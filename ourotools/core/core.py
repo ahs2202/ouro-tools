@@ -10,6 +10,7 @@ from . import SC
 from . import SAM
 from . import MAP
 from . import SEQ
+from . import STR
 from . import biobookshelf as bk
 
 
@@ -18,6 +19,7 @@ from . import biobookshelf as bk
 """
 
 # import biobookshelf as bk
+# import biobookshelf.STR as STR
 # import biobookshelf.SEQ as SEQ
 # import biobookshelf.SC as SC
 # import biobookshelf.SAM as SAM
@@ -85,7 +87,7 @@ logger = logging.getLogger("ouro-count")
 # define version
 _version_ = "0.0.1"
 _scelephant_version_ = _version_
-_last_modified_time_ = "2023-07-30 15:45:51"
+_last_modified_time_ = "2023-08-02 15:13:18 "
 
 str_release_note = [
     """
@@ -1984,7 +1986,10 @@ def longfilternsplit(
     str_minimap_aligner_preset : str = 'splice', # preset of the minimap2 aligner
     int_min_mapq : int = 1, # minimum mapping quality of the alignment to consider a read (or parts of a read)  were aligned to the genome
     int_size_window_for_searching_poly_a_tail : int = 15, # the size of the window from the end of the alignment to search for poly A tail.
+    int_max_size_intervening_sequence_between_alignment_end_and_poly_A : int = 20, # max size of the intervening sequence between alignment end position and poly A tract. it will be applied for both internal poly A or external (enzymatically attached) poly A.
     float_min_A_frequency_for_identifying_poly_A : float = 0.75, # the minimum frequency to determine a sequence contains a poly A tract
+    int_min_size_intervening_sequence_for_splitting : int = 150, # the minimum length of intervening sequence between alignments for splitting the reads
+    int_max_intron_size_for_determining_chimeric_molecule : int = 200000, # the maximum allowed intron size for classifying considering the molecule as a intra-chromosomal chimeric read
     am_genome = None, # mappy aligner for genome (optional. if given, will override 'path_file_minimap_index_genome' argument)
     l_am_unwanted : Union[ None, List ] = None, # mappy aligner for unwanted sequences (optional. if given, will override 'l_path_file_minimap_index_unwanted' argument)
 ) -> None :
@@ -2002,12 +2007,17 @@ def longfilternsplit(
     str_minimap_aligner_preset = 'splice', # preset of the minimap2 aligner
     verbose: bool = True,
     int_min_mapq = 1, # minimum mapping quality of the alignment to consider a read (or parts of a read)  were aligned to the genome
-    int_size_window_for_searching_poly_a_tail : int = 15, # the size of the window from the end of the alignment to search for poly A tail.
+    int_size_window_for_searching_poly_a_tail : int = 16, # the size of the window from the end of the alignment to search for poly A tail.
+    int_max_size_intervening_sequence_between_alignment_end_and_poly_A : int = 20, # max size of the intervening sequence between alignment end position and poly A tract. it will be applied for both internal poly A or external (enzymatically attached) poly A.
     float_min_A_frequency_for_identifying_poly_A : float = 0.75, # the minimum frequency to determine a sequence contains a poly A tract
+    int_max_intron_size_for_determining_chimeric_molecule : int = 200000, # the maximum allowed intron size for classifying considering the molecule as a intra-chromosomal chimeric read
     am_genome = None, # mappy aligner for genome (optional. if given, will override 'path_file_minimap_index_genome' argument)
+    int_min_size_intervening_sequence_for_splitting : int = 150, # the minimum length of intervening sequence between alignments for splitting the reads
     l_am_unwanted : Union[ None, List ] = None, # mappy aligner for unwanted sequences (optional. if given, will override 'l_path_file_minimap_index_unwanted' argument)
 
     returns
+    
+    * of note, strand information is not used for identifying chimeric molecules, since hairpin formation during reverse transcription can lead to molecules with hairpin alignment patterns, which are not chimeric molecules. (reference: 10x Genomics' technical document)
     """
     """
     Parse arguments
@@ -2101,8 +2111,8 @@ def longfilternsplit(
         arg_grp_poly_a_tail_detection.add_argument(
             "-w",
             "--int_size_window_for_searching_poly_a_tail",
-            help="(default: 15) the size of the window from the end of the alignment to search for poly A tail.",
-            default=15,
+            help="(default: 16) the size of the window from the end of the alignment to search for poly A tail.",
+            default=16,
             type=int,
         )
         arg_grp_poly_a_tail_detection.add_argument(
@@ -2112,7 +2122,30 @@ def longfilternsplit(
             default=0.75,
             type=float,
         )
-    
+        arg_grp_poly_a_tail_detection.add_argument(
+            "-I",
+            "--int_max_size_intervening_sequence_between_alignment_end_and_poly_A",
+            help="(default: 20) the maximum size of the intervening sequence between alignment end position and poly A tract. it will be applied for both internal poly A or external (enzymatically attached) poly A.",
+            default=20,
+            type=int,
+        )
+        
+        arg_grp_read_splitting = parser.add_argument_group("Read Splitting ")
+        arg_grp_read_splitting.add_argument(
+            "-S",
+            "--int_min_size_intervening_sequence_for_splitting",
+            help="(default: 150) the minimum length of intervening sequence between alignments for splitting the reads.",
+            default=150,
+            type=int,
+        )
+        arg_grp_read_splitting.add_argument(
+            "-C",
+            "--int_max_intron_size_for_determining_chimeric_molecule",
+            help="(default: 200,000) the maximum allowed intron size for classifying considering the molecule as a intra-chromosomal chimeric read.",
+            default=200000,
+            type=int,
+        )
+        
         args = parser.parse_args()
 
         flag_usage_from_command_line_interface = args.flag_usage_from_command_line_interface
@@ -2128,7 +2161,10 @@ def longfilternsplit(
         int_min_mapq = args.int_min_mapq
         str_minimap_aligner_preset = args.str_minimap_aligner_preset
         int_size_window_for_searching_poly_a_tail = args.int_size_window_for_searching_poly_a_tail
+        int_max_size_intervening_sequence_between_alignment_end_and_poly_A = args.int_max_size_intervening_sequence_between_alignment_end_and_poly_A
         float_min_A_frequency_for_identifying_poly_A = args.float_min_A_frequency_for_identifying_poly_A
+        int_min_size_intervening_sequence_for_splitting = args.int_min_size_intervening_sequence_for_splitting
+        int_max_intron_size_for_determining_chimeric_molecule = args.int_max_intron_size_for_determining_chimeric_molecule
 
     """
     Start of the pipeline
@@ -2176,6 +2212,8 @@ def longfilternsplit(
     """ 
     Fixed Settings
     """
+    # internal settings
+    int_highest_mapq = 60
 
     """
     Exit early when no samples is anlayzed
@@ -2226,44 +2264,96 @@ def longfilternsplit(
         arr_dist[ new_size ] += 1 # update the size distribution
         return arr_dist
     
+    def _combine_size_distribution( arr_dist_1, arr_dist_2 ) :
+        """ # 2023-08-03 11:41:13 
+        combine two size distributions. one of the distributions will be modified in-place
+        """
+        ''' handle cases when one if the distribution is empty '''
+        if arr_dist_1 is None :
+            return arr_dist_2
+        if arr_dist_2 is None :
+            return arr_dist_1
+        
+        ''' when both of the distributions are not empty '''
+        len_arr_dist_1, len_arr_dist_2 = len( arr_dist_1 ), len( arr_dist_2 )
+        if len_arr_dist_1 >= len_arr_dist_2 : # if the length of distribution 1 is larger than the distribution 2
+            arr_dist_1[ : len_arr_dist_2 ] += arr_dist_2 # add distribution 2 to distribution 1
+            return arr_dist_1
+        else :
+            arr_dist_2[ : len_arr_dist_1 ] += arr_dist_1
+            return arr_dist_2
+    
     def _write_a_fastq_record( newfastqfile, r ) :
         """ # 2023-08-01 12:21:30 
         write a fastq record to a given fastq output file (gzipped).
         """
         newfastqfile.write( ( r[ 0 ] + '\n' + r[ 1 ] + '\n+\n' + r[ 3 ] + '\n' ).encode( ) ) # the given record should contain '@' in front of the qname
 
-    def _calculate_proportion_of_a_base( str_seq, str_base ) :
-        """ # 2023-08-01 21:15:42 
+    def _calculate_proportion_of_a_base( str_seq : str, str_base : str, int_min_length : int = 1 ) :
+        """ # 2023-08-03 21:39:57 
         calculate a proportion of a base in a given sequence
+        
+        int_min_length : int # if the length of the given sequence is smaller than the given threshold, return np.nan as the proportion of the base. should be larger than 0 to avoid zero division error.
         """
         len_seq = len( str_seq ) # retrieve the length of the given sequence
-        return [ len_seq, str_seq.count( str_base ) / len_seq ] if len_seq > 0 else [ 0, np.nan ]
+        return [ len_seq, str_seq.count( str_base ) / len_seq ] if len_seq >= int_min_length else [ len_seq, np.nan ]
     
-    def _classify_read( len_left_clipped : int, left_clipped_T_prop : float, len_left_internal : int, left_internal_T_prop : float, len_right_clipped : int, right_clipped_A_prop : float, len_right_internal : int, right_internal_A_prop : float, len_left_clipped_3bp : int, right_left_clipped_3bp_G_prop : float, len_right_clipped_3bp : int, right_clipped_3bp_C_prop : float ) :
-        """ # 2023-08-01 23:34:47 
+    def _classify_read( seq : str, hit ) :
+        """ # 2023-08-03 23:15:49 
         classlfy read by detecting poly A and unreferenced Gs.
         
+        hit # a Minimap2 mappy alignment record. multiple hits can be given as a list of hits. 
+        
         # possible labels
-        'no_poly_A', 'genuine_poly_A__unrefenced_G', 'internal_poly_A__unrefenced_G', 'genuine_poly_A__no_unrefenced_G', 'internal_poly_A__no_unrefenced_G'
+        'no_poly_A', 'external_poly_A__unrefenced_G', 'internal_poly_A__unrefenced_G', 'external_poly_A__no_unrefenced_G', 'internal_poly_A__no_unrefenced_G'
         
         return the direction of the read and the classification label
         """
+        # retrieve 'q_st' and 'q_en'
+        if isinstance( hit, list ) : # if a list of hits were given, 
+            q_st, q_en = min( h.q_st for h in hit ), max( h.q_en for h in hit ) # retrieve smallest q_st and largest q_en for q_st and q_en of the segment if multiple hits were given
+        else : # when single hit was given
+            q_st, q_en = hit.q_st, hit.q_en
+        
         # internal setting
         float_min_G_frequency_for_identifying_unreferenced_Gs = 0.5
+        int_size_window_for_identifying_unreferenced_Gs = 3
+        
+        # calculate metrics for classification
+        len_left_clipped, left_clipped_T_prop = _calculate_proportion_of_a_base( seq[ max( 0, q_st - int_size_window_for_searching_poly_a_tail ) : q_st ], 'T', int_size_window_for_searching_poly_a_tail )
+        len_left_internal, left_internal_T_prop = _calculate_proportion_of_a_base( seq[ q_st : q_st + int_size_window_for_searching_poly_a_tail ], 'T', int_size_window_for_searching_poly_a_tail )
+        len_right_clipped, right_clipped_A_prop = _calculate_proportion_of_a_base( seq[ q_en : q_en + int_size_window_for_searching_poly_a_tail ], 'A', int_size_window_for_searching_poly_a_tail )
+        len_right_internal, right_internal_A_prop = _calculate_proportion_of_a_base( seq[ max( 0, q_en - int_size_window_for_searching_poly_a_tail ) : q_en ], 'A', int_size_window_for_searching_poly_a_tail )
+        len_left_clipped_3bp, left_clipped_3bp_G_prop = _calculate_proportion_of_a_base( seq[ max( 0, q_st - int_size_window_for_identifying_unreferenced_Gs ) : q_st ], 'G', int_size_window_for_identifying_unreferenced_Gs )
+        len_right_clipped_3bp, right_clipped_3bp_C_prop = _calculate_proportion_of_a_base( seq[ q_en : q_en + int_size_window_for_identifying_unreferenced_Gs ], 'C', int_size_window_for_identifying_unreferenced_Gs )
         
         # retrieve flags for poly A
-        flag_genuine_poly_A_flipped = left_clipped_T_prop >= float_min_A_frequency_for_identifying_poly_A # if length = 0, the value will be np.nan, and the comparison will be automatically failed
+        flag_external_poly_A_flipped = left_clipped_T_prop >= float_min_A_frequency_for_identifying_poly_A # if length = 0, the value will be np.nan, and the comparison will be automatically failed
         flag_internal_poly_A_flipped = left_internal_T_prop >= float_min_A_frequency_for_identifying_poly_A
-        flag_genuine_poly_A = right_clipped_A_prop >= float_min_A_frequency_for_identifying_poly_A
+        flag_external_poly_A = right_clipped_A_prop >= float_min_A_frequency_for_identifying_poly_A
         flag_internal_poly_A = right_internal_A_prop >= float_min_A_frequency_for_identifying_poly_A
         # retrieve flags for unreferenced Gs
-        flag_unreferenced_Gs = right_left_clipped_3bp_G_prop >= float_min_G_frequency_for_identifying_unreferenced_Gs
+        flag_unreferenced_Gs = left_clipped_3bp_G_prop >= float_min_G_frequency_for_identifying_unreferenced_Gs
         flag_unreferenced_Gs_flipped = right_clipped_3bp_C_prop >= float_min_G_frequency_for_identifying_unreferenced_Gs
         
         ''' handles 'no_poly_A' '''
-        if not( flag_genuine_poly_A_flipped or flag_internal_poly_A_flipped or flag_genuine_poly_A or flag_internal_poly_A ) :
-            return 'no_poly_A', None # no direction for the 'no_poly_A' label
-        
+        if not( flag_external_poly_A_flipped or flag_internal_poly_A_flipped or flag_external_poly_A or flag_internal_poly_A ) :
+            """
+            [rebound] - search poly A that might be located farther downstream/upstream of the alignment end position using costly but more accurate search algorithm. The exact mechanism by which poly A can be found 5~20bp up/downstram of the alignment end position is currently not known.
+            """
+            int_min_poly_A_length = int( math.ceil( int_size_window_for_searching_poly_a_tail * float_min_A_frequency_for_identifying_poly_A ) ) # retrieve minimum length of a stretch of 'A' (or 'T') for identification of poly A tail.
+            int_size_search_window = int_size_window_for_searching_poly_a_tail + int_max_size_intervening_sequence_between_alignment_end_and_poly_A # retrieve size of the search window
+            
+            # retry cacluation of flags for searching poly A
+            flag_external_poly_A_flipped = len( STR.Find_stretch_of_a_character( seq[ max( 0, q_st - int_size_search_window ) : q_st ], 'T', int_len_threshold = int_min_poly_A_length ) ) > 0 # True if at least one stretch of 'T' (flipped) or 'A' exists in the search window.
+            flag_internal_poly_A_flipped = len( STR.Find_stretch_of_a_character( seq[ q_st : q_st + int_size_search_window ], 'T', int_len_threshold = int_min_poly_A_length ) ) > 0
+            flag_external_poly_A = len( STR.Find_stretch_of_a_character( seq[ q_en : q_en + int_size_search_window ], 'A', int_len_threshold = int_min_poly_A_length ) ) > 0
+            flag_internal_poly_A = len( STR.Find_stretch_of_a_character( seq[ max( 0, q_en - int_size_search_window ) : q_en ], 'A', int_len_threshold = int_min_poly_A_length ) ) > 0
+            
+            ''' handles 'no_poly_A' (after retrying) '''
+            if not( flag_external_poly_A_flipped or flag_internal_poly_A_flipped or flag_external_poly_A or flag_internal_poly_A ) :
+                return 'no_poly_A', None # no direction for the 'no_poly_A' label
+            
         ''' handles internal poly A '''
         if flag_internal_poly_A_flipped or flag_internal_poly_A :
             if flag_internal_poly_A_flipped :
@@ -2277,17 +2367,39 @@ def longfilternsplit(
                 else :
                     return 'internal_poly_A__no_unrefenced_G', '+'
         
-        ''' handles genuine poly A '''
-        if flag_genuine_poly_A_flipped :
+        ''' handles external poly A '''
+        if flag_external_poly_A_flipped :
             if flag_unreferenced_Gs_flipped :
-                return 'genuine_poly_A__unrefenced_G', '-'
+                return 'external_poly_A__unrefenced_G', '-'
             else :
-                return 'genuine_poly_A__no_unrefenced_G', '-'
+                return 'external_poly_A__no_unrefenced_G', '-'
         else :
             if flag_unreferenced_Gs :
-                return 'genuine_poly_A__unrefenced_G', '+'
+                return 'external_poly_A__unrefenced_G', '+'
             else :
-                return 'genuine_poly_A__no_unrefenced_G', '+'
+                return 'external_poly_A__no_unrefenced_G', '+'
+    
+    def _initialize_dict_arr_dist( ) :
+        """ # 2023-08-03 11:49:26 
+        initialize 'dict_arr_dist'
+        """
+        return {
+            'aligned_to_unwanted_sequence' : None,
+            'cannot_aligned_to_genome' : None,
+            'aligned_to_genome' : None,
+
+            'aligned_to_genome__non_chimeric__no_poly_A' : None,
+            'aligned_to_genome__non_chimeric__external_poly_A__unrefenced_G' : None,
+            'aligned_to_genome__non_chimeric__internal_poly_A__unrefenced_G' : None,
+            'aligned_to_genome__non_chimeric__external_poly_A__no_unrefenced_G' : None,
+            'aligned_to_genome__non_chimeric__internal_poly_A__no_unrefenced_G' : None,
+
+            'aligned_to_genome__chimeric__no_poly_A' : None,
+            'aligned_to_genome__chimeric__external_poly_A__unrefenced_G' : None,
+            'aligned_to_genome__chimeric__internal_poly_A__unrefenced_G' : None,
+            'aligned_to_genome__chimeric__external_poly_A__no_unrefenced_G' : None,
+            'aligned_to_genome__chimeric__internal_poly_A__no_unrefenced_G' : None,
+        }
         
     def run_pipeline():
         """# 2023-07-30 17:20:19 
@@ -2458,6 +2570,8 @@ def longfilternsplit(
                 "int_num_reads_in_a_batch" : int_num_reads_in_a_batch,
                 'str_minimap_aligner_preset' : str_minimap_aligner_preset,
                 'int_min_mapq' : int_min_mapq,
+                'int_size_window_for_searching_poly_a_tail' : int_size_window_for_searching_poly_a_tail,
+                'float_min_A_frequency_for_identifying_poly_A' : float_min_A_frequency_for_identifying_poly_A,
                 # internal
                 "path_folder_temp": path_folder_temp,
                 "path_folder_graph": path_folder_graph,
@@ -2519,14 +2633,16 @@ def longfilternsplit(
                     logger.info(f"[Started] start working (worker_id={str_uuid})")
                     
                 """ open output files """
-                newfile_fastq_output_aligned_to_unwanted_sequences = gzip.open( f"{path_folder_temp}{str_uuid}.aligned_to_unwanted_sequences.fastq.gz", "wb", ) 
-                newfile_fastq_output_cannot_aligned_to_genome = gzip.open( f"{path_folder_temp}{str_uuid}.cannot_aligned_to_genome.fastq.gz", "wb", ) 
+                dict_newfile_fastq_output = {
+                    'aligned_to_unwanted_sequences' : gzip.open( f"{path_folder_temp}{str_uuid}.aligned_to_unwanted_sequences.fastq.gz", "wb", ), 
+                    'cannot_aligned_to_genome' : gzip.open( f"{path_folder_temp}{str_uuid}.cannot_aligned_to_genome.fastq.gz", "wb", ), 
 
-                newfile_fastq_output_aligned_to_genome__non_chimeric__no_poly_A = gzip.open( f"{path_folder_temp}{str_uuid}.aligned_to_genome__non_chimeric__no_poly_A.fastq.gz", "wb", ) 
-                newfile_fastq_output_aligned_to_genome__non_chimeric__poly_A__plus_strand = gzip.open( f"{path_folder_temp}{str_uuid}.aligned_to_genome__non_chimeric__poly_A__plus_strand.fastq.gz", "wb", ) # main fastq output file
-                
-                newfile_fastq_output_aligned_to_genome__chimeric__no_poly_A = gzip.open( f"{path_folder_temp}{str_uuid}.aligned_to_genome__chimeric__no_poly_A.fastq.gz", "wb", ) 
-                newfile_fastq_output_aligned_to_genome__chimeric__poly_A__plus_strand = gzip.open( f"{path_folder_temp}{str_uuid}.aligned_to_genome__chimeric__poly_A__plus_strand.fastq.gz", "wb", ) 
+                    'aligned_to_genome__non_chimeric__no_poly_A' : gzip.open( f"{path_folder_temp}{str_uuid}.aligned_to_genome__non_chimeric__no_poly_A.fastq.gz", "wb", ), 
+                    'aligned_to_genome__non_chimeric__poly_A__plus_strand' : gzip.open( f"{path_folder_temp}{str_uuid}.aligned_to_genome__non_chimeric__poly_A__plus_strand.fastq.gz", "wb", ), # main fastq output file
+
+                    'aligned_to_genome__chimeric__no_poly_A' : gzip.open( f"{path_folder_temp}{str_uuid}.aligned_to_genome__chimeric__no_poly_A.fastq.gz", "wb", ), 
+                    'aligned_to_genome__chimeric__poly_A__plus_strand' : gzip.open( f"{path_folder_temp}{str_uuid}.aligned_to_genome__chimeric__poly_A__plus_strand.fastq.gz", "wb", ), 
+                }
                 
                 while True:
                     ins = pipe_receiver.recv()
@@ -2541,25 +2657,46 @@ def longfilternsplit(
                     int_total_num_records_for_a_batch = len( l_r_for_a_batch ) # record the total number of records
 
                     # initialize summary metrics
-                    dict_arr_dist = {
-                        'aligned_to_unwanted_sequence' : None,
-                        'cannot_aligned_to_genome' : None,
-                        'aligned_to_genome' : None,
-                        
-                        'aligned_to_genome__non_chimeric__no_poly_A' : None,
-                        'aligned_to_genome__non_chimeric__genuine_poly_A__unrefenced_G' : None,
-                        'aligned_to_genome__non_chimeric__internal_poly_A__unrefenced_G' : None,
-                        'aligned_to_genome__non_chimeric__genuine_poly_A__no_unrefenced_G' : None,
-                        'aligned_to_genome__non_chimeric__internal_poly_A__no_unrefenced_G' : None,
-                        
-                        'aligned_to_genome__chimeric__no_poly_A' : None,
-                        'aligned_to_genome__chimeric__genuine_poly_A__unrefenced_G' : None,
-                        'aligned_to_genome__chimeric__internal_poly_A__unrefenced_G' : None,
-                        'aligned_to_genome__chimeric__genuine_poly_A__no_unrefenced_G' : None,
-                        'aligned_to_genome__chimeric__internal_poly_A__no_unrefenced_G' : None,
-                    }
+                    dict_arr_dist = _initialize_dict_arr_dist( ) # initialize 'dict_arr_dist'
 
 #                     l_l = [ ] # initialize the container # ❤️
+
+                    """
+                    define batch-specific function
+                    """
+                    def _process_molecule( qname : str, seq : str, qual : str, hit, st : Union[ None, int ] = None, en : Union[ None, int ] = None, type_molecule : Literal[ 'non_chimeric', 'chimeric' ] = 'non_chimeric' ) :
+                        """ # 2023-08-03 10:28:48 
+                        process a molecule (segment) of a sequence
+                        
+                        hit, # a Minimap2 mappy alignment record. multiple hits can be given as a list of hits. 
+                        type_molecule : Literal[ 'non_chimeric', 'chimeric' ] = 'non_chimeric' # type of the molecule
+                        """
+                        ''' Retrieve the segment and the length of the segment. Also, compose suffix to the qname '''
+                        if st is None and en is None : # analyze an entire molecule
+                            seg, qual_seg, qname_suffix = seq, qual, '' 
+                        elif st is None :
+                            seg, qual_seg, qname_suffix = seq[ : en ], qual[ : en ], '_to' + str( en )
+                        elif en is None :
+                            seg, qual_seg, qname_suffix = seq[ st : ], qual[ st : ], '_' + str( st ) + 'to'
+                        else :
+                            seg, qual_seg, qname_suffix = seq[ st : en ], qual[ st : en ], '_' + str( st ) + 'to' + str( en )
+                        len_seg = len( seq )
+                
+                        label, direction = _classify_read( seq, hit ) # classify the segment 
+
+                        dict_arr_dist[ f'aligned_to_genome__{type_molecule}__{label}' ] = _update_size_distribution( new_size = len_seg, arr_dist = dict_arr_dist[ f'aligned_to_genome__{type_molecule}__{label}' ] ) # update appropriate distribution of reads using the label
+                      
+                        if label == 'no_poly_A' : # (likely to be not analyzed)
+                            _write_a_fastq_record( dict_newfile_fastq_output[ f'aligned_to_genome__{type_molecule}__no_poly_A' ], [ "@" + qname + qname_suffix, seg, '+', qual_seg ] ) # write the current read to the appropriate output fastq file
+                        else : # collect all reads with poly A to 'poly_A__plus_strand' output file. (likely to be analyzed together)
+                            """
+                            if needed, modify the fastq record so that poly A can be located at the right, representing the '+' strand of the original mRNA initially captured by the primer.
+                            """
+                            if direction == '-' :
+                                seg = SEQ.Reverse_Complement( seg ) # reverse complement the sequence
+                                qual_seg = qual_seg[ : : -1 ] # flip the quality scores
+                            _write_a_fastq_record( dict_newfile_fastq_output[ f'aligned_to_genome__{type_molecule}__poly_A__plus_strand' ], [ "@" + qname + qname_suffix + '_R', seg, '+', qual_seg ] ) # write the current read to the appropriate output fastq file # add additional suffix to show the sequence has been reverse complemented.
+
                     for r in l_r_for_a_batch :
                         header, seq, _, qual = r # parse fastq record
                         len_seq = len( seq ) # retrieve length of the sequence
@@ -2582,7 +2719,7 @@ def longfilternsplit(
                         """
                         if flag_aligned_to_unwanted_sequence :
                             dict_arr_dist[ 'aligned_to_unwanted_sequence' ] = _update_size_distribution( new_size = len_seq, arr_dist = dict_arr_dist[ 'aligned_to_unwanted_sequence' ] ) # update distribution of reads aligned to unwanted sequences
-                            _write_a_fastq_record( newfile_fastq_output_aligned_to_unwanted_sequences, r ) # write the current read to the appropriate output fastq file
+                            _write_a_fastq_record( dict_newfile_fastq_output[ 'aligned_to_unwanted_sequences' ], r ) # write the current read to the appropriate output fastq file
                             continue # skip the remaining operations
                             
                         """
@@ -2595,74 +2732,98 @@ def longfilternsplit(
                         """
                         if len( l_hit_genome ) == 0 :
                             dict_arr_dist[ 'cannot_aligned_to_genome' ] = _update_size_distribution( new_size = len_seq, arr_dist = dict_arr_dist[ 'cannot_aligned_to_genome' ] ) # update distribution of reads that cannot be aligned to the genome
-                            _write_a_fastq_record( newfile_fastq_output_cannot_aligned_to_genome, r ) # write the current read to the appropriate output fastq file
+                            _write_a_fastq_record( dict_newfile_fastq_output[ 'cannot_aligned_to_genome' ], r ) # write the current read to the appropriate output fastq file
                             continue # skip the remaining operations
                         
                         """
-                        analyze the alignments
+                        analyze the alignments to the genome
                         """
-                        l_l = [ ] # initialize the container 
-                        for hit in l_hit_genome :
-                            l_l.append( [ qname, len_seq, hit.mapq, hit.q_st, hit.q_en, hit.ctg, hit.r_st, hit.r_en, hit.strand ]
-                                + _calculate_proportion_of_a_base( seq[ max( 0, hit.q_st - int_size_window_for_searching_poly_a_tail ) : hit.q_st ], 'T' )
-                                + _calculate_proportion_of_a_base( seq[ hit.q_st : hit.q_st + int_size_window_for_searching_poly_a_tail ], 'T' )
-                                + _calculate_proportion_of_a_base( seq[ hit.q_en : hit.q_en + int_size_window_for_searching_poly_a_tail ], 'A' )
-                                + _calculate_proportion_of_a_base( seq[ max( 0, hit.q_en - int_size_window_for_searching_poly_a_tail ) : hit.q_en ], 'A' )
-                                + _calculate_proportion_of_a_base( seq[ max( 0, hit.q_st - 3 ) : hit.q_st ], 'G' )
-                                + _calculate_proportion_of_a_base( seq[ hit.q_en : hit.q_en + 3 ], 'C' )
-                             )
-                            # l_seq, int_total_aligned_length = bk.SAM.Retrive_List_of_Mapped_Segments( hit.cigar, hit.r_st, flag_is_cigartuples_from_mappy = True )
+                        dict_arr_dist[ 'aligned_to_genome' ] = _update_size_distribution( new_size = len_seq, arr_dist = dict_arr_dist[ 'aligned_to_genome' ] ) # update distribution of reads aligned to genome
 
                         """
                         handle the case when read was aligned to genome only once (non-chimeric read, the majority of cases)
                         """
                         if len( l_hit_genome ) == 1 :
-                            qname, len_seq, mapq, q_st, q_en, ref_name, ref_st, ref_en, strand, len_left_clipped, left_clipped_T_prop, len_left_internal, left_internal_T_prop, len_right_clipped, right_clipped_A_prop, len_right_internal, right_internal_A_prop, len_left_clipped_3bp, right_left_clipped_3bp_G_prop, len_right_clipped_3bp, right_clipped_3bp_C_prop = l_l[ 0 ] # retrieve analysis result
-                            
-                            label, direction = _classify_read( len_left_clipped, left_clipped_T_prop, len_left_internal, left_internal_T_prop, len_right_clipped, right_clipped_A_prop, len_right_internal, right_internal_A_prop, len_left_clipped_3bp, right_left_clipped_3bp_G_prop, len_right_clipped_3bp, right_clipped_3bp_C_prop ) # classify the read 
-                            
-                            dict_arr_dist[ f'aligned_to_genome__non_chimeric__{label}' ] = _update_size_distribution( new_size = len_seq, arr_dist = dict_arr_dist[ f'aligned_to_genome__non_chimeric__{label}' ] ) # update appropriate distribution of reads
-                            
-                            if label == 'no_poly_A' : # (likely to be not analyzed)
-                                _write_a_fastq_record( newfile_fastq_output_aligned_to_genome__non_chimeric__no_poly_A, r ) # write the current read to the appropriate output fastq file
-                            else : # collect all reads with poly A to 'poly_A__plus_strand' output file. (likely to be analyzed together)
-                                """
-                                if needed, modify the fastq record so that poly A can be located at the right, representing the '+' strand of the original mRNA initially captured by the primer.
-                                """
-                                if direction == '-' :
-                                    r[ 1 ] = SEQ.Reverse_Complement( r[ 1 ] ) # reverse complement the sequence
-                                    r[ 3 ] = r[ 3 ][ : : -1 ] # flip the quality scores
-                                _write_a_fastq_record( newfile_fastq_output_aligned_to_genome__non_chimeric__poly_A__plus_strand, r ) # write the current read to the appropriate output fastq file
+                            _process_molecule( qname, seq, qual, l_hit_genome[ 0 ] ) # process non-chimeric segment
                             continue # skip the remaining operations
                             
-                            
+                        """
+                        handle reads with multiple genome alignments
+                        """
+#                         l_hit_genome = list( hit for hit in am_genome.map( seq ) if hit.mapq == int_highest_mapq ) # filter hits using the highest mapping quality
+#                         # if only a single genomic alignment remains, process the read
+#                         if len( l_hit_genome ) == 1 :
+#                             _process_molecule( qname, seq, qual, l_hit_genome[ 0 ] ) # process non-chimeric segment
+#                             continue # skip the remaining operations
                         
-
+                        l_l = [ ] # initialize the container # 💛
+                        for hit in l_hit_genome :
+                            l_l.append( [ hit.q_st, hit ] )
+#                             l_l.append( [ qname, len_seq, hit.mapq, hit.q_st, hit.q_en, hit.ctg, hit.r_st, hit.r_en, hit.strand ] ) # ❤️ 
+                            # l_seq, int_total_aligned_length = bk.SAM.Retrive_List_of_Mapped_Segments( hit.cigar, hit.r_st, flag_is_cigartuples_from_mappy = True )
+    
+                        arr_algn = np.array( l_l, dtype = object ) # create an array of alignments
+                        arr_algn = arr_algn[ arr_algn[ :, 0 ].argsort( ) ] # sort alignments using 'q_st'
+                        
+                        """
+                        Split a read into multiple segments (multiple output reads)
+                        """
+                        # initialize the search
+                        flag_is_segment_chimeric, q_st_segment, q_en_segment, ctg_prev, r_st_prev, r_en_prev = False, None, None, None, None, None # initialize a flag indicating the segment is chimeric or non-chimeric
+                        l_hit_segment = [ ] # initialize a list of hit of a segment
+                        for q_st, hit in arr_algn : # for each q_st and hit
+                            q_en = hit.q_en # retrieve q_en
+                            ''' initialize the segment (if it was not initialized) '''
+                            if q_st_segment is None :
+                                q_st_segment, q_en_segment, ctg_prev, r_st_prev, r_en_prev = 0, hit.q_en, hit.ctg, hit.r_st, hit.r_en # use the start of the molecule as 'q_en_segment'
+                                l_hit_segment.append( hit )
+                                continue # continue to the next hit
+                            
+                            """ split the read """
+                            int_size_gap = q_st - q_en_segment # calculate the size of the intervening sequence
+                            if int_size_gap >= int_min_size_intervening_sequence_for_splitting : # if the size of the intervening sequences is larger then the threshold, split the read
+                                int_size_flanking = min( int_size_gap, int_min_size_intervening_sequence_for_splitting ) # retrieve the size of the flanking sequence to include in the segment. the size of the flanking sequence cannot be larger than the intervening sequence
+                                _process_molecule( qname, seq, qual, l_hit_segment, q_st_segment, q_en_segment + int_size_flanking, 'chimeric' if flag_is_segment_chimeric else 'non_chimeric' ) # process chimeric segment # add 'int_size_flanking' to q_en_segment to include a flanking sequence
+                                # initialize the next segment
+                                flag_is_segment_chimeric, q_st_segment, q_en_segment, ctg_prev, r_st_prev, r_en_prev = False, q_st - int_size_flanking, hit.q_en, hit.ctg, hit.r_st, hit.r_en # set q_st_segment as q_st - int_size_flanking to include a flanking sequence
+                                l_hit_segment = [ hit ] 
+                                continue
+                                
+                            """ concatenate genomic alignments and determine whether the segment is chimeric or not """
+                            # identify chimeric molecule
+                            if ctg_prev != hit.ctg :
+                                flag_is_segment_chimeric = True
+                            elif max( r_st_prev - hit.r_en, hit.r_st - r_en_prev ) > int_max_intron_size_for_determining_chimeric_molecule : # if the distance between alignment is longer than maximum intron size, consider reads as an intra-chromosomal chimeric molecule
+                                flag_is_segment_chimeric = True
+                            # extend segment
+                            l_hit_segment.append( hit )
+                            q_en_segment = max( q_en_segment, q_en ) # update 'q_en_segment' ('q_st_segment' will not change)
+                            ctg_prev, r_st_prev, r_en_prev = hit.ctg, hit.r_st, hit.r_en # update the previous alignment
+                                
+                        if len( l_hit_segment ) > 0 : # if a segment is remaining, process the segment
+                            _process_molecule( qname, seq, qual, l_hit_segment, q_st_segment, None, 'chimeric' if flag_is_segment_chimeric else 'non_chimeric' ) # process chimeric segment # use the end of the molecule as 'q_en_segment'
                                                     
                     if verbose :
-                        logger.info( f"{dict_arr_dist[ 'aligned_to_unwanted_sequence' ].sum( )}/{int_total_num_records_for_a_batch} number of reads were aligned to unwanted sequences" )
-                        logger.info( f"{dict_arr_dist[ 'cannot_aligned_to_genome' ].sum( )}/{int_total_num_records_for_a_batch} number of reads cannot be aligned to genome" )
+                        logger.info( f"{0 if dict_arr_dist[ 'aligned_to_unwanted_sequence' ] is None else dict_arr_dist[ 'aligned_to_unwanted_sequence' ].sum( )}/{int_total_num_records_for_a_batch} number of reads were aligned to unwanted sequences" )
+                        logger.info( f"{0 if dict_arr_dist[ 'cannot_aligned_to_genome' ] is None else dict_arr_dist[ 'cannot_aligned_to_genome' ].sum( )}/{int_total_num_records_for_a_batch} number of reads cannot be aligned to genome" )
 
                     pipe_sender.send( { 
                         'int_total_num_records_for_a_batch' : int_total_num_records_for_a_batch,
                         'dict_arr_dist' : dict_arr_dist,
-                        'l_l' : l_l, # ❤️
+#                         'l_l' : l_l, # ❤️
                     } )  # report the number of processed records
 
                 """ close output files """
-                newfile_fastq_output_aligned_to_unwanted_sequences.close( )
-                newfile_fastq_output_cannot_aligned_to_genome.close( )
-                newfile_fastq_output_aligned_to_genome__non_chimeric__no_poly_A.close( )
-                newfile_fastq_output_aligned_to_genome__non_chimeric__poly_A__plus_strand.close( )
-                newfile_fastq_output_aligned_to_genome__chimeric__no_poly_A.close( )
-                newfile_fastq_output_aligned_to_genome__chimeric__poly_A__plus_strand.close( )
+                for name_type in dict_newfile_fastq_output :
+                    dict_newfile_fastq_output[ name_type ].close( )
 
                 if verbose:
                     logger.info(f"[Completed] all works completed (worker_id={str_uuid})")
 
             ns = dict()  # define a namespace
             ns[ "int_num_read_currently_processed" ] = 0  # initialize total number of reads processed by the algorithm
-            ns[ 'l_l' ] = [ ] # ❤️
+            ns[ 'dict_arr_dist' ] = _initialize_dict_arr_dist( ) # initialize 'dict_arr_dist'
+#             ns[ 'l_l' ] = [ ] # ❤️
 
             def post_process_batch(res):
                 # parse received result
@@ -2671,8 +2832,12 @@ def longfilternsplit(
                 logger.info(
                     f"[{path_file_fastq_input}] total {ns[ 'int_num_read_currently_processed' ]} number of reads has been processed."
                 )  # report
-                ns[ 'l_l' ].extend( res[ 'l_l' ] )
-
+#                 ns[ 'l_l' ].extend( res[ 'l_l' ] ) # ❤️
+                
+                # combine distributions
+                for name_cat_dist in _initialize_dict_arr_dist( ) : # for each category
+                    ns[ 'dict_arr_dist' ][ name_cat_dist ] = _combine_size_distribution( ns[ 'dict_arr_dist' ][ name_cat_dist ], res[ 'dict_arr_dist' ][ name_cat_dist ] ) # combine and update the global distributions
+                    
             """
             Analyze an input file
             """
@@ -2707,7 +2872,16 @@ def longfilternsplit(
                 ] :
                     bk.OS_Run( [ 'cat' ] + glob.glob( f"{path_folder_temp}*.{name_file}" ), stdout_binary = True, path_file_stdout = f"{path_folder_output}{name_file}" )
                     
-                pd.DataFrame( ns[ "l_l" ], columns = [ 'qname', 'len_seq', 'mapq', 'q_st', 'q_en', 'ref_name', 'ref_st', 'ref_en', 'strand', 'len_left_clipped', 'left_clipped_T_prop', 'len_left_internal', 'left_internal_T_prop', 'len_right_clipped', 'right_clipped_A_prop', 'len_right_internal', 'right_internal_A_prop', 'len_left_clipped_3bp', 'right_left_clipped_3bp_G_prop', 'len_right_clipped_3bp', 'right_clipped_3bp_C_prop' ] ).to_csv( f"{path_folder_output}output.tsv.gz", sep = '\t', index = False )
+
+                # draw plots # ❤️
+                for name_cat_dist in _initialize_dict_arr_dist( ) : # for each category
+                    if ns[ 'dict_arr_dist' ][ name_cat_dist ] is not None :
+                        plt.plot( np.arange( len( ns[ 'dict_arr_dist' ][ name_cat_dist ] ) ), ns[ 'dict_arr_dist' ][ name_cat_dist ] )
+                        plt.title( name_cat_dist )
+                        plt.show( )
+                bk.PICKLE_Write( f"{path_folder_output}dict_arr_dist.pkl", ns[ 'dict_arr_dist' ] )
+                    
+#                 pd.DataFrame( ns[ "l_l" ], columns = [ 'qname', 'len_seq', 'mapq', 'q_st', 'q_en', 'ref_name', 'ref_st', 'ref_en', 'strand' ] ).to_csv( f"{path_folder_output}output.tsv.gz", sep = '\t', index = False ) # ❤️ 'len_left_clipped', 'left_clipped_T_prop', 'len_left_internal', 'left_internal_T_prop', 'len_right_clipped', 'right_clipped_A_prop', 'len_right_internal', 'right_internal_A_prop', 'len_left_clipped_3bp', 'right_left_clipped_3bp_G_prop', 'len_right_clipped_3bp', 'right_clipped_3bp_C_prop'
                 
                 # write a flag indicating that the processing has been completed
                 with open( f"{path_folder_output}pipeline_completed.txt", 'w' ) as newfile :
