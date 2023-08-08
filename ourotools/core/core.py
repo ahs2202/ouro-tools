@@ -137,39 +137,7 @@ def __chromosome_name_remove_chr__(str_name_chrom):
     else:
         return str_name_chrom
 
-
-def Detect_PolyT_Length(
-    seq_after_softclipping,
-    int_len_window_internal_polyT=30,
-    int_len_sliding_window_internal_polyT=10,
-    float_min_T_fraction=0.8,
-):
-    ba = bitarray(len(seq_after_softclipping))
-    ba.setall(0)
-
-    for index, base in enumerate(seq_after_softclipping):
-        ba[index] = base == "T"
-
-    int_len_internal_polyT = 0
-    if (
-        ba[:int_len_sliding_window_internal_polyT].count()
-        / int_len_sliding_window_internal_polyT
-        >= float_min_T_fraction
-    ):
-        int_len_internal_polyT = int_len_sliding_window_internal_polyT
-        for index in range(
-            1, int_len_window_internal_polyT - int_len_sliding_window_internal_polyT + 1
-        ):
-            if (
-                ba[index : index + int_len_sliding_window_internal_polyT].count()
-                / int_len_sliding_window_internal_polyT
-                < float_min_T_fraction
-            ):
-                break
-            int_len_internal_polyT += 1
-    return int_len_internal_polyT
-
-
+    
 def Call_Mutation_from_Read(
     path_file_input,
     path_file_bam,
@@ -1972,7 +1940,7 @@ def Convert_df_count_to_MTX_10X(
     os.remove(f"{path_folder_mtx_10x_output}_barcodes.tsv.gz")
     os.remove(f"{path_folder_mtx_10x_output}_features.tsv.gz")
 
-def longfilternsplit(
+def LongFilterNSplit(
     flag_usage_from_command_line_interface: bool = False,
     path_file_minimap_index_genome: Union[str, None] = None,
     l_path_file_minimap_index_unwanted: List[str] = [ ],
@@ -1993,7 +1961,7 @@ def longfilternsplit(
     am_genome = None, # mappy aligner for genome (optional. if given, will override 'path_file_minimap_index_genome' argument)
     l_am_unwanted : Union[ None, List ] = None, # mappy aligner for unwanted sequences (optional. if given, will override 'l_path_file_minimap_index_unwanted' argument)
 ) -> None :
-    """# 2023-07-30 16:10:37 
+    """# 2023-08-07 23:35:49 
     
     flag_usage_from_command_line_interface: bool = False,
     path_file_minimap_index_genome: Union[str, None] = None, # required for identifying valid regions of a read and identify chimeric transcripts
@@ -2028,10 +1996,10 @@ def longfilternsplit(
         # command line arguments
         parser = argparse.ArgumentParser(
             description=str_description,
-            usage="ourotools longfilternsplit",
+            usage="ourotools LongFilterNSplit",
             formatter_class=argparse.RawTextHelpFormatter,
         )
-        parser.add_argument("longfilternsplit")
+        parser.add_argument("LongFilterNSplit")
 
         arg_grp_general = parser.add_argument_group("General")
         arg_grp_general.add_argument(
@@ -2070,8 +2038,8 @@ def longfilternsplit(
         arg_grp_general.add_argument(
             "-m",
             "--float_memory_in_GiB",
-            help="(default: 75) the maximum memory usage of the pipeline in GiB",
-            default=75,
+            help="(default: 50) the maximum memory usage of the pipeline in GiB",
+            default=50,
             type=float,
         )
         arg_grp_general.add_argument(
@@ -2197,7 +2165,7 @@ def longfilternsplit(
             os.path.abspath(path_folder) + "/" for path_folder in l_path_folder_output
         )
     else:
-        """# compose a list of default 'path_folder_output' values for the given list of input BAM files"""
+        """# compose a list of default 'path_folder_output' values for the given list of input files"""
         l_path_file_fastq_input_reversed = deepcopy(
             l_path_file_fastq_input[::-1]
         )  # reverse the input file paths so that pop operation yield the element located at the front
@@ -2205,7 +2173,7 @@ def longfilternsplit(
         for str_mode_ouro_count in l_str_mode_ouro_count:
             path_file_fastq = l_path_file_fastq_input_reversed.pop()
             path_folder_output = (
-                f"{path_file_fastq.rsplit( '/', 1 )[ 0 ]}longfilternsplit_output/"
+                f"{path_file_fastq.rsplit( '/', 1 )[ 0 ]}LongFilterNSplit_output/"
             )
             l_path_folder_output.append(path_folder_output)
 
@@ -2221,7 +2189,7 @@ def longfilternsplit(
     # if no samples will be analyzed, return
     if len(l_path_folder_output) == 0:
         logger.info(f"no output folders were given, exiting")
-        return scidx  # return the loaded index object
+        return
 
     """
     Initiate pipelines for off-loading works
@@ -2252,12 +2220,12 @@ def longfilternsplit(
     Pipeline specific functions
     """
     def _update_size_distribution( new_size : int, arr_dist = None, int_default_size : int = 10000 ) :
-        """ # 2023-07-31 20:30:36 
+        """ # 2023-08-05 09:05:32 
         update size distribution using the new size
         """
         if arr_dist is None :
             arr_dist = np.zeros( max( int( new_size * 2 ), int_default_size ), dtype = int ) # initialize an array containing the size distribution # the array will accomodate sizes upto 2x of the initial input
-        if len( arr_dist ) < new_size :
+        if len( arr_dist ) <= new_size : # when the new molecule size exceed that of the container
             arr_dist_new = np.zeros( int( new_size * 2 ), dtype = int ) # initialize an array containing the size distribution # the array will accomodate sizes upto 2x of the initial input
             arr_dist_new[ : len( arr_dist ) ] = arr_dist[ : ] # copy 'arr_dist' to 'arr_dist_new'
             arr_dist = arr_dist_new # replace existing 'arr_dist'
@@ -2512,7 +2480,7 @@ def longfilternsplit(
             path_file_fastq_input = os.path.abspath(path_file_fastq_input)
             if path_folder_output is None:  # set default 'path_folder_output'
                 path_folder_output = (
-                    f"{path_file_fastq.rsplit( '/', 1 )[ 0 ]}longfilternsplit_output/"
+                    f"{path_file_fastq.rsplit( '/', 1 )[ 0 ]}LongFilterNSplit_output/"
                 )
             path_folder_output = os.path.abspath(path_folder_output)
             path_folder_output += "/"
@@ -2526,6 +2494,7 @@ def longfilternsplit(
                     logger.info(
                         f"[Output folder Already Exists] the output folder {path_folder_output} contains valid output files. Therefore, the output folder will be skipped."
                     )
+                    release_lock( ) # release the lock
                     continue  # skip if the pipeline has been completed for the output folder
                 else:
                     """if required output files does not exist or the an intermediate file exists, remove the entire output folder, and rerun the pipeline"""
@@ -2562,8 +2531,8 @@ def longfilternsplit(
                 # external
                 "flag_usage_from_command_line_interface" : flag_usage_from_command_line_interface,
                 "path_file_minimap_index_genome" : path_file_minimap_index_genome,
-                "l_path_file_fastq_input" : l_path_file_fastq_input,
-                "l_path_folder_output" : l_path_folder_output,
+                "path_file_fastq_input" : path_file_fastq_input,
+                "path_folder_output" : path_folder_output,
                 "n_threads" : n_threads,
                 "int_num_samples_analyzed_concurrently" : int_num_samples_analyzed_concurrently,
                 "float_memory_in_GiB" : float_memory_in_GiB,
@@ -2659,8 +2628,6 @@ def longfilternsplit(
                     # initialize summary metrics
                     dict_arr_dist = _initialize_dict_arr_dist( ) # initialize 'dict_arr_dist'
 
-#                     l_l = [ ] # initialize the container # ❤️
-
                     """
                     define batch-specific function
                     """
@@ -2750,16 +2717,9 @@ def longfilternsplit(
                         """
                         handle reads with multiple genome alignments
                         """
-#                         l_hit_genome = list( hit for hit in am_genome.map( seq ) if hit.mapq == int_highest_mapq ) # filter hits using the highest mapping quality
-#                         # if only a single genomic alignment remains, process the read
-#                         if len( l_hit_genome ) == 1 :
-#                             _process_molecule( qname, seq, qual, l_hit_genome[ 0 ] ) # process non-chimeric segment
-#                             continue # skip the remaining operations
-                        
-                        l_l = [ ] # initialize the container # 💛
+                        l_l = [ ] # initialize the container # 
                         for hit in l_hit_genome :
                             l_l.append( [ hit.q_st, hit ] )
-#                             l_l.append( [ qname, len_seq, hit.mapq, hit.q_st, hit.q_en, hit.ctg, hit.r_st, hit.r_en, hit.strand ] ) # ❤️ 
                             # l_seq, int_total_aligned_length = bk.SAM.Retrive_List_of_Mapped_Segments( hit.cigar, hit.r_st, flag_is_cigartuples_from_mappy = True )
     
                         arr_algn = np.array( l_l, dtype = object ) # create an array of alignments
@@ -2803,14 +2763,9 @@ def longfilternsplit(
                         if len( l_hit_segment ) > 0 : # if a segment is remaining, process the segment
                             _process_molecule( qname, seq, qual, l_hit_segment, q_st_segment, None, 'chimeric' if flag_is_segment_chimeric else 'non_chimeric' ) # process chimeric segment # use the end of the molecule as 'q_en_segment'
                                                     
-                    if verbose :
-                        logger.info( f"{0 if dict_arr_dist[ 'aligned_to_unwanted_sequence' ] is None else dict_arr_dist[ 'aligned_to_unwanted_sequence' ].sum( )}/{int_total_num_records_for_a_batch} number of reads were aligned to unwanted sequences" )
-                        logger.info( f"{0 if dict_arr_dist[ 'cannot_aligned_to_genome' ] is None else dict_arr_dist[ 'cannot_aligned_to_genome' ].sum( )}/{int_total_num_records_for_a_batch} number of reads cannot be aligned to genome" )
-
                     pipe_sender.send( { 
                         'int_total_num_records_for_a_batch' : int_total_num_records_for_a_batch,
                         'dict_arr_dist' : dict_arr_dist,
-#                         'l_l' : l_l, # ❤️
                     } )  # report the number of processed records
 
                 """ close output files """
@@ -2823,16 +2778,14 @@ def longfilternsplit(
             ns = dict()  # define a namespace
             ns[ "int_num_read_currently_processed" ] = 0  # initialize total number of reads processed by the algorithm
             ns[ 'dict_arr_dist' ] = _initialize_dict_arr_dist( ) # initialize 'dict_arr_dist'
-#             ns[ 'l_l' ] = [ ] # ❤️
 
             def post_process_batch(res):
                 # parse received result
                 int_n_sam_record_count = res[ 'int_total_num_records_for_a_batch' ]
                 ns["int_num_read_currently_processed"] += int_n_sam_record_count
-                logger.info(
-                    f"[{path_file_fastq_input}] total {ns[ 'int_num_read_currently_processed' ]} number of reads has been processed."
-                )  # report
-#                 ns[ 'l_l' ].extend( res[ 'l_l' ] ) # ❤️
+                if verbose :
+                    logger.info( f"for the current batch, {0 if res[ 'dict_arr_dist' ][ 'aligned_to_unwanted_sequence' ] is None else res[ 'dict_arr_dist' ][ 'aligned_to_unwanted_sequence' ].sum( )}/{int_total_num_records_for_a_batch} number of reads were aligned to unwanted sequences\n{0 if res[ 'dict_arr_dist' ][ 'cannot_aligned_to_genome' ] is None else res[ 'dict_arr_dist' ][ 'cannot_aligned_to_genome' ].sum( )}/{int_total_num_records_for_a_batch} number of reads cannot be aligned to genome" )
+                    logger.info( f"[{path_file_fastq_input}] total {ns[ 'int_num_read_currently_processed' ]} number of reads has been processed." )  # report
                 
                 # combine distributions
                 for name_cat_dist in _initialize_dict_arr_dist( ) : # for each category
@@ -2873,12 +2826,17 @@ def longfilternsplit(
                     bk.OS_Run( [ 'cat' ] + glob.glob( f"{path_folder_temp}*.{name_file}" ), stdout_binary = True, path_file_stdout = f"{path_folder_output}{name_file}" )
                     
 
-                # draw plots # ❤️
+                # draw plots 
+                # plot settings
+                int_max_molecule_size_plot = 10000
                 for name_cat_dist in _initialize_dict_arr_dist( ) : # for each category
                     if ns[ 'dict_arr_dist' ][ name_cat_dist ] is not None :
-                        plt.plot( np.arange( len( ns[ 'dict_arr_dist' ][ name_cat_dist ] ) ), ns[ 'dict_arr_dist' ][ name_cat_dist ] )
-                        plt.title( name_cat_dist )
-                        plt.show( )
+                        len_max_molecule_size_data = len( ns[ 'dict_arr_dist' ][ name_cat_dist ] ) # retrieve max molecule size 
+                        plt.plot( np.arange( min( int_max_molecule_size_plot, len_max_molecule_size_data ) ), ns[ 'dict_arr_dist' ][ name_cat_dist ] if len_max_molecule_size_data <= int_max_molecule_size_plot else ns[ 'dict_arr_dist' ][ name_cat_dist ][ : int_max_molecule_size_plot ] )
+                        plt.title( f"{name_cat_dist} ({ns[ 'dict_arr_dist' ][ name_cat_dist ].sum( )} molecules)" )
+                        bk.MPL_SAVE( f"{name_cat_dist}.distribution", folder = path_folder_graph, l_format=['.pdf', '.png'] )
+                    
+                # write distribution data as a pickle file
                 bk.PICKLE_Write( f"{path_folder_output}dict_arr_dist.pkl", ns[ 'dict_arr_dist' ] )
                     
 #                 pd.DataFrame( ns[ "l_l" ], columns = [ 'qname', 'len_seq', 'mapq', 'q_st', 'q_en', 'ref_name', 'ref_st', 'ref_en', 'strand' ] ).to_csv( f"{path_folder_output}output.tsv.gz", sep = '\t', index = False ) # ❤️ 'len_left_clipped', 'left_clipped_T_prop', 'len_left_internal', 'left_internal_T_prop', 'len_right_clipped', 'right_clipped_A_prop', 'len_right_internal', 'right_internal_A_prop', 'len_left_clipped_3bp', 'right_left_clipped_3bp_G_prop', 'len_right_clipped_3bp', 'right_clipped_3bp_C_prop'
@@ -2887,9 +2845,831 @@ def longfilternsplit(
                 with open( f"{path_folder_output}pipeline_completed.txt", 'w' ) as newfile :
                     newfile.write( 'completed' )
 
+                # delete temporary files
+                shutil.rmtree( path_folder_temp )
+                    
                 release_lock()  # release the lock
                 logger.info(
                     f"[{path_file_fastq_input}] post-processing completed"
+                )
+
+            workers.submit_work(post_processing)
+
+            release_lock()  # release the lock
+
+        # wait all the single-core works offloaded to the workers to be completed.
+        workers.wait_all()
+        logger.info(
+            f"[Pipeline Completion] Forked Pipeline (id={str_uuid_pipeline}) Completed."
+        )
+
+    for _ in range(
+        int_num_samples_analyzed_concurrently
+    ):  # run 'int_num_samples_analyzed_concurrently' number of pipelines
+        pipelines.submit_work(run_pipeline)
+
+    # wait all pipelines to be completed
+    pipelines.wait_all()
+    logger.info(f"Completed.")
+    return 
+
+def LongExtractBarcodeFromBAM(
+    flag_usage_from_command_line_interface: bool = False, # a flag indicating the usage in the command line
+    l_path_file_bam_input: Union[list, None] = None, # list of input BAM files
+    l_path_folder_output: [list[str], None] = None, # list of output folders
+    n_threads: int = 32, # the number of threads to use
+    int_num_samples_analyzed_concurrently : int = 2, # the number of samples that can be analyzed concurrently to reduce bottlenecks due to processing of very large chunks.
+    int_num_reads_in_a_batch : int = 10_000, # the number of reads in a batch
+    int_min_mapq : int = 1, # minimum mapping quality of the alignment to filter read with low alignment quality
+    float_memory_in_GiB : float = 50, # expected memory usage of the pipeline
+    float_error_rate : float = 0.2, # maximum error rate to consider when searching adaptor sequence in the read
+    int_length_cb : int = 16, # the length of the cell barcode
+    int_length_umi : int = 12, # the length of the UMI (unique molecular identifier)
+    str_seq_r1 : str = 'CTACACGACGCTCTTCCGATCT', # the sequence of R1 adaptor (in 10x GEX v3 kit, located upstream of CB and UMI)
+    str_seq_tso : str = 'AAGCAGTGGTATCAACGCAGAG', # the sequence of TSO adaptor (in 10x GEX v3 kit, located at 5' end of the molecule)
+    path_file_valid_cb : str = None, # (required argument) the path to tsv file of whitelist barcodes. For more details, please see 10x cellranger references.
+    n_cell_expected : int = 1000, # the number of expected cells
+    int_len_sliding_window_internal_polyT : int = 10, # the length of sliding window for searching internal poly T (poly A) tract. (When poly-A tailed read is reverse complemented, R1 adaptor become situated in the forward direction
+    int_len_window_internal_polyT : int = 30, # the size of window for searching for internal poly T
+    float_min_T_fraction : float = 0.8, # the minimum T fraction for identifying the stretch of poly T tract
+    int_min_n_overlap_kmer_for_clustering_umi : int = 1, # the minimum number of overlapped kmer for initiating UMI clustering 
+    int_len_kmer_for_clustering_umi : int = 7, # the length of kmer for clustering UMI
+    float_min_proportion_read_to_select_kmer_representative_for_clustering_umi : float = 0.75, # if the given proportion of UMI contains the kmer, include the kmer in a set of kmers representing the UMI clusters.
+    verbose: bool = True,
+) -> None :
+    """# 2023-07-30 16:10:37 
+    
+    flag_usage_from_command_line_interface: bool = False, # a flag indicating the usage in the command line
+    l_path_file_bam_input: Union[list, None] = None, # list of input BAM files
+    l_path_folder_output: [list[str], None] = None, # list of output folders
+    n_threads: int = 32, # the number of threads to use
+    int_num_samples_analyzed_concurrently : int = 2, # the number of samples that can be analyzed concurrently to reduce bottlenecks due to processing of very large chunks.
+    int_num_reads_in_a_batch : int = 10_000, # the number of reads in a batch
+    int_min_mapq : int = 1, # minimum mapping quality of the alignment to filter read with low alignment quality
+    float_memory_in_GiB: float = 50,
+    float_error_rate : float = 0.2, # maximum error rate to consider when searching adaptor sequence in the read
+    int_length_cb : int = 16, # the length of the cell barcode
+    int_length_umi : int = 12, # the length of the UMI (unique molecular identifier)
+    str_seq_r1 : str = 'CTACACGACGCTCTTCCGATCT', # the sequence of R1 adaptor (in 10x GEX v3 kit, located upstream of CB and UMI)
+    str_seq_tso : str = 'AAGCAGTGGTATCAACGCAGAG', # the sequence of TSO adaptor (in 10x GEX v3 kit, located at 5' end of the molecule)
+    path_file_valid_cb : str = None, # (required argument) the path to tsv file of whitelist barcodes. For more details, please see 10x cellranger references.
+    n_cell_expected : int = 1000, # the number of expected cells
+    int_len_sliding_window_internal_polyT : int = 10, # the length of sliding window for searching internal poly T (poly A) tract. (When poly-A tailed read is reverse complemented, R1 adaptor become situated in the forward direction
+    int_len_window_internal_polyT : int = 30, # the size of window for searching for internal poly T
+    float_min_T_fraction : float = 0.8, # the minimum T fraction for identifying the stretch of poly T tract
+    int_min_n_overlap_kmer_for_clustering_umi : int = 1, # the minimum number of overlapped kmer for initiating UMI clustering 
+    int_len_kmer_for_clustering_umi : int = 7, # the length of kmer for clustering UMI
+    float_min_proportion_read_to_select_kmer_representative_for_clustering_umi : float = 0.75, # if the given proportion of UMI contains the kmer, include the kmer in a set of kmers representing the UMI clusters.
+    verbose: bool = True,
+    
+    returns None
+    """
+    """
+    Parse arguments
+    """
+    if flag_usage_from_command_line_interface:  # parse arguments
+        """parse arguments when the function was called from the command-line interface"""
+        # {  } # unused arguments
+        # command line arguments
+        parser = argparse.ArgumentParser(
+            description=str_description,
+            usage="ourotools LongExtractBarcodeFromBAM",
+            formatter_class=argparse.RawTextHelpFormatter,
+        )
+        parser.add_argument("LongExtractBarcodeFromBAM")
+
+        arg_grp_general = parser.add_argument_group("General")
+        arg_grp_general.add_argument(
+            "-l",
+            "--l_path_file_bam_input",
+            help="",
+            nargs="*",
+        )
+        arg_grp_general.add_argument(
+            "-o",
+            "--l_path_folder_output",
+            help="",
+            nargs="*",
+        )
+        arg_grp_general.add_argument(
+            "-t",
+            "--n_threads",
+            help="(default: 32) the number of processors to use concurrently.",
+            default=32,
+            type=int,
+        )
+        arg_grp_general.add_argument(
+            "-b",
+            "--int_num_reads_in_a_batch",
+            help="(default: 10000) the number of reads in a batch.",
+            default=10_000,
+            type=int,
+        )
+        arg_grp_general.add_argument(
+            "-s",
+            "--int_num_samples_analyzed_concurrently",
+            help="(default: 2) the number of samples that can be analyzed concurrently.",
+            default=2,
+            type=int,
+        )
+        arg_grp_general.add_argument(
+            "-m",
+            "--float_memory_in_GiB",
+            help="(default: 50) the maximum memory usage of the pipeline in GiB",
+            default=50,
+            type=float,
+        )
+        arg_grp_general.add_argument(
+            "-v", 
+            "--verbose", 
+            help="turn on verbose mode", 
+            action="store_true"
+        )
+        arg_grp_alignment = parser.add_argument_group("Alignment")
+        arg_grp_alignment.add_argument(
+            "-Q", 
+            "--int_min_mapq", 
+            help="(default: 1) minimum mapping quality of the alignment to consider a read (or parts of a read)  were aligned to the genome", 
+            default=1,
+            type=int,
+        )
+        # define adaptor sequences (10X)
+        # define cell barcode and umi length
+        arg_grp_barcode_extraction = parser.add_argument_group("Barcode Extraction")
+        arg_grp_barcode_extraction.add_argument( "-x", "--int_length_cb", help = "(default: 16) the length of the cell barcode", default = 16, type = int )
+        arg_grp_barcode_extraction.add_argument( "-y", "--int_length_umi", help = "(default: 12) the length of the UMI (unique molecular identifier)", default = 12, type = int )
+        arg_grp_barcode_extraction.add_argument( "-r", "--str_seq_r1", help = "(default: CTACACGACGCTCTTCCGATCT) the sequence of R1 (Read1) adaptor (in 10x GEX v3 kit, located upstream of CB and UMI)", default = 'CTACACGACGCTCTTCCGATCT' )
+        arg_grp_barcode_extraction.add_argument( "-e", "--str_seq_tso", help = "(default: AAGCAGTGGTATCAACGCAGAG) the sequence of TSO (Template Switching Oligo) adaptor (in 10x GEX v3 kit, located at 5' end of the molecule)", default = 'AAGCAGTGGTATCAACGCAGAG' )
+        arg_grp_barcode_extraction.add_argument( "-E", "--float_error_rate", help = "(default: 0.2) maximum error rate to consider when searching adaptor sequence in the read", default = 0.2, type = float )
+        
+        arg_grp_cb_correction = parser.add_argument_group("Cell Barcode Correction")
+        arg_grp_cb_correction.add_argument( "-V", "--path_file_valid_cb", help = "(required argument) the path to tsv file of whitelist barcodes. For more details, please see 10x cellranger references." ) # required argument
+        arg_grp_cb_correction.add_argument( "-N", "--n_cell_expected", help = "(default: 1000) the number of expected cells", default = 1000, type = int )
+
+        arg_grp_internal_polyt = parser.add_argument_group("Internal Poly(A) Tract-Primed Read Identification")
+        arg_grp_internal_polyt.add_argument( "-S", "--int_len_sliding_window_internal_polyT", help = "(default: 10) the length of sliding window for searching internal poly T (poly A) tract. (When poly-A tailed read is reverse complemented, R1 adaptor become situated in the forward direction", type = int, default = 10 )
+        arg_grp_internal_polyt.add_argument( "-w", "--int_len_window_internal_polyT", help = "(default: 30) the size of window for searching for internal poly T", type = int, default = 30 )
+        arg_grp_internal_polyt.add_argument( "-F", "--float_min_T_fraction", help = "(default: 0.8) the minimum T fraction for identifying the stretch of poly T tract", type = float, default = 0.8 )
+                    
+        arg_grp_umi_clustering = parser.add_argument_group("UMI Clustering")
+        arg_grp_umi_clustering.add_argument( "-O", "--int_min_n_overlap_kmer_for_clustering_umi", help = "(default: 1) the minimum number of overlapped kmer for initiating UMI clustering ", type = int, default = 1 )
+        arg_grp_umi_clustering.add_argument( "-L", "--int_len_kmer_for_clustering_umi", help = "(default: 7) the length of kmer for clustering UMI", type = int, default = 7 )
+        arg_grp_umi_clustering.add_argument( "-P", "--float_min_proportion_read_to_select_kmer_representative_for_clustering_umi", help = "(default: 0.75) if the given proportion of UMI contains the kmer, include the kmer in a set of kmers representing the UMI clusters.", type = float, default = 0.75 )
+        
+        args = parser.parse_args( )
+
+        l_path_file_bam_input = args.l_path_file_bam_input
+        l_path_folder_output = args.l_path_folder_output
+        n_threads = args.n_threads
+        int_num_reads_in_a_batch = args.int_num_reads_in_a_batch
+        int_num_samples_analyzed_concurrently = args.int_num_samples_analyzed_concurrently
+        float_memory_in_GiB = args.float_memory_in_GiB
+        verbose = args.verbose
+        int_min_mapq = args.int_min_mapq
+        str_seq_r1 = args.str_seq_r1
+        str_seq_tso = args.str_seq_tso
+        float_error_rate = args.float_error_rate
+        int_length_cb = args.int_length_cb
+        int_length_umi = args.int_length_umi
+        path_file_valid_cb = args.path_file_valid_cb
+        n_cell_expected = args.n_cell_expected
+        int_len_sliding_window_internal_polyT = args.int_len_sliding_window_internal_polyT
+        int_len_window_internal_polyT = args.int_len_window_internal_polyT
+        float_min_T_fraction = args.float_min_T_fraction
+        int_min_n_overlap_kmer_for_clustering_umi = args.int_min_n_overlap_kmer_for_clustering_umi
+        int_len_kmer_for_clustering_umi = args.int_len_kmer_for_clustering_umi
+        float_min_proportion_read_to_select_kmer_representative_for_clustering_umi = args.float_min_proportion_read_to_select_kmer_representative_for_clustering_umi
+
+    """
+    Start of the pipeline
+    """
+    logger.info(str_description)
+    logger.info(
+        "Ouro-Tools LongExtractBarcodeFromBAM, a pipeline for preprocessing BAM file for extracting barcode information from user-aligned BAM file using the FASTQ file pre-processed by 'LongFilterNSplit' "
+    )
+    logger.info(f"Started.")
+
+    """ handle special cases and invalid inputs """
+    if l_path_file_bam_input is None : # when inputs are not given
+        logger.error(
+            "Required argument(s) is missing. to view help message, type -h or --help"
+        )
+        return -1
+
+    """ process required input directories """
+
+    """ process input directory  """
+    l_path_file_bam_input = list(
+        os.path.abspath(path_file_bam_input)
+        for path_file_bam_input in l_path_file_bam_input
+    )
+    if l_path_folder_output is not None:
+        """# when a valid list of output folders were given # ensure directories of the output folder ends with '/' characters"""
+        l_path_folder_output = list(
+            os.path.abspath(path_folder) + "/" for path_folder in l_path_folder_output
+        )
+    else:
+        """# compose a list of default 'path_folder_output' values for the given list of input BAM files"""
+        l_path_file_bam_input_reversed = deepcopy(
+            l_path_file_bam_input[::-1]
+        )  # reverse the input file paths so that pop operation yield the element located at the front
+        l_path_folder_output = []
+        for str_mode_ouro_count in l_str_mode_ouro_count:
+            path_file_bam = l_path_file_bam_input_reversed.pop()
+            path_folder_output = (
+                f"{path_file_bam.rsplit( '/', 1 )[ 0 ]}LongExtractBarcodeFromBAM_output/"
+            )
+            l_path_folder_output.append(path_folder_output)
+
+    """ 
+    Fixed Settings
+    """
+    # internal settings
+    int_highest_mapq = 60
+    # define interger representation of the CIGAR operations used in BAM files
+    int_cigarop_S = 4
+    int_cigarop_H = 5
+    # output file setting
+    l_col_read_analysis = [  ]
+    # calculate padding 
+    int_length_cb_umi = int_length_cb + int_length_umi 
+    int_length_cb_umi_padding = int( np.ceil( int_length_cb_umi * float_error_rate ) )
+    int_length_cb_umi_including_padding = int_length_cb_umi + int_length_cb_umi_padding
+
+    """
+    Exit early when no samples is anlayzed
+    """
+    # if no samples will be analyzed, return
+    if len(l_path_folder_output) == 0:
+        logger.info(f"no output folders were given, exiting")
+        return
+
+    """
+    Initiate pipelines for off-loading works
+    """
+    pipelines = bk.Offload_Works(
+        None
+    )  # no limit for the number of works that can be submitted.
+
+    int_num_samples_analyzed_concurrently = min(
+        len(l_path_folder_output), int_num_samples_analyzed_concurrently
+    )  # if the number of samples are smaller than 'int_num_samples_analyzed_concurrently', adjust 'int_num_samples_analyzed_concurrently' so that it matches the number of samples
+
+    n_threads = int(
+        np.ceil(n_threads / int_num_samples_analyzed_concurrently)
+    )  # divide the number of processes that can be used by each pipeline by the number of pipelines that will be run concurrently.
+
+    """
+    Pipeline specific functions
+    """
+    def _check_binary_flags( flags : int, int_bit_flag_position : int ) :
+        """ # 2023-08-08 22:47:02 
+        check a flag in the binary flags at the given position
+        """
+        return ( flags & ( 1 << int_bit_flag_position ) ) > 0 
+
+    def _detect_poly_t_length(
+        seq_after_softclipping,
+        int_len_window_internal_polyT=30,
+        int_len_sliding_window_internal_polyT=10,
+        float_min_T_fraction=0.8,
+    ):
+        """ # 2023-08-08 23:22:52 
+        detect the length of poly T tract
+        """
+        ba = bitarray(len(seq_after_softclipping))
+        ba.setall(0)
+
+        for index, base in enumerate(seq_after_softclipping):
+            ba[index] = base == "T"
+
+        int_len_internal_polyT = 0
+        if (
+            ba[:int_len_sliding_window_internal_polyT].count()
+            / int_len_sliding_window_internal_polyT
+            >= float_min_T_fraction
+        ):
+            int_len_internal_polyT = int_len_sliding_window_internal_polyT
+            for index in range(
+                1, int_len_window_internal_polyT - int_len_sliding_window_internal_polyT + 1
+            ):
+                if (
+                    ba[index : index + int_len_sliding_window_internal_polyT].count()
+                    / int_len_sliding_window_internal_polyT
+                    < float_min_T_fraction
+                ):
+                    break
+                int_len_internal_polyT += 1
+        return int_len_internal_polyT
+
+    
+    def run_pipeline():
+        """# 2023-07-30 17:20:19 
+        analyze a pipeline for a given list of samples
+        """
+        # retrieve id of the pipeline
+        str_uuid_pipeline = bk.UUID()
+        logger.info(
+            f"[Pipeline Start] Forked Pipeline (id={str_uuid_pipeline}) Started."
+        )
+
+        """
+        Initiate workers for off-loading works
+        """
+        workers = bk.Offload_Works(
+            None
+        )  # no limit for the number of works that can be submitted.
+
+        """
+        Run pipeline for each sample
+        """
+        for path_file_bam_input, path_folder_output in zip( l_path_file_bam_input, l_path_folder_output ) :  # retrieve an output folder for the current sample
+            """
+            define a function to release a lock
+            """
+            def release_lock():
+                """# 2023-01-14 20:36:17
+                release the lock file
+                """
+                path_file_lock = (
+                    f"{path_folder_output}ourotools.lock"
+                )
+
+                # check the existence of output files for the output folder of each input file of the current sample
+                flag_all_output_files_exist = True  # initialize the flag
+                
+                if not os.path.exists(
+                    f"{path_folder_output}pipeline_completed.txt"
+                ):
+                    flag_all_output_files_exist = False
+
+                # check the existence of the lock file
+                if (
+                    os.path.exists(path_file_lock) and flag_all_output_files_exist
+                ):  # if all output files exist and the lock file exists
+                    # check whether the lock file has been created by the current pipeline
+                    with open(path_file_lock, "rt") as file_lock:
+                        str_uuid_pipeline_lock = file_lock.read() # retrieve uuid of lock
+                        flag_lock_acquired = str_uuid_pipeline_lock == str_uuid_pipeline
+                    if (
+                        flag_lock_acquired
+                    ):  # if the lock file has been created by the current pipeline, delete the lock file
+                        os.remove(path_file_lock)
+                        # lock has been released
+                        if verbose:
+                            logger.warning(
+                                f"[{path_folder_output}] The forked pipeline (id={str_uuid_pipeline}) released the lock"
+                            )
+                    else :
+                        # lock has been released
+                        if verbose:
+                            logger.warning(
+                                f"[{path_folder_output}] The lock belongs to the forked pipeline (id={str_uuid_pipeline_lock}), and the lock was not released."
+                            )
+                else:
+                    if verbose:
+                        logger.warning(
+                            f"[{path_folder_output}] The forked pipeline (id={str_uuid_pipeline}) attempted to release the lock, but some output files are missing, and the lock will not be released, yet."
+                        )
+
+            """
+            Run pipeline for each sample
+            """
+            """
+            create a lock
+            """
+            os.makedirs(path_folder_output, exist_ok=True)
+            path_file_lock = f"{path_folder_output}ourotools.lock"
+
+            # check the existence of the lock file
+            if os.path.exists(path_file_lock):
+                logger.warning( f"[Output folder unavailable] the output folder {path_folder_output} contains a lock file, which appears to be processed by a different process. Therefore, the output folder will be skipped." )
+                continue
+            flag_lock_acquired = False  # initialize 'flag_lock_acquired'
+            try:
+                # create the lock file
+                with open(path_file_lock, "wt") as newfile_lock:
+                    newfile_lock.write(str_uuid_pipeline)
+                # check whether the lock file has been created correctly (check for collision).
+                with open(path_file_lock, "rt") as file_lock:
+                    flag_lock_acquired = file_lock.read() == str_uuid_pipeline
+            except Exception as e:
+                logger.critical(
+                    e, exc_info=True
+                )  # if an exception occurs, print the error message
+            if not flag_lock_acquired:
+                logger.warning(
+                    f"[Output folder unavailable] an attempt to acquire a lock for the output folder {path_folder_output} failed, which appears to be processed by a different process. Therefore, the output folder will be skipped."
+                )
+                continue
+            # lock has been acquired
+
+            """
+            Run pipeline for each input file
+            """
+            # define folders and directories
+            path_file_bam_input = os.path.abspath(path_file_bam_input)
+            if path_folder_output is None:  # set default 'path_folder_output'
+                path_folder_output = (
+                    f"{path_file_bam.rsplit( '/', 1 )[ 0 ]}LongExtractBarcodeFromBAM_output/"
+                )
+            path_folder_output = os.path.abspath(path_folder_output)
+            path_folder_output += "/"
+            path_folder_temp = f"{path_folder_output}temp/"
+            path_folder_graph = f"{path_folder_output}graph/"
+
+            """ if the output folder already exists """
+            if os.path.exists(path_folder_output):
+                """check whether the pipeline has been completed"""
+                if os.path.exists( f"{path_folder_output}pipeline_completed.txt" ) :  # intermediate files should not exists, while all output files should exist
+                    logger.info(
+                        f"[Output folder Already Exists] the output folder {path_folder_output} contains valid output files. Therefore, the output folder will be skipped."
+                    )
+                    release_lock( ) # release the lock
+                    continue  # skip if the pipeline has been completed for the output folder
+                else:
+                    """if required output files does not exist or the an intermediate file exists, remove the entire output folder, and rerun the pipeline"""
+                    if (
+                        len(glob.glob(f"{path_folder_output}*/")) > 0
+                    ):  # detect a folder inside the output folder and report the presence of the existing folders.
+                        logger.info(
+                            f"[Output folder Already Exists] the output folder {path_folder_output} does not contain valid output files. The output folder will be cleaned and the pipeline will start anew at the folder."
+                        )
+                    # delete the folders
+                    for path_folder in glob.glob(f"{path_folder_output}*/"):
+                        shutil.rmtree(path_folder)
+                    # delete the files, excluding the lock file that has been acquired by the current pipeline
+                    for path_file in glob.glob(f"{path_folder_output}*"):
+                        if (
+                            path_file_lock != path_file
+                        ):  # does not delete the lock file
+                            os.remove(path_file)
+
+            """ create directories """
+            for path_folder in [
+                path_folder_output,
+                path_folder_temp,
+                path_folder_graph,
+            ]:
+                os.makedirs(path_folder, exist_ok=True)
+
+            """
+            Report program arguments
+            """
+            # record arguments used for the program (metadata)
+            dict_program_setting = {
+                "version": _version_,  # record version
+                # external
+                "flag_usage_from_command_line_interface" : flag_usage_from_command_line_interface,
+                "path_file_bam_input" : path_file_bam_input,
+                "path_folder_output" : path_folder_output,
+                "n_threads" : n_threads,
+                "int_num_samples_analyzed_concurrently" : int_num_samples_analyzed_concurrently,
+                "int_num_reads_in_a_batch" : int_num_reads_in_a_batch,
+                "int_min_mapq" : int_min_mapq,
+                "float_memory_in_GiB" : float_memory_in_GiB,
+                # internal
+                "path_folder_temp": path_folder_temp,
+                "path_folder_graph": path_folder_graph,
+            }
+            logger.info(
+                f"[Setting] program will be run with the following setting for the input file {path_file_bam_input} : {str( dict_program_setting )}"
+            )
+
+            """ export program setting """
+            path_file_json_setting_program = (
+                f"{path_folder_output}program_setting.json"
+            )
+            if os.path.exists(path_file_json_setting_program):
+                with open(path_file_json_setting_program, "r") as file:
+                    j = json.load(file)
+                if j != dict_program_setting:
+                    logger.info(
+                        f"[Warning] the current program setting is different from the previous program setting recorded in the pipeline folder. The previous setting will be used."
+                    )
+                    with open(path_file_json_setting_program, "r") as file:
+                        dict_program_setting = json.load(
+                            file
+                        )  # override current program setting with previous program setting
+            with open(path_file_json_setting_program, "w") as newfile:
+                json.dump(dict_program_setting, newfile)
+                
+            """
+            Define a generator for partitioning input file
+            """
+            def gen_batch( ):
+                """# 2023-07-30 18:37:49 
+                create batch from the input BAM file
+                """
+                with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
+                    gen_r = samfile.fetch( ) # open the generator
+                    try :
+                        r = next( gen_r ) # retrieve the first read
+                    except StopIteration : # if the bam file is emtpy, end the generator
+                        return
+                    # initialize the batch
+                    ns_batch = { 'int_num_reads_encountered_for_a_batch' : 1, 'start__reference_name' : r.reference_name, 'start__reference_start' : r.reference_start, } # initialize the dictionary containing information about the batch # counts of reads in a batch
+                    
+                    while True :
+                        """ retrieve a read """ 
+                        try :
+                            r = next( gen_r )
+                        except StopIteration : # once all reads were analyzed, exit the loop
+                            yield ns_batch # yield the last batch
+                            break
+                        
+                        """ filter read """
+                        if r.mapq < int_min_mapq : # filter out reads with low mapq
+                            continue
+                        if r.seq is None : # consider only the primary alignment
+                            continue
+                        cigartuples, flags = r.cigartuples, r.flag # retrieve attributes
+                        if int_cigarop_H == cigartuples[ 0 ][ 0 ] or int_cigarop_H == cigartuples[ -1 ][ 0 ] : # skip hard-clipped reads
+                            continue 
+                        if _check_binary_flags( flags, 10 ) or _check_binary_flags( flags, 8 ) : # filter out optical duplicates or secondary alignments
+                            continue
+                            
+                        """ when contig changes """
+                        if r.reference_name != ns_batch[ 'start__reference_name' ] :
+                            yield ns_batch # yield the last batch for the last contig
+                            # initialize the next batch
+                            ns_batch = { 'int_num_reads_encountered_for_a_batch' : 0 } # initialize the counter
+                            ns_batch[ 'start__reference_name' ] = r.reference_name
+                            ns_batch[ 'start__reference_start' ] = r.reference_start
+                            
+                        ns_batch[ 'int_num_reads_encountered_for_a_batch' ] += 1 # increase the read count
+                        if int_num_reads_in_a_batch <= ns_batch[ 'int_num_reads_encountered_for_a_batch' ] : # once the batch is full, yield the batch and consume remaining reads starting at the reference start position, so that the reads of the same reference start position are processed together.
+                            # update batch information
+                            ns_batch[ 'end__reference_start' ] = r.reference_start
+                            while True :
+                                """ retrieve a read """ 
+                                try :
+                                    r = next( gen_r )
+                                except StopIteration : # once all reads were analyzed, exit the loop
+                                    break
+                                    
+                                if ns_batch[ 'end__reference_start' ] != r.reference_start :
+                                    break
+                                
+                                ns_batch[ 'int_num_reads_encountered_for_a_batch' ] += 1 # increase the counter
+                            yield ns_batch # yield the batch
+                            ns_batch = { 'int_num_reads_encountered_for_a_batch' : 1 } # initialize the counter
+                            ns_batch[ 'start__reference_name' ] = r.reference_name
+                            ns_batch[ 'start__reference_start' ] = r.reference_start
+                            
+            def process_batch(pipe_receiver, pipe_sender):
+                """ # 2023-08-09 00:26:28 
+                """
+                """
+                initialize the worker 
+                # 2023-08-01 12:19:06 
+                """
+                str_uuid = bk.UUID()  # retrieve id
+                if verbose:
+                    logger.info(f"[Started] start working (worker_id={str_uuid})")
+                    
+                """ open output files """
+                path_file_bam_preprocessed = f"{path_folder_temp}{str_uuid}.preprocessed.bam"
+                with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
+                    newsamfile = pysam.AlignmentFile( path_file_bam_preprocessed, 'wb', template = samfile ) # open the new samfile, based on the input BAM file
+                
+                while True:
+                    ins = pipe_receiver.recv()
+                    if ins is None:
+                        break
+                    ns_batch = ins  # parse input
+                    
+                    """
+                    define batch-specific function
+                    """
+                    
+                    """
+                    open and process the input BAM file
+                    """
+                    int_total_num_records_processed = 0
+                    l_cb_umi = [ ] # collect cb_umi sequences
+                    start__reference_name, start__reference_start = ns_batch[ 'start__reference_name' ], ns_batch[ 'start__reference_start' ]
+                    end__reference_start = ns_batch[ 'end__reference_start' ] if 'end__reference_start' in ns_batch else None
+                    with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
+                        for r in samfile.fetch( start__reference_name, start__reference_start, end__reference_start + 1 ) if end__reference_start is not None else samfile.fetch( start__reference_name, start__reference_start ) : # include the end position by adding +1
+                            
+                            """ filter read """
+                            if r.mapq < int_min_mapq : # filter out reads with low mapq
+                                continue
+                            if r.seq is None : # consider only the primary alignment
+                                continue
+                            seq, cigartuples, flags = r.seq, r.cigartuples, r.flag # retrieve attributes
+                            if int_cigarop_H == cigartuples[ 0 ][ 0 ] or int_cigarop_H == cigartuples[ -1 ][ 0 ] : # skip hard-clipped reads
+                                continue 
+                            if _check_binary_flags( flags, 10 ) or _check_binary_flags( flags, 8 ) : # filter out optical duplicates or secondary alignments
+                                continue
+                                
+                            ''' if the batch has been completed, exit the loop '''
+                            if end__reference_start is not None and r.reference_end > end__reference_start : 
+                                break
+                            
+                            ''' process read '''
+                            
+                            """
+                            (Assumes the aligned FASTQ files are already pre-processed by ouro-tools and poly A tail is located in the downstream of the read.)
+                            
+                            not reverse complemented:
+                                - poly A and cell barcodes (reverse complemented) located at the right
+                            
+                            reverse complemented:
+                                - poly T and cell barcodes located at the left
+                            """
+                            # check whether the read was reverse complemented
+                            flag_is_reverse_complemented = _check_binary_flags( flags, 4 ) 
+
+                            # retrieve soft-clipped sequences
+                            flag_left_softclipped = int_cigarop_S == cigartuples[ 0 ][ 0 ]
+                            flag_right_softclipped = int_cigarop_S == cigartuples[ -1 ][ 0 ]
+                            if not ( flag_left_softclipped and flag_right_softclipped ) : # skip reads that does not contain soft-clipped reads at both ends (adaptors not detected at least one end)
+                                continue 
+                            int_length_softclipped_left = cigartuples[ 0 ][ 1 ]
+                            int_length_softclipped_right = cigartuples[ -1 ][ 1 ]
+                            seq_sc_left = seq[ : int_length_softclipped_left ]
+                            seq_sc_right = SEQ.Reverse_Complement( seq[ - int_length_softclipped_right : ] )
+                            
+                            # search for R1 and TSO adaptor sequences
+                            seq_sc_with_r1, seq_sc_with_tso, seq_r1_is_located_left, int_length_softclipped_with_r1 = ( seq_sc_left, seq_sc_right, seq, int_length_softclipped_left ) if flag_is_reverse_complemented else ( seq_sc_right, seq_sc_left, SEQ.Reverse_Complement( seq ), int_length_softclipped_right )
+                            res_r1 = STR.Search_Subsequence( seq_sc_with_r1, str_seq_r1, float_error_rate )
+                            res_tso = STR.Search_Subsequence( seq_sc_with_tso, str_seq_tso, float_error_rate )
+                            
+                            # initialize the tags that will be added to the SAM record
+                            l_tags = [ ( 'RX', res_r1[ 'num_errors' ], 'i' ), ( 'AX', res_tso[ 'num_errors' ], 'i' ) ] # add the number of errors from R1 and TSO adaptor search results as tags
+                            
+                            ''' Retrieve Cell Barcode and Check for Internal PolyA Priming (looking for reference-derived polyT next to Cell Barcode in the aligned reads) '''
+                            # retrieve cell barcode and UMI
+                            int_start_cb_umi = res_r1[ 'index_end_subsequence' ]
+                            if int_start_cb_umi != -1 : # if R1 adaptor sequence was identified
+                                seq_cb_umi = seq_sc_with_r1[ int_start_cb_umi : int_start_cb_umi + int_length_cb_umi_including_padding ] # retrieve cb-umi sequence
+                                # Check for Internal PolyA Priming 
+                                seq_after_softclipping = seq_r1_is_located_left[ int_length_softclipped_with_r1 : int_length_softclipped_with_r1 + int_len_window_internal_polyT ]
+                                int_length_internal_polyT = _detect_poly_t_length( seq_after_softclipping, int_len_window_internal_polyT, int_len_sliding_window_internal_polyT, float_min_T_fraction )
+                                int_count_T_in_a_window = seq_after_softclipping.count( 'T' )
+                                # add tags
+                                l_tags += [ ("CX", seq_cb_umi, 'Z'), ('PX', int_length_internal_polyT, 'i') ] # add uncorrected cb and umi sequence as a tag # add the identified poly T length as a tag
+                                # collect data 
+                                l_cb_umi.append( seq_cb_umi ) # collect 'seq_cb_umi'
+
+                            ''' write the SAM record ''' 
+                            int_total_num_records_processed += 1
+                            r.set_tags( l_tags ) # set tags
+                            newsamfile.write( r ) # write the record to the output BAM file
+                            
+                    pipe_sender.send( { 
+                        'int_total_num_records_for_a_batch' : int_total_num_records_processed, # record the actual number of records processed for the batch
+                        'l_cb_umi' : l_cb_umi,
+                    } )  # report the number of processed records
+
+                """ close output files """
+                newsamfile.close( )
+                # index the resulting BAM file
+                pysam.index( path_file_bam_preprocessed )
+                
+                if verbose:
+                    logger.info(f"[Completed] all works completed (worker_id={str_uuid})")
+
+            ns = { 'int_num_read_currently_processed' : 0, 'int_num_records_with_cb_umi' : 0, 'l_cb_umi' : [ ] }  # define a namespace # initialize total number of reads processed by the algorithm
+
+            def post_process_batch(res):
+                # update data using the received result
+                ns["int_num_read_currently_processed"] += res[ 'int_total_num_records_for_a_batch' ]
+                ns["int_num_records_with_cb_umi"] += len( res["l_cb_umi"] ) # update ns["int_num_records_with_cb_umi"]
+                ns["l_cb_umi"] += res["l_cb_umi"]
+                logger.info(
+                    f"[{path_file_bam_input}] total {ns[ 'int_num_read_currently_processed' ]} number of reads has been processed. CB/UMI sequence identification rate is {np.round(ns['int_num_records_with_cb_umi'] / ns['int_num_read_currently_processed'], 2 )}"
+                )  # report
+                    
+            """
+            Analyze an input BAM file
+            """
+            if verbose:
+                logger.info( f"[{path_file_bam_input}] the analysis pipeline will be run with {n_threads} number of threads" )
+            bk.Multiprocessing_Batch_Generator_and_Workers(
+                gen_batch=gen_batch(),
+                process_batch=process_batch,
+                post_process_batch=post_process_batch,
+                int_num_threads=n_threads
+                + 2,  # one thread for generating batch, another thread for post-processing of the batch
+            )
+            
+            """
+            Re-analyze pre-processed BAM files
+            """
+            def process_batch(pipe_receiver, pipe_sender):
+                """ # 2023-08-09 00:26:41 
+                # 2022-04-24 01:29:59
+                """
+                """
+                initialize the worker 
+                # 2023-08-01 12:19:06 
+                """
+                str_uuid = bk.UUID()  # retrieve id
+                if verbose:
+                    logger.info(f"[Started] start working (worker_id={str_uuid})")
+                    
+                """ open output files """
+                path_file_bam_barcoded = f"{path_folder_temp}{str_uuid}.barcoded.bam"
+                with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
+                    newsamfile = pysam.AlignmentFile( path_file_bam_barcoded, 'wb', template = samfile ) # open the new samfile, based on the input BAM file
+                
+                while True:
+                    ins = pipe_receiver.recv()
+                    if ins is None:
+                        break
+                    path_file_bam_preprocessed = ins  # parse input
+                    
+                    """
+                    define batch-specific function
+                    """
+                    
+                    """
+                    open and process the input BAM file
+                    """
+                    int_total_num_records_processed = 0
+                    with pysam.AlignmentFile( path_file_bam_preprocessed, 'rb' ) as samfile :
+                        for r in samfile.fetch( ) : # analyze all reads (since the pre-processed BAM file only contains valid reads that are already filtered)
+                            seq, cigartuples, flags = r.seq, r.cigartuples, r.flag # retrieve attributes
+                                
+                            ''' process read '''
+                            """
+                            (Assumes the aligned FASTQ files are already pre-processed by ouro-tools and poly A tail is located in the downstream of the read.)
+                            
+                            not reverse complemented:
+                                - poly A and cell barcodes (reverse complemented) located at the right
+                            
+                            reverse complemented:
+                                - poly T and cell barcodes located at the left
+                            """
+                            # check whether the read was reverse complemented
+                            flag_is_reverse_complemented = _check_binary_flags( flags, 4 ) 
+
+
+                            ''' write the SAM record ''' 
+                            int_total_num_records_processed += 1
+                            newsamfile.write( r ) # write the record to the output BAM file
+                            
+                    pipe_sender.send( { 
+                        'int_total_num_records_for_a_batch' : int_total_num_records_processed, # record the actual number of records processed for the batch
+                    } )  # report the number of processed records
+
+                """ close output files """
+                newsamfile.close( )
+                # index the resulting BAM file
+                pysam.index( path_file_bam_barcoded )
+                
+                if verbose:
+                    logger.info(f"[Completed] all works completed (worker_id={str_uuid})")
+
+            ns = { 'int_num_read_currently_processed' : 0 }  # define a namespace 
+
+            def post_process_batch(res):
+                # update data using the received result
+                ns["int_num_read_currently_processed"] += res[ 'int_total_num_records_for_a_batch' ]
+                logger.info(
+                    f"[{path_file_bam_input}] total {ns[ 'int_num_read_currently_processed' ]} number of reads has been processed."
+                )  # report
+                    
+            """
+            Analyze an input BAM file
+            """
+            if verbose:
+                logger.info( f"[{path_file_bam_input}] the analysis pipeline will be run with {n_threads} number of threads" )
+            bk.Multiprocessing_Batch_Generator_and_Workers(
+                gen_batch=iter( glob.glob( f"{path_folder_temp}*.preprocessed.bam" ) ), # analyze each pre-processed BAM file
+                process_batch=process_batch,
+                post_process_batch=post_process_batch,
+                int_num_threads=n_threads
+                + 2,  # one thread for generating batch, another thread for post-processing of the batch
+            )
+
+            """ 
+            post-processing
+            """
+
+            def post_processing():  # off-loading a single-core work
+                logger.info(
+                    f"[{path_file_bam_input}] post-processing started"
+                )
+                
+                # combine results into a single output file (initial read analysis)
+                """ combine results into a single output BAM file """
+                pysam.merge( '--threads', str( min( n_threads, 10 ) ), '-c', '-p', f"{path_folder_output}barcoded.bam", * glob.glob( f"{path_folder_temp}*.barcoded.bam" ) ) # merge output BAM files
+                pysam.index( f"{path_folder_output}barcoded.bam" ) # index the input BAM file
+                
+                # write a flag indicating that the processing has been completed
+                with open( f"{path_folder_output}pipeline_completed.txt", 'w' ) as newfile :
+                    newfile.write( 'completed' )
+
+                # delete temporary files
+                shutil.rmtree( path_folder_temp )
+                    
+                release_lock()  # release the lock
+                logger.info(
+                    f"[{path_file_bam_input}] post-processing completed"
                 )
 
             workers.submit_work(post_processing)

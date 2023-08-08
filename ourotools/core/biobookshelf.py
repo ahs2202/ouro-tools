@@ -16,6 +16,27 @@ import shutil
 import csv
 import intervaltree
 
+def MPL_SAVE(fig_name, l_format=[".pdf", ".png"], close_fig=True, **dict_save_fig):
+    """With the given 'fig_name', save fiqures in both svg and png format
+    'l_format' : list of image extensions for saving files
+    """
+    for str_format in l_format:
+        MATPLOTLIB_savefig(
+            fig_name, format=str_format, close_fig=False, **dict_save_fig
+        )
+    if close_fig:
+        plt.close()
+
+def MATPLOTLIB_savefig(title, dpi=200, folder=None, close_fig=True, format=".png"):
+    if "." not in format:
+        format = "." + format
+    plt.savefig(
+        folder + To_window_path_compatible_str(title) + format,
+        dpi=200,
+        bbox_inches="tight",
+    )  # prevent x or y labels from cutting off
+    if close_fig:
+        plt.close()
 
 def PICKLE_Write(path_file, data_object):
     """write binary pickle file of a given data_object"""
@@ -1873,3 +1894,83 @@ class HostedDictIntervalTree:
 # register
 ManagerReadOnly.register("HostedDict", HostedDict)
 ManagerReadOnly.register("HostedDictIntervalTree", HostedDictIntervalTree)
+
+
+def FASTQ_Iterate(path_file, return_only_at_index=None):
+    """# 2020-12-09 22:22:34
+    iterate through a given fastq file.
+    'return_only_at_index' : return value only at the given index. For example, for when 'return_only_at_index' == 1, return sequence only.
+    """
+    if return_only_at_index is not None:
+        return_only_at_index = (
+            return_only_at_index % 4
+        )  # 'return_only_at_index' value should be a value between 0 and 3
+    bool_flag_file_gzipped = (
+        ".gz" in path_file[-3:]
+    )  # set a flag indicating whether a file has been gzipped.
+    with gzip.open(path_file, "rb") if bool_flag_file_gzipped else open(
+        path_file
+    ) as file:
+        while True:
+            record = (
+                [file.readline().decode()[:-1] for index in range(4)]
+                if bool_flag_file_gzipped
+                else [file.readline()[:-1] for index in range(4)]
+            )
+            if len(record[0]) == 0:
+                break
+            if return_only_at_index is not None:
+                yield record[return_only_at_index]
+            else:
+                yield record
+
+def FASTQ_Read(
+    path_file,
+    return_only_at_index=None,
+    flag_add_qname=True,
+    int_num_reads: Union[int, None] = None,
+):  # 2020-08-18 22:31:31
+    """# 2021-08-25 07:06:50
+    read a given fastq file into list of sequences or a dataframe (gzipped fastq file supported). 'return_only_at_index' is a value between 0 and 3 (0 = readname, 1 = seq, ...)
+    'flag_add_qname' : add a column containing qname in the bam file (space-split read name without '@' character at the start of the read name)
+    int_num_reads : Union[ int, None ] = None # the number of reads to include in the output, starting from the start. By default, include all reads.
+    """
+    if return_only_at_index is not None:
+        return_only_at_index = (
+            return_only_at_index % 4
+        )  # 'return_only_at_index' value should be a value between 0 and 3
+    bool_flag_file_gzipped = (
+        ".gz" in path_file[-3:]
+    )  # set a flag indicating whether a file has been gzipped.
+    l_seq = list()
+    l_l_values = list()
+    """ read fastq file """
+    file = gzip.open(path_file, "rb") if bool_flag_file_gzipped else open(path_file)
+    int_read_count = 0  # count the number of reads parsed.
+    while True:
+        record = (
+            [file.readline().decode()[:-1] for index in range(4)]
+            if bool_flag_file_gzipped
+            else [file.readline()[:-1] for index in range(4)]
+        )
+        if len(record[0]) == 0:
+            break
+        if return_only_at_index is not None:
+            l_seq.append(record[return_only_at_index])
+        else:
+            l_l_values.append([record[0], record[1], record[3]])
+        int_read_count += 1  # increase the read count
+        if (
+            int_num_reads is not None and int_read_count >= int_num_reads
+        ):  # if the number of parsed reads equal to the desired number of reads in the output, stop reading the file
+            break
+    file.close()
+    if return_only_at_index is not None:
+        return l_seq
+    else:
+        df_fq = pd.DataFrame(l_l_values, columns=["readname", "seq", "quality"])
+        if flag_add_qname:
+            df_fq["qname"] = list(
+                e.split(" ", 1)[0][1:] for e in df_fq.readname.values
+            )  # retrieve qname
+        return df_fq

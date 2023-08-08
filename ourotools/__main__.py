@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # the date of last modification
-from scarab_count.core import *
+from ourotools.core import *
 
 import warnings
 
