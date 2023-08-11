@@ -87,12 +87,13 @@ logger = logging.getLogger("ouro-count")
 # define version
 _version_ = "0.0.1"
 _scelephant_version_ = _version_
-_last_modified_time_ = "2023-08-02 15:13:18 "
+_last_modified_time_ = "2023-08-10 16:40:52"
 
 str_release_note = [
     """
     # %% RELEASE NOTE %%
-    
+    # 2023-08-10 16:41:24 
+    draft version of 'LongFilterNSplit' function completed
 
     ##### Future implementations #####
 
@@ -1961,7 +1962,7 @@ def LongFilterNSplit(
     am_genome = None, # mappy aligner for genome (optional. if given, will override 'path_file_minimap_index_genome' argument)
     l_am_unwanted : Union[ None, List ] = None, # mappy aligner for unwanted sequences (optional. if given, will override 'l_path_file_minimap_index_unwanted' argument)
 ) -> None :
-    """# 2023-08-07 23:35:49 
+    """# 2023-08-10 16:30:50 
     
     flag_usage_from_command_line_interface: bool = False,
     path_file_minimap_index_genome: Union[str, None] = None, # required for identifying valid regions of a read and identify chimeric transcripts
@@ -2506,7 +2507,7 @@ def LongFilterNSplit(
                         )
                     # delete the folders
                     for path_folder in glob.glob(f"{path_folder_output}*/"):
-                        shutil.rmtree(path_folder)
+                        shutil.rmtree(path_folder, ignore_errors = True)
                     # delete the files, excluding the lock file that has been acquired by the current pipeline
                     for path_file in glob.glob(f"{path_folder_output}*"):
                         if (
@@ -2600,8 +2601,9 @@ def LongFilterNSplit(
                 str_uuid = bk.UUID()  # retrieve id
                 if verbose:
                     logger.info(f"[Started] start working (worker_id={str_uuid})")
-                    
+                
                 """ open output files """
+                str_uuid_for_a_batch = bk.UUID( ) # retrieve id for the specific batch
                 dict_newfile_fastq_output = {
                     'aligned_to_unwanted_sequences' : gzip.open( f"{path_folder_temp}{str_uuid}.aligned_to_unwanted_sequences.fastq.gz", "wb", ), 
                     'cannot_aligned_to_genome' : gzip.open( f"{path_folder_temp}{str_uuid}.cannot_aligned_to_genome.fastq.gz", "wb", ), 
@@ -2762,18 +2764,21 @@ def LongFilterNSplit(
                                 
                         if len( l_hit_segment ) > 0 : # if a segment is remaining, process the segment
                             _process_molecule( qname, seq, qual, l_hit_segment, q_st_segment, None, 'chimeric' if flag_is_segment_chimeric else 'non_chimeric' ) # process chimeric segment # use the end of the molecule as 'q_en_segment'
-                                                    
+                    
+                    """ report a batch has been completed """
                     pipe_sender.send( { 
                         'int_total_num_records_for_a_batch' : int_total_num_records_for_a_batch,
                         'dict_arr_dist' : dict_arr_dist,
                     } )  # report the number of processed records
-
+                    
                 """ close output files """
                 for name_type in dict_newfile_fastq_output :
                     dict_newfile_fastq_output[ name_type ].close( )
-
+                    
+                """ report the worker has completed all works """
                 if verbose:
                     logger.info(f"[Completed] all works completed (worker_id={str_uuid})")
+                pipe_sender.send( 'completed' )  
 
             ns = dict()  # define a namespace
             ns[ "int_num_read_currently_processed" ] = 0  # initialize total number of reads processed by the algorithm
@@ -2781,10 +2786,10 @@ def LongFilterNSplit(
 
             def post_process_batch(res):
                 # parse received result
-                int_n_sam_record_count = res[ 'int_total_num_records_for_a_batch' ]
-                ns["int_num_read_currently_processed"] += int_n_sam_record_count
+                int_total_num_records_for_a_batch = res[ 'int_total_num_records_for_a_batch' ]
+                ns["int_num_read_currently_processed"] += int_total_num_records_for_a_batch
                 if verbose :
-                    logger.info( f"for the current batch, {0 if res[ 'dict_arr_dist' ][ 'aligned_to_unwanted_sequence' ] is None else res[ 'dict_arr_dist' ][ 'aligned_to_unwanted_sequence' ].sum( )}/{int_total_num_records_for_a_batch} number of reads were aligned to unwanted sequences\n{0 if res[ 'dict_arr_dist' ][ 'cannot_aligned_to_genome' ] is None else res[ 'dict_arr_dist' ][ 'cannot_aligned_to_genome' ].sum( )}/{int_total_num_records_for_a_batch} number of reads cannot be aligned to genome" )
+                    logger.info( f"[{path_file_fastq_input}] a batch has been completed, {0 if res[ 'dict_arr_dist' ][ 'aligned_to_unwanted_sequence' ] is None else res[ 'dict_arr_dist' ][ 'aligned_to_unwanted_sequence' ].sum( )}/{int_total_num_records_for_a_batch} number of reads were aligned to unwanted sequences, {0 if res[ 'dict_arr_dist' ][ 'cannot_aligned_to_genome' ] is None else res[ 'dict_arr_dist' ][ 'cannot_aligned_to_genome' ].sum( )}/{int_total_num_records_for_a_batch} number of reads cannot be aligned to genome" )
                     logger.info( f"[{path_file_fastq_input}] total {ns[ 'int_num_read_currently_processed' ]} number of reads has been processed." )  # report
                 
                 # combine distributions
@@ -2804,6 +2809,7 @@ def LongFilterNSplit(
                 post_process_batch=post_process_batch,
                 int_num_threads=n_threads
                 + 2,  # one thread for generating batch, another thread for post-processing of the batch
+                flag_wait_for_a_response_from_worker_after_sending_termination_signal = True, # wait until all worker exists before resuming works in the main process
             )
 
             """ 
@@ -2846,7 +2852,7 @@ def LongFilterNSplit(
                     newfile.write( 'completed' )
 
                 # delete temporary files
-                shutil.rmtree( path_folder_temp )
+                shutil.rmtree( path_folder_temp, ignore_errors = True )
                     
                 release_lock()  # release the lock
                 logger.info(
@@ -3096,6 +3102,12 @@ def LongExtractBarcodeFromBAM(
     int_length_cb_umi_padding = int( np.ceil( int_length_cb_umi * float_error_rate ) )
     int_length_cb_umi_including_padding = int_length_cb_umi + int_length_cb_umi_padding
 
+    """ 
+    Load shared data
+    """
+    # retrieve set of valid cell barcodes
+    set_valid_cb = set( pd.read_csv( path_file_valid_cb, header = None, sep = '\t' ).iloc[ :, 0 ].values )
+
     """
     Exit early when no samples is anlayzed
     """
@@ -3297,7 +3309,7 @@ def LongExtractBarcodeFromBAM(
                         )
                     # delete the folders
                     for path_folder in glob.glob(f"{path_folder_output}*/"):
-                        shutil.rmtree(path_folder)
+                        shutil.rmtree(path_folder, ignore_errors = True)
                     # delete the files, excluding the lock file that has been acquired by the current pipeline
                     for path_file in glob.glob(f"{path_folder_output}*"):
                         if (
@@ -3412,6 +3424,7 @@ def LongExtractBarcodeFromBAM(
                                     break
                                 
                                 ns_batch[ 'int_num_reads_encountered_for_a_batch' ] += 1 # increase the counter
+                            logger.info( f"{ns_batch} yield" ) # ❤️
                             yield ns_batch # yield the batch
                             ns_batch = { 'int_num_reads_encountered_for_a_batch' : 1 } # initialize the counter
                             ns_batch[ 'start__reference_name' ] = r.reference_name
@@ -3504,7 +3517,7 @@ def LongExtractBarcodeFromBAM(
                             # retrieve cell barcode and UMI
                             int_start_cb_umi = res_r1[ 'index_end_subsequence' ]
                             if int_start_cb_umi != -1 : # if R1 adaptor sequence was identified
-                                seq_cb_umi = seq_sc_with_r1[ int_start_cb_umi : int_start_cb_umi + int_length_cb_umi_including_padding ] # retrieve cb-umi sequence
+                                seq_cb_umi = seq_r1_is_located_left[ int_start_cb_umi : int_start_cb_umi + int_length_cb_umi_including_padding ] # retrieve cb-umi sequence # including sequences that are 'accidently' aligned to the genome
                                 # Check for Internal PolyA Priming 
                                 seq_after_softclipping = seq_r1_is_located_left[ int_length_softclipped_with_r1 : int_length_softclipped_with_r1 + int_len_window_internal_polyT ]
                                 int_length_internal_polyT = _detect_poly_t_length( seq_after_softclipping, int_len_window_internal_polyT, int_len_sliding_window_internal_polyT, float_min_T_fraction )
@@ -3519,6 +3532,7 @@ def LongExtractBarcodeFromBAM(
                             r.set_tags( l_tags ) # set tags
                             newsamfile.write( r ) # write the record to the output BAM file
                             
+                    """ report a batch has been completed """
                     pipe_sender.send( { 
                         'int_total_num_records_for_a_batch' : int_total_num_records_processed, # record the actual number of records processed for the batch
                         'l_cb_umi' : l_cb_umi,
@@ -3529,6 +3543,8 @@ def LongExtractBarcodeFromBAM(
                 # index the resulting BAM file
                 pysam.index( path_file_bam_preprocessed )
                 
+                """ report the worker has completed all works """
+                pipe_sender.send( 'completed' )  
                 if verbose:
                     logger.info(f"[Completed] all works completed (worker_id={str_uuid})")
 
@@ -3554,8 +3570,99 @@ def LongExtractBarcodeFromBAM(
                 post_process_batch=post_process_batch,
                 int_num_threads=n_threads
                 + 2,  # one thread for generating batch, another thread for post-processing of the batch
+                flag_wait_for_a_response_from_worker_after_sending_termination_signal = True, # wait until all worker exists before resuming works in the main process
             )
             
+            bk.PICKLE_Write( f"{path_folder_output}l_cb_umi.pickle", ns["l_cb_umi"] )# ❤️
+            
+            """ combine results into a single output BAM file """
+            path_file_bam_preprocessed = f"{path_folder_temp}preprocessed.bam"
+            pysam.merge( '--threads', str( min( n_threads, 10 ) ), '-c', '-p', path_file_bam_preprocessed, * glob.glob( f"{path_folder_temp}*.preprocessed.bam" ) ) # merge output BAM files
+            pysam.index( path_file_bam_preprocessed ) # index the input BAM file
+
+            """ 
+            Correct and Assign Cell Barcodes to Each Read
+            """
+            # internal settings
+            n_droplets = 100000 # number of droplets generated in 10X Chromium instruments (number of barcoded beads) - with sufficient margin
+            n_minimum_count_cb_before_correction = 2 # threshold for filtering cell barcodes before correction
+            ''' retrieve list of potentially valid barcodes '''
+            l_cb_umi = ns["l_cb_umi"]
+            # retrieve all cb sequence by its normal length, and count each unique cb
+            s_cb_count = pd.Series( bk.COUNTER( list( e[ : int_length_cb ] for e in l_cb_umi ) ) )
+            # filtering uncorrected cb
+            s_cb_count = s_cb_count[ s_cb_count >= n_minimum_count_cb_before_correction  ]
+            # sort uncorrected cb by their counts and only retrieve 'n_droplets' number of cell barcodes
+            if len( s_cb_count ) > n_droplets :
+                s_cb_count = s_cb_count.sort_values( ascending = False ).iloc[ : n_droplets ]
+            # drop invalid barcodes
+            s_cb_count = bk.Series_Subset( s_cb_count, set_valid_cb )
+            # retrieve a list of valid barcodes
+            l_cb_valid = s_cb_count.index.values
+
+            ''' 1) use pre-computed error-correcting dictionary to identify cell barcodes with 1 error '''
+            # build a list of possible errors for each base
+            dict_base_to_l_error = dict( )
+            for str_base in 'ATGC' :
+                l = [ '' ]
+                for str_base_error in 'ATGC' :
+                    l.append( str_base + str_base_error )
+                    if str_base != str_base_error :
+                        l.append( str_base_error )
+                dict_base_to_l_error[ str_base ] = l
+            # retrieve mapping between cb with error to error-free cb
+            dict_cb_with_error_to_cb = dict( ) 
+            for cb in l_cb_valid :
+                for pos in range( int_length_cb ) :
+                    str_base = cb[ pos ]
+                    for error in dict_base_to_l_error[ str_base ] :
+                        cb_with_error = STR.Replace_a_character_at_an_index( cb, pos, error )
+                        if cb_with_error in dict_cb_with_error_to_cb :
+                            dict_cb_with_error_to_cb[ cb_with_error ] = None # record collision
+                        else :
+                            dict_cb_with_error_to_cb[ cb_with_error ] = cb # record error-free cb for each cb with an introduced error
+            dict_cb_with_error_to_cb = dict( ( kmer, dict_cb_with_error_to_cb[ kmer ] ) for kmer in dict_cb_with_error_to_cb if dict_cb_with_error_to_cb[ kmer ] is not None )
+
+            ''' 2) Using varying number of kmer to identify cell barcodes with many number of errors '''
+            dict_len_kmer_to_kmer_from_cb_to_cb = dict( )
+            dict_len_kmer_to_kmer_from_cb_to_cb[ 'l_len_kmer' ] = list( range( int( np.floor( int_length_cb / 2 ) ), int_length_cb, 1 ) ) # length of kmer for cb identification
+            for int_length_kmer_for_cb_ident in dict_len_kmer_to_kmer_from_cb_to_cb[ 'l_len_kmer' ] :
+                dict_kmer_from_cb_to_cb = dict( )
+                for cb in l_cb_valid :
+                    for str_kmer in SEQ.Generate_Kmer( cb, int_length_kmer_for_cb_ident ) :
+                        if str_kmer in dict_kmer_from_cb_to_cb :
+                            dict_kmer_from_cb_to_cb[ str_kmer ] = None # record the occurrence of collision
+                        else :
+                            dict_kmer_from_cb_to_cb[ str_kmer ] = cb # record the cb from which the kmer was derived
+                dict_kmer_from_cb_to_cb = dict( ( kmer, dict_kmer_from_cb_to_cb[ kmer ] ) for kmer in dict_kmer_from_cb_to_cb if dict_kmer_from_cb_to_cb[ kmer ] is not None ) # remove the kmer that are containing collisions
+                dict_len_kmer_to_kmer_from_cb_to_cb[ int_length_kmer_for_cb_ident ] = dict_kmer_from_cb_to_cb
+            dict_len_kmer_to_kmer_from_cb_to_cb[ 'l_len_kmer' ] = sorted( dict_len_kmer_to_kmer_from_cb_to_cb[ 'l_len_kmer' ] )[ : : -1 ] # sort the list from largest kmer length to the smallest kmer length (for identifing cell barcode from which the current cb would likely to be derived from)
+
+            ''' define a function for correcting cb retrieved from reads using the different levels of dictionaries '''
+            def _correct_cell_barcode( cb_umi_padded : str ) :
+                """ # 2023-08-09 22:03:25 
+                correct a single cell barcode 
+                """
+                cb_corrected = np.nan # initialized to 'cb not found'
+                ''' 1) use pre-computed error-correcting dictionary to identify cell barcodes with 1 error '''
+                for cb_from_read in [ cb_umi_padded[ : int_length_cb ], cb_umi_padded[ : int_length_cb - 1 ], cb_umi_padded[ : int_length_cb + 1 ] ] :
+                    if cb_from_read in dict_cb_with_error_to_cb :
+                        cb_corrected = dict_cb_with_error_to_cb[ cb_from_read ]
+                        break
+                if not isinstance( cb_corrected, float ) : # if the correct cell barcode was assigned, return the result
+                    return cb_corrected
+                ''' 2) Using varying number of kmer to identify cell barcodes with many number of errors '''
+                cb_from_read = cb_umi_padded[ : int_length_cb ] # only consider 'int_length_cb' number of bases
+                for len_kmer in dict_len_kmer_to_kmer_from_cb_to_cb[ 'l_len_kmer' ] : # from largest kmer length to the smallest kmer length, identify cell barcode from which the current cb would likely to be derived from.
+                    dict_kmer_from_cb_to_cb = dict_len_kmer_to_kmer_from_cb_to_cb[ len_kmer ]
+                    for seq_kmer in SEQ.Generate_Kmer( cb_from_read, len_kmer ) :
+                        if seq_kmer in dict_kmer_from_cb_to_cb :
+                            cb_corrected = dict_kmer_from_cb_to_cb[ seq_kmer ]
+                            break
+                    if not isinstance( cb_corrected, float ) : # if the cell barcode were identified using the given length of kmer, skip the remaining correction process
+                        break
+                return cb_corrected
+
             """
             Re-analyze pre-processed BAM files
             """
@@ -3571,6 +3678,11 @@ def LongExtractBarcodeFromBAM(
                 if verbose:
                     logger.info(f"[Started] start working (worker_id={str_uuid})")
                     
+                """
+                Initiate workers for off-loading works for processing each batch
+                """
+                workers_for_batch_processing = bk.Offload_Works( 3 )  # 💛no limit for the number of works that can be submitted.
+                    
                 """ open output files """
                 path_file_bam_barcoded = f"{path_folder_temp}{str_uuid}.barcoded.bam"
                 with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
@@ -3580,7 +3692,7 @@ def LongExtractBarcodeFromBAM(
                     ins = pipe_receiver.recv()
                     if ins is None:
                         break
-                    path_file_bam_preprocessed = ins  # parse input
+                    name_contig = ins  # parse input
                     
                     """
                     define batch-specific function
@@ -3589,10 +3701,54 @@ def LongExtractBarcodeFromBAM(
                     """
                     open and process the input BAM file
                     """
-                    int_total_num_records_processed = 0
+                    int_max_bucket_deletion_count_before_reinitialize = 10000 # the max number of bucket deletion count before re-initializing the bucket container (python dictionary, when too many keys are deleted, lead to 'memory leak')
+                    ns = { 'int_total_num_records_processed' : 0, 'int_bucket_deletion_count' : 0 } # create a namespace for buckets # a counter counting the number of bucket deleted from 'dict_poly_a_site_to_l_l'. if the number exceed
+                    ns[ 'dict_poly_a_site_to_l_l' ] = dict( ) # a container to collect reads for alignment end position
+                    reference_name_current = None # initialize the current contig name
+                    
+                    set_e = set( )
+                    
+                    def _empty_bucket( t_poly_a_site ) :
+                        """ # 2023-08-10 21:21:29 
+                        empty bucket for the 't_poly_a_site' by clustering UMI of the reads of the bucket and write the reads to the output BAM file
+                        """
+                        l_l = ns[ 'dict_poly_a_site_to_l_l' ].pop( t_poly_a_site ) # remove the bucket
+                        ns[ 'int_bucket_deletion_count' ] += 1 # increase the counter
+                        
+                        if t_poly_a_site in set_e :
+                            logger.warn( f"{t_poly_a_site} already processed!" )
+                        set_e.add( t_poly_a_site )
+                        
+                        ''' if the number of deletion count exceed the deletion count, re-initialize the bucket container '''
+                        if ns[ 'int_bucket_deletion_count' ] > int_max_bucket_deletion_count_before_reinitialize :
+                            dict_poly_a_site_to_l_l = dict( ) # create a new dictionary for reinitialization
+                            for e in ns[ 'dict_poly_a_site_to_l_l' ] : # copy the dictionary
+                                dict_poly_a_site_to_l_l[ e ] = ns[ 'dict_poly_a_site_to_l_l' ][ e ]
+                            ns[ 'dict_poly_a_site_to_l_l' ] = dict_poly_a_site_to_l_l # reinitialize the container
+                            ns[ 'int_bucket_deletion_count' ] = 0 # reset the counter
+                            
+                        for r, dict_tags_existing, seq_cb_umi in l_l : # ❤️❤️❤️
+                            ns[ 'int_total_num_records_processed' ] += 1 # ❤️
+                            newsamfile.write( r ) # ❤️
+                    
                     with pysam.AlignmentFile( path_file_bam_preprocessed, 'rb' ) as samfile :
-                        for r in samfile.fetch( ) : # analyze all reads (since the pre-processed BAM file only contains valid reads that are already filtered)
-                            seq, cigartuples, flags = r.seq, r.cigartuples, r.flag # retrieve attributes
+                        logger.info( f"preprocessing for {name_contig} started" )
+                        for r in samfile.fetch( name_contig ) : # analyze all reads (since the pre-processed BAM file only contains valid reads that are already filtered) for the given chromosome
+                            seq, cigartuples, flags, reference_start, reference_name = r.seq, r.cigartuples, r.flag, r.reference_start, r.reference_name # retrieve attributes
+                            
+                            ''' process reads for each 'bucket' (reads with the same poly A tail attachment sites) '''
+                            ''' when the contig has changed, empty all buckets '''
+                            if reference_name_current != reference_name :  # retrieve a flag for emptying the buckets (when the contig changes)
+                                for t_poly_a_site in list( ns[ 'dict_poly_a_site_to_l_l' ] ) : # retrieve list of 't_poly_a_site'
+                                    _empty_bucket( t_poly_a_site )
+                                reference_name_current = reference_name # update the current contig name
+                                
+                            ''' determine whether to empty bucket or not, based on the current position on the sorted BAM file '''
+                            for t_poly_a_site in list( ns[ 'dict_poly_a_site_to_l_l' ] ) : # retrieve list of 't_poly_a_site'
+                                ''' whether poly A site is located at the left or the right side of the read, when the current position passes the poly A site, process the bucket '''
+                                flag_is_reverse_complemented, pos = t_poly_a_site # parse 't_poly_a_site'
+                                if pos < reference_start :
+                                    _empty_bucket( t_poly_a_site )
                                 
                             ''' process read '''
                             """
@@ -3606,21 +3762,43 @@ def LongExtractBarcodeFromBAM(
                             """
                             # check whether the read was reverse complemented
                             flag_is_reverse_complemented = _check_binary_flags( flags, 4 ) 
-
-
-                            ''' write the SAM record ''' 
-                            int_total_num_records_processed += 1
-                            newsamfile.write( r ) # write the record to the output BAM file
                             
+                            dict_tags_existing = dict( r.get_tags( ) ) # retrieve tags
+                            if 'CX' in dict_tags_existing :
+                                """ Correct the cell barcode sequence, and collect the read for UMI clustering """
+                                seq_cb_umi = dict_tags_existing[ 'CX' ] # retrieve cb_umi sequence
+                                cb_corrected = _correct_cell_barcode( seq_cb_umi ) # correct cell barcode
+
+                                if isinstance( cb_corrected, str ) : # if the conversion was successful
+                                    # add tags
+                                    l_tags = [ ("CB", cb_corrected, 'Z') ] 
+                                    r.set_tags( l_tags ) # set tags
+                                    
+                                ''' retrieve poly (A) tail attachment site (specific definition: the alignment 'end' position that are closer to the poly (A) tail) '''
+                                t_poly_a_site = ( flag_is_reverse_complemented, ( r.reference_start if flag_is_reverse_complemented else r.reference_end ) ) # retrieve a tuple indicating the aligned direction and poly A tail attachment position (alignment end position closer to the identified poly A tail)
+                                if t_poly_a_site not in ns[ 'dict_poly_a_site_to_l_l' ] : # initialize 'dict_poly_a_site_to_l_l' for 't_poly_a_site'
+                                    ns[ 'dict_poly_a_site_to_l_l' ][ t_poly_a_site ] = [ ]
+                                ns[ 'dict_poly_a_site_to_l_l' ][ t_poly_a_site ].append( [ r, dict_tags_existing, seq_cb_umi ] )
+                            else :
+                                ''' write the SAM record (record that does not contain the cell barcode - UMI sequence) ''' 
+                                ns[ 'int_total_num_records_processed' ] += 1
+                                newsamfile.write( r ) # write the record to the output BAM file
+                            
+                    """ report a batch has been completed """
                     pipe_sender.send( { 
-                        'int_total_num_records_for_a_batch' : int_total_num_records_processed, # record the actual number of records processed for the batch
+                        'int_total_num_records_for_a_batch' : ns[ 'int_total_num_records_processed' ], # record the actual number of records processed for the batch
                     } )  # report the number of processed records
 
                 """ close output files """
                 newsamfile.close( )
+                # sort the output sam file
+                path_file_bam_barcoded_sorted = f"{path_folder_temp}{str_uuid}.barcoded.sorted.bam"
+                pysam.sort( "-o", path_file_bam_barcoded_sorted, '-@', str( min( n_threads, 5 ) ), path_file_bam_barcoded )
                 # index the resulting BAM file
-                pysam.index( path_file_bam_barcoded )
+                pysam.index( path_file_bam_barcoded_sorted )
                 
+                """ report the worker has completed all works """
+                pipe_sender.send( 'completed' )  
                 if verbose:
                     logger.info(f"[Completed] all works completed (worker_id={str_uuid})")
 
@@ -3639,11 +3817,12 @@ def LongExtractBarcodeFromBAM(
             if verbose:
                 logger.info( f"[{path_file_bam_input}] the analysis pipeline will be run with {n_threads} number of threads" )
             bk.Multiprocessing_Batch_Generator_and_Workers(
-                gen_batch=iter( glob.glob( f"{path_folder_temp}*.preprocessed.bam" ) ), # analyze each pre-processed BAM file
+                gen_batch = iter( SAM.Get_contig_names_from_bam_header( path_file_bam_preprocessed ) ), # analyze the pre-processed BAM file for each chromosome
                 process_batch=process_batch,
                 post_process_batch=post_process_batch,
                 int_num_threads=n_threads
                 + 2,  # one thread for generating batch, another thread for post-processing of the batch
+                flag_wait_for_a_response_from_worker_after_sending_termination_signal = True, # wait until all worker exists before resuming works in the main process
             )
 
             """ 
@@ -3657,7 +3836,8 @@ def LongExtractBarcodeFromBAM(
                 
                 # combine results into a single output file (initial read analysis)
                 """ combine results into a single output BAM file """
-                pysam.merge( '--threads', str( min( n_threads, 10 ) ), '-c', '-p', f"{path_folder_output}barcoded.bam", * glob.glob( f"{path_folder_temp}*.barcoded.bam" ) ) # merge output BAM files
+                logger.info( f"number of files:{len(glob.glob( f'{path_folder_temp}*.barcoded.sorted.bam' ))}" )
+                pysam.merge( '--threads', str( min( n_threads, 10 ) ), '-c', '-p', f"{path_folder_output}barcoded.bam", * glob.glob( f"{path_folder_temp}*.barcoded.sorted.bam" ) ) # merge output BAM files
                 pysam.index( f"{path_folder_output}barcoded.bam" ) # index the input BAM file
                 
                 # write a flag indicating that the processing has been completed
@@ -3665,7 +3845,7 @@ def LongExtractBarcodeFromBAM(
                     newfile.write( 'completed' )
 
                 # delete temporary files
-                shutil.rmtree( path_folder_temp )
+                # shutil.rmtree( path_folder_temp, ignore_errors = True )
                     
                 release_lock()  # release the lock
                 logger.info(
@@ -3709,11 +3889,15 @@ def ourotools(str_mode=None, **dict_args):
     )
     if flag_usage_from_command_line_interface:
         str_mode = sys.argv[1]
-        if str_mode == "longfilternsplit":
-            longfilternsplit(flag_usage_from_command_line_interface=True)
+        if str_mode == "LongFilterNSplit":
+            LongFilterNSplit(flag_usage_from_command_line_interface=True)
+        elif str_mode == "LongExtractBarcodeFromBAM":
+            LongExtractBarcodeFromBAM(flag_usage_from_command_line_interface=True)
     else:
-        if str_mode == "longfilternsplit":
-            longfilternsplit(**dict_args)
+        if str_mode == "LongFilterNSplit":
+            LongFilterNSplit(**dict_args)
+        elif str_mode == "LongExtractBarcodeFromBAM":
+            LongExtractBarcodeFromBAM(**dict_args)
 
 
 if __name__ == "__main__":

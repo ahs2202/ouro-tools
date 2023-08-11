@@ -1232,10 +1232,11 @@ def Multiprocessing_Batch_Generator_and_Workers(
     gen_batch,
     process_batch,
     post_process_batch=None,
-    int_num_threads=15,
-    int_num_seconds_to_wait_before_identifying_completed_processes_for_a_loop=0.2,
+    int_num_threads : int =15,
+    int_num_seconds_to_wait_before_identifying_completed_processes_for_a_loop : float = 0.2,
+    flag_wait_for_a_response_from_worker_after_sending_termination_signal : bool = True, # wait until all worker exists before resuming works in the main process
 ):
-    """# 2022-09-06 16:49:30
+    """# 2023-08-11 23:00:16 
     'Multiprocessing_Batch_Generator_and_Workers' : multiprocessing using batch generator and workers.
     all worker process will be started using the default ('fork' in UNIX) method.
     perform batch-based multiprocessing using the three components, (1) gen_batch, (2) process_batch, (3) post_process_batch. (3) will be run in the main process, while (1) and (2) will be offloaded to worker processes.
@@ -1246,9 +1247,8 @@ def Multiprocessing_Batch_Generator_and_Workers(
     'post_process_batch( result )' : a function that can process return value from 'process_batch' function in the main process. operations that are not thread/process-safe can be done here, as these works will be serialized in the main thread.
     'int_num_threads' : the number of threads(actually processes) including the main process. For example, when 'int_num_threads' is 3, 2 worker processes will be used. one thread is reserved for batch generation.
     'int_num_seconds_to_wait_before_identifying_completed_processes_for_a_loop' : number of seconds to wait for each loop before checking which running processes has been completed
+    flag_wait_for_a_response_from_worker_after_sending_termination_signal : bool = True, # wait until all worker exists before resuming works in the main process
     """
-    from collections import deque as collections_deque
-    from multiprocessing import Pipe, Process
 
     def __batch_generating_worker(
         gen_batch,
@@ -1262,7 +1262,7 @@ def Multiprocessing_Batch_Generator_and_Workers(
         # hard coded setting
         int_max_num_batches_in_a_queue_for_each_worker = 2
 
-        q_batch = collections_deque()  # initialize queue of batchs
+        q_batch = collections.deque()  # initialize queue of batchs
         int_num_batch_processing_workers = len(l_pipe_sender_input)
         flag_batch_generation_completed = False  # flag indicating whether generating batchs for the current input sam file was completed
         arr_num_batch_being_processed = np.zeros(
@@ -1330,15 +1330,17 @@ def Multiprocessing_Batch_Generator_and_Workers(
         1, int_num_threads - 2
     )  # retrieve the number of workers for processing batches # minimum number of worker is 1
     # compose pipes
-    l_pipes_input = list(Pipe() for i in range(int_num_batch_processing_workers))
-    l_pipes_output = list(Pipe() for i in range(int_num_batch_processing_workers))
-    pipe_sender_output_to_main_process, pipe_receiver_output_to_main_process = Pipe()
+    l_pipes_input = list(mp.Pipe() for i in range(int_num_batch_processing_workers))
+    l_pipes_output = list(mp.Pipe() for i in range(int_num_batch_processing_workers))
+    pipe_sender_output_to_main_process, pipe_receiver_output_to_main_process = mp.Pipe()
     # compose workers
     l_batch_processing_workers = list(
-        Process(target=process_batch, args=(l_pipes_input[i][1], l_pipes_output[i][0]))
+        mp.Process(
+            target=process_batch, args=(l_pipes_input[i][1], l_pipes_output[i][0])
+        )
         for i in range(int_num_batch_processing_workers)
     )  # compose a list of batch processing workers
-    p_batch_generating_worker = Process(
+    p_batch_generating_worker = mp.Process(
         target=__batch_generating_worker,
         args=(
             gen_batch,
@@ -1361,6 +1363,12 @@ def Multiprocessing_Batch_Generator_and_Workers(
             post_process_batch(
                 res
             )  # process the result returned by the 'process_batch' function in the 'MAIN PROCESS', serializing potentially not thread/process-safe operations in the main thread.
+    
+    # if 'flag_wait_for_a_response_from_worker_after_sending_termination_signal' is True, wait until a response is received from the worker
+    if flag_wait_for_a_response_from_worker_after_sending_termination_signal :
+        for s, r in l_pipes_output : # pipe receiving responses from batch workers
+            r.recv( )
+
 
 
 def Multiprocessing(
@@ -1974,3 +1982,10 @@ def FASTQ_Read(
                 e.split(" ", 1)[0][1:] for e in df_fq.readname.values
             )  # retrieve qname
         return df_fq
+
+def Series_Subset(s, set_index):
+    """# 2021-08-01 19:10:01
+    subset index of a given series using a given set of index 'index'"""
+    if not isinstance(set_index, set):
+        set_index = set(set_index)
+    return s[list(True if e in set_index else False for e in s.index.values)]
