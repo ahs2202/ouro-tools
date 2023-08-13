@@ -1496,7 +1496,7 @@ def Multiprocessing(
 
 
 class Offload_Works:
-    """# 2023-01-07 12:13:13
+    """# 2023-08-12 16:59:52 
     a class for offloading works in a separate server process without blocking the main process. similar to async. methods, but using processes instead of threads.
 
     int_max_num_workers : Union[ int, None ] = None # maximum number of worker processes. if the maximum number of works are offloaded, submitting a new work will fail. By default, there will be no limit of the number of worker processes
@@ -1518,6 +1518,13 @@ class Offload_Works:
             dict()
         )  # a dictionary that store the completed results of submitted works until it is retrieved.
 
+    @property
+    def is_worker_available(self) :
+        """ # 2023-08-12 15:42:56 
+        return a binary flag indicating whether a worker is available
+        """
+        return self.int_num_active_workers != self.int_max_num_workers
+        
     @property
     def int_num_active_workers(self):
         """# 2023-01-07 12:30:24
@@ -1551,20 +1558,21 @@ class Offload_Works:
         for str_uuid_work in list(self._dict_worker):
             worker = self._dict_worker[str_uuid_work]
             if worker["pipe_receiver"].poll():
-                self._dict_res[str_uuid_work] = worker[
-                    "pipe_receiver"
-                ].recv()  # collect and store the result
+                self._dict_res[str_uuid_work] = worker[ "get_result" ]( ) # collect and store the result
                 worker["process"].join()  # dismiss the worker process
                 del self._dict_worker[str_uuid_work]  # delete the record of the worker
                 int_num_collected_results += 1
             del worker
         return int_num_collected_results
 
-    def submit_work(self, func, args: tuple = (), kwargs: dict = dict()):
-        """# 2023-01-07 12:21:23
+    def submit_work(self, func, args: tuple = (), kwargs: dict = dict(), associated_data = None ):
+        """# 2023-08-12 16:59:57 
         submit a work
 
         return a 'str_uuid_work' that identify the submitted work. the id will be used to check the status of the work and retrieve the result of the work
+        associated_data = None # a data object associated with the work. the data will be returned with the result returned by the function as a dictionary using the following format:
+            { 'result' : res, 'associated_data' : associated_data }
+            If None is given, simply the result returned by the function will be returned.
         """
         # raise error when already the maximum number of workers are working
         if (
@@ -1580,6 +1588,10 @@ class Offload_Works:
 
         # initialize a worker process
         worker = dict()
+        # add 'associated_data'
+        if associated_data is not None :
+            worker[ 'associated_data' ] = associated_data
+        
         # create a pipe for communication
         pipe_sender, pipe_receiver = mp.Pipe()
         worker["pipe_receiver"] = pipe_receiver
@@ -1590,6 +1602,12 @@ class Offload_Works:
 
         worker["process"] = mp.Process(target=__worker, args=(pipe_sender,))
         worker["process"].start()  # start the work
+        
+        # define a function to get result
+        def __get_result( ) :
+            res = worker[ "pipe_receiver" ].recv()
+            return res if associated_data is None else { 'result' : res, 'associated_data' : associated_data }
+        worker["get_result"] = __get_result
 
         str_uuid_work = uuid.uuid4().hex  # assign uuid to the current work
         self._dict_worker[str_uuid_work] = worker
@@ -1615,9 +1633,7 @@ class Offload_Works:
         # if the work currently active, wait until the work is completed and collect the result
         if str_uuid_work in self._dict_worker:
             worker = self._dict_worker[str_uuid_work]  # retrieve the worker
-            self._dict_res[str_uuid_work] = worker[
-                "pipe_receiver"
-            ].recv()  # wait until the result become available and collect and store the result
+            self._dict_res[str_uuid_work] =  worker[ "get_result" ]( ) # wait until the result become available and collect and store the result
             worker["process"].join()  # dismiss the worker process
             del self._dict_worker[str_uuid_work]  # delete the record of the worker
 
@@ -1634,14 +1650,20 @@ class Offload_Works:
         if str_uuid_work in self._dict_res:
             return self._dict_res.pop(str_uuid_work)
 
-    def wait_all(self):
-        """# 2023-01-07 13:26:58
+    def wait_all(self, flag_return_results : bool = False):
+        """# 2023-08-12 15:54:11 
         wait all works to be completed.
+        flag_return_results : bool = False # wait for all submitted works, and return results as a dictionary
         """
         self.collect_results()  # collect the completed results
 
         for str_uuid_work in list(self._dict_worker):  # for each uncompleted work
             self.wait(str_uuid_work)  # wait until the work is completed
+            
+        if flag_return_results : # return the results
+            dict_result = self._dict_res # return all results
+            self._dict_res = dict( ) # initialize the internal container for saving dictionary results
+            return dict_result
 
 
 def OS_Run(

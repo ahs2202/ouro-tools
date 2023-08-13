@@ -3420,11 +3420,10 @@ def LongExtractBarcodeFromBAM(
                                 except StopIteration : # once all reads were analyzed, exit the loop
                                     break
                                     
-                                if ns_batch[ 'end__reference_start' ] != r.reference_start :
+                                if ns_batch[ 'end__reference_start' ] != r.reference_start : # when the 'reference_start' position changes, finish the batch
                                     break
                                 
                                 ns_batch[ 'int_num_reads_encountered_for_a_batch' ] += 1 # increase the counter
-                            logger.info( f"{ns_batch} yield" ) # ❤️
                             yield ns_batch # yield the batch
                             ns_batch = { 'int_num_reads_encountered_for_a_batch' : 1 } # initialize the counter
                             ns_batch[ 'start__reference_name' ] = r.reference_name
@@ -3556,7 +3555,7 @@ def LongExtractBarcodeFromBAM(
                 ns["int_num_records_with_cb_umi"] += len( res["l_cb_umi"] ) # update ns["int_num_records_with_cb_umi"]
                 ns["l_cb_umi"] += res["l_cb_umi"]
                 logger.info(
-                    f"[{path_file_bam_input}] total {ns[ 'int_num_read_currently_processed' ]} number of reads has been processed. CB/UMI sequence identification rate is {np.round(ns['int_num_records_with_cb_umi'] / ns['int_num_read_currently_processed'], 2 )}"
+                    f"[{path_file_bam_input}] total {ns[ 'int_num_read_currently_processed' ]} number of reads has been processed. CB/UMI sequence identification rate is {np.round(ns['int_num_records_with_cb_umi'] / ns['int_num_read_currently_processed'], 2 ) if ns['int_num_read_currently_processed'] > 0 else np.nan}"
                 )  # report
                     
             """
@@ -3638,7 +3637,7 @@ def LongExtractBarcodeFromBAM(
                 dict_len_kmer_to_kmer_from_cb_to_cb[ int_length_kmer_for_cb_ident ] = dict_kmer_from_cb_to_cb
             dict_len_kmer_to_kmer_from_cb_to_cb[ 'l_len_kmer' ] = sorted( dict_len_kmer_to_kmer_from_cb_to_cb[ 'l_len_kmer' ] )[ : : -1 ] # sort the list from largest kmer length to the smallest kmer length (for identifing cell barcode from which the current cb would likely to be derived from)
 
-            ''' define a function for correcting cb retrieved from reads using the different levels of dictionaries '''
+            ''' define a function for correcting CB sequences retrieved from reads using the different levels of dictionaries '''
             def _correct_cell_barcode( cb_umi_padded : str ) :
                 """ # 2023-08-09 22:03:25 
                 correct a single cell barcode 
@@ -3662,6 +3661,46 @@ def LongExtractBarcodeFromBAM(
                     if not isinstance( cb_corrected, float ) : # if the cell barcode were identified using the given length of kmer, skip the remaining correction process
                         break
                 return cb_corrected
+            
+            ''' define a function for correcting UMI sequences retrieved from reads using the k-mer-based linear clustering methods '''
+            def _cluster_umi( l_umi_for_clustering : list ) :
+                """ # 2023-08-12 18:44:33 
+                cluster UMI sequences of a single cell barcode
+                """
+                ''' handle simple cases '''
+                if len( l_umi_for_clustering ) <= 1 : # does not perform UMI clustering when the number of given UMI sequences is <= 1
+                    return l_umi_for_clustering
+                
+                ''' perform UMI clustering '''
+                # cluster umi with extracted k-mer
+                dict_cluster = SEQ.Cluster_with_Kmer( dict_seq_count = bk.COUNTER( l_umi_for_clustering ), int_min_n_overlap_kmer = int_min_n_overlap_kmer_for_clustering_umi, len_kmer = int_len_kmer_for_clustering_umi, float_min_proportion_read_to_select_kmer_representative = float_min_proportion_read_to_select_kmer_representative_for_clustering_umi )
+
+                ''' retrieve a representative UMI sequence for each cluster based on the frequency, and replace the UMI sequences of the cluster with the representative sequence of the cluster '''
+                dict_seq_umi_to_str_name_umi_cluster = dict( ) # retrieve mapping
+                for id_c in dict_cluster : # for each cluster
+                    c = dict_cluster[ id_c ] # retrieve the cluster
+                    # set the seq_umi with the largest count as a name of current umi cluster
+                    str_name_umi_cluster, _ = bk.DICTIONARY_Find_Max( c[ 'seq_count' ] )
+                    # assign the current umi cluster name to the umi sequences belonging to the current cluster
+                    for seq_umi in c[ 'seq_count' ] :
+                        dict_seq_umi_to_str_name_umi_cluster[ seq_umi ] = str_name_umi_cluster
+
+                l_umi_corrected = list( dict_seq_umi_to_str_name_umi_cluster[ umi_uncorrected ] for umi_uncorrected in l_umi_for_clustering )
+                return l_umi_corrected
+            
+            def _index_array( l_index : list ) :
+                """ # 2023-08-12 20:46:39 
+                return a dictionary where key = unique value of 'l_index' and value = list of integer indices of the entries that are equal to the unique value.
+                Of note, ignore 'float' type values, including np.nan values.
+                """
+                dict_index = dict( )
+                for i, index in enumerate( l_index ) :
+                    if isinstance( index, float ) :
+                        continue
+                    if index not in dict_index :
+                        dict_index[ index ] = [ ]
+                    dict_index[ index ].append( i )
+                return dict_index
 
             """
             Re-analyze pre-processed BAM files
@@ -3681,7 +3720,9 @@ def LongExtractBarcodeFromBAM(
                 """
                 Initiate workers for off-loading works for processing each batch
                 """
-                workers_for_batch_processing = bk.Offload_Works( 3 )  # 💛no limit for the number of works that can be submitted.
+                int_num_workers_for_bucket_processing = 3 # the number of workers for bucket processing
+                workers_for_bucket_processing = bk.Offload_Works( int_num_workers_for_bucket_processing )  # 💛no limit for the number of works that can be submitted.
+                int_min_num_reads_in_a_bucket_for_parallel_processing = 100 # minimum number of reads in a bucket for offloaded in a worker processs
                     
                 """ open output files """
                 path_file_bam_barcoded = f"{path_folder_temp}{str_uuid}.barcoded.bam"
@@ -3706,8 +3747,57 @@ def LongExtractBarcodeFromBAM(
                     ns[ 'dict_poly_a_site_to_l_l' ] = dict( ) # a container to collect reads for alignment end position
                     reference_name_current = None # initialize the current contig name
                     
-                    set_e = set( )
+                    set_e = set( ) # ❤️
                     
+                    def _process_bucket( l_seq_cb_umi ) :
+                        """ # 2023-08-12 15:34:56 
+                        process reads in a bucket, and return the reads
+                        """
+                        """ Correct the cell barcode sequence, and collect the read for UMI clustering """
+                        l_cb = [ ]
+                        for seq_cb_umi in l_seq_cb_umi : # retrieve cb_umi sequence
+                            cb_corrected = _correct_cell_barcode( seq_cb_umi ) # correct cell barcode
+                            l_cb.append( cb_corrected )
+                            
+                        ''' retrieve UMI sequence (uncertain boundaries, might contain more or less bases than the actual sequenced UMI sequence) '''
+                        l_umi_uncorrected = [ ]
+                        for seq_cb_umi, cb_assigned in zip( l_seq_cb_umi, l_cb ) :
+                            l_umi_uncorrected.append( np.nan if isinstance( cb_assigned, float ) else seq_cb_umi[ int_length_cb : ] )
+                        
+                        
+                        if len( l_umi_uncorrected ) <= 1 : # if there is less than 2 umi sequences, clustering is not required.
+                            ''' handle simple cases '''
+                            l_umi_corrected = l_umi_uncorrected
+                        else :
+                            l_umi_uncorrected = np.array( l_umi_uncorrected, dtype = object ) # convert to numpy array
+                            l_umi_corrected = np.zeros( len( l_umi_uncorrected ), dtype = object ) # initialize an empty array
+                            # l_umi = l_umi_uncorrected
+                            ''' cluster UMI sequences for each cell barcodes '''
+                            dict_index = _index_array( l_cb ) # index cell barcode values
+                            for cb in dict_index :
+                                l_index = dict_index[ cb ] # retrieve indices of the entries for the current cell barcode
+                                l_umi_corrected[ l_index ] = _cluster_umi( l_umi_uncorrected[ l_index ] )
+                        return l_cb, l_umi_corrected, l_umi_uncorrected
+
+                    def _write_processed_bucket( res, l_l ) :
+                        """ # 2023-08-12 16:11:02 
+                        write the result of the processed bucket 
+                        """
+                        l_cb, l_umi_corrected, l_umi_uncorrected = res # parse the result
+                        ns[ 'int_total_num_records_processed' ] += len( l_l ) # update 'int_total_num_records_processed'
+                        for str_cb, str_umi_corrected, str_umi_uncorrected, t_r_and_tags in zip( l_cb, l_umi_corrected, l_umi_uncorrected, l_l ) : # save the sam records to the file
+                            # parse records
+                            r, dict_tags_existing = t_r_and_tags
+                            if isinstance( str_cb, str ) : # if valid cell barcode was assigned, add tags to the reads
+                                r.set_tags( [ ( 'CB', str_cb, 'Z' ), ( 'UB', str_umi_corrected, 'Z' ), ( 'UR', str_umi_uncorrected, 'Z' ) ] )
+                            newsamfile.write( r ) 
+
+                    def _write_results_from_offloaded_works( ) :
+                        """ # 2023-08-12 21:57:27 
+                        """
+                        for res in workers_for_bucket_processing.wait_all( flag_return_results = True ).values( ) : # wait for all submitted works to be completed, and retrieve results for each work
+                            _write_processed_bucket( res[ 'result' ], res[ 'associated_data' ] ) # save the sam records to the file
+                            
                     def _empty_bucket( t_poly_a_site ) :
                         """ # 2023-08-10 21:21:29 
                         empty bucket for the 't_poly_a_site' by clustering UMI of the reads of the bucket and write the reads to the output BAM file
@@ -3715,9 +3805,9 @@ def LongExtractBarcodeFromBAM(
                         l_l = ns[ 'dict_poly_a_site_to_l_l' ].pop( t_poly_a_site ) # remove the bucket
                         ns[ 'int_bucket_deletion_count' ] += 1 # increase the counter
                         
-                        if t_poly_a_site in set_e :
-                            logger.warn( f"{t_poly_a_site} already processed!" )
-                        set_e.add( t_poly_a_site )
+                        if t_poly_a_site in set_e : # ❤️
+                            logger.warn( f"{t_poly_a_site} already processed!" ) # ❤️
+                        set_e.add( t_poly_a_site ) # ❤️
                         
                         ''' if the number of deletion count exceed the deletion count, re-initialize the bucket container '''
                         if ns[ 'int_bucket_deletion_count' ] > int_max_bucket_deletion_count_before_reinitialize :
@@ -3726,16 +3816,20 @@ def LongExtractBarcodeFromBAM(
                                 dict_poly_a_site_to_l_l[ e ] = ns[ 'dict_poly_a_site_to_l_l' ][ e ]
                             ns[ 'dict_poly_a_site_to_l_l' ] = dict_poly_a_site_to_l_l # reinitialize the container
                             ns[ 'int_bucket_deletion_count' ] = 0 # reset the counter
-                            
-                        for r, dict_tags_existing, seq_cb_umi in l_l : # ❤️❤️❤️
-                            ns[ 'int_total_num_records_processed' ] += 1 # ❤️
-                            newsamfile.write( r ) # ❤️
+
+                        ''' correct CB / cluster UMI sequences and save results to the file '''
+                        l_seq_cb_umi = list( dict_tags_existing[ 'CX' ] for r, dict_tags_existing in l_l ) # retrieve 'l_seq_cb_umi'
+                        int_num_reads_in_a_bucket = len( l_l ) # retrieve the number of reads in a bucket
+                        if int_num_reads_in_a_bucket < int_min_num_reads_in_a_bucket_for_parallel_processing : # 
+                            _write_processed_bucket( _process_bucket( l_seq_cb_umi ), l_l ) # process a bucket in the current process, without offloading, and save the sam records to the file
+                        else :
+                            if not workers_for_bucket_processing.is_worker_available : # if all workers are working, wait for a while until workers are idle
+                                _write_results_from_offloaded_works( ) # flush results from offloaded computations
+                            workers_for_bucket_processing.submit_work( _process_bucket, args = ( l_seq_cb_umi, ), associated_data = l_l ) # submit the work for offloading (append 'l_r' as the data associated with the work)
                     
                     with pysam.AlignmentFile( path_file_bam_preprocessed, 'rb' ) as samfile :
-                        logger.info( f"preprocessing for {name_contig} started" )
                         for r in samfile.fetch( name_contig ) : # analyze all reads (since the pre-processed BAM file only contains valid reads that are already filtered) for the given chromosome
                             seq, cigartuples, flags, reference_start, reference_name = r.seq, r.cigartuples, r.flag, r.reference_start, r.reference_name # retrieve attributes
-                            
                             ''' process reads for each 'bucket' (reads with the same poly A tail attachment sites) '''
                             ''' when the contig has changed, empty all buckets '''
                             if reference_name_current != reference_name :  # retrieve a flag for emptying the buckets (when the contig changes)
@@ -3764,26 +3858,22 @@ def LongExtractBarcodeFromBAM(
                             flag_is_reverse_complemented = _check_binary_flags( flags, 4 ) 
                             
                             dict_tags_existing = dict( r.get_tags( ) ) # retrieve tags
-                            if 'CX' in dict_tags_existing :
-                                """ Correct the cell barcode sequence, and collect the read for UMI clustering """
-                                seq_cb_umi = dict_tags_existing[ 'CX' ] # retrieve cb_umi sequence
-                                cb_corrected = _correct_cell_barcode( seq_cb_umi ) # correct cell barcode
-
-                                if isinstance( cb_corrected, str ) : # if the conversion was successful
-                                    # add tags
-                                    l_tags = [ ("CB", cb_corrected, 'Z') ] 
-                                    r.set_tags( l_tags ) # set tags
-                                    
+                            if 'CX' in dict_tags_existing : # if cb_umi sequence is present
                                 ''' retrieve poly (A) tail attachment site (specific definition: the alignment 'end' position that are closer to the poly (A) tail) '''
                                 t_poly_a_site = ( flag_is_reverse_complemented, ( r.reference_start if flag_is_reverse_complemented else r.reference_end ) ) # retrieve a tuple indicating the aligned direction and poly A tail attachment position (alignment end position closer to the identified poly A tail)
                                 if t_poly_a_site not in ns[ 'dict_poly_a_site_to_l_l' ] : # initialize 'dict_poly_a_site_to_l_l' for 't_poly_a_site'
                                     ns[ 'dict_poly_a_site_to_l_l' ][ t_poly_a_site ] = [ ]
-                                ns[ 'dict_poly_a_site_to_l_l' ][ t_poly_a_site ].append( [ r, dict_tags_existing, seq_cb_umi ] )
+                                ns[ 'dict_poly_a_site_to_l_l' ][ t_poly_a_site ].append( [ r, dict_tags_existing ] )
                             else :
                                 ''' write the SAM record (record that does not contain the cell barcode - UMI sequence) ''' 
                                 ns[ 'int_total_num_records_processed' ] += 1
                                 newsamfile.write( r ) # write the record to the output BAM file
                             
+                        ''' when all reads of the contig were read, empty all buckets '''
+                        for t_poly_a_site in list( ns[ 'dict_poly_a_site_to_l_l' ] ) : # retrieve list of 't_poly_a_site'
+                            _empty_bucket( t_poly_a_site )
+                        _write_results_from_offloaded_works( ) # flush results from offloaded computations
+
                     """ report a batch has been completed """
                     pipe_sender.send( { 
                         'int_total_num_records_for_a_batch' : ns[ 'int_total_num_records_processed' ], # record the actual number of records processed for the batch
@@ -3836,7 +3926,6 @@ def LongExtractBarcodeFromBAM(
                 
                 # combine results into a single output file (initial read analysis)
                 """ combine results into a single output BAM file """
-                logger.info( f"number of files:{len(glob.glob( f'{path_folder_temp}*.barcoded.sorted.bam' ))}" )
                 pysam.merge( '--threads', str( min( n_threads, 10 ) ), '-c', '-p', f"{path_folder_output}barcoded.bam", * glob.glob( f"{path_folder_temp}*.barcoded.sorted.bam" ) ) # merge output BAM files
                 pysam.index( f"{path_folder_output}barcoded.bam" ) # index the input BAM file
                 
