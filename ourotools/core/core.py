@@ -2846,8 +2846,7 @@ def LongFilterNSplit(
                 ] :
                     bk.OS_Run( [ 'cat' ] + glob.glob( f"{path_folder_temp}*.{name_file}" ), stdout_binary = True, path_file_stdout = f"{path_folder_output}{name_file}" )
                     
-
-                # draw plots 
+                ''' draw plots '''
                 # plot settings
                 int_max_molecule_size_plot = 10000
                 for name_cat_dist in _initialize_dict_arr_dist( ) : # for each category
@@ -2856,7 +2855,8 @@ def LongFilterNSplit(
                         plt.plot( np.arange( min( int_max_molecule_size_plot, len_max_molecule_size_data ) ), ns[ 'dict_arr_dist' ][ name_cat_dist ] if len_max_molecule_size_data <= int_max_molecule_size_plot else ns[ 'dict_arr_dist' ][ name_cat_dist ][ : int_max_molecule_size_plot ] )
                         plt.title( f"{name_cat_dist} ({ns[ 'dict_arr_dist' ][ name_cat_dist ].sum( )} molecules)" )
                         bk.MPL_SAVE( f"{name_cat_dist}.distribution", folder = path_folder_graph, l_format=['.pdf', '.png'] )
-                    
+                
+                ''' export pickle files '''
                 # write distribution data as a pickle file
                 bk.PICKLE_Write( f"{path_folder_output}dict_arr_dist.pkl", ns[ 'dict_arr_dist' ] )
                     
@@ -2916,9 +2916,10 @@ def LongExtractBarcodeFromBAM(
     int_min_n_overlap_kmer_for_clustering_umi : int = 1, # the minimum number of overlapped kmer for initiating UMI clustering 
     int_len_kmer_for_clustering_umi : int = 7, # the length of kmer for clustering UMI
     float_min_proportion_read_to_select_kmer_representative_for_clustering_umi : float = 0.75, # if the given proportion of UMI contains the kmer, include the kmer in a set of kmers representing the UMI clusters.
+    int_size_bin_in_base_pairs_for_collecting_size_distributions_at_single_cell_level : int = 50, # the size of the bin (in base pairs) for collecting size distributions at the single-cell level
     verbose: bool = True,
 ) -> None :
-    """# 2023-07-30 16:10:37 
+    """# 2023-08-14 23:44:22 
     
     flag_usage_from_command_line_interface: bool = False, # a flag indicating the usage in the command line
     l_path_file_bam_input: Union[list, None] = None, # list of input BAM files
@@ -2941,6 +2942,7 @@ def LongExtractBarcodeFromBAM(
     int_min_n_overlap_kmer_for_clustering_umi : int = 1, # the minimum number of overlapped kmer for initiating UMI clustering 
     int_len_kmer_for_clustering_umi : int = 7, # the length of kmer for clustering UMI
     float_min_proportion_read_to_select_kmer_representative_for_clustering_umi : float = 0.75, # if the given proportion of UMI contains the kmer, include the kmer in a set of kmers representing the UMI clusters.
+    int_size_bin_in_base_pairs_for_collecting_size_distributions_at_single_cell_level : int = 50, # the size of the bin (in base pairs) for collecting size distributions at the single-cell level
     verbose: bool = True,
     
     returns None
@@ -3051,6 +3053,9 @@ def LongExtractBarcodeFromBAM(
         arg_grp_umi_clustering.add_argument( "-L", "--int_len_kmer_for_clustering_umi", help = "(default: 7) the length of kmer for clustering UMI", type = int, default = 7 )
         arg_grp_umi_clustering.add_argument( "-P", "--float_min_proportion_read_to_select_kmer_representative_for_clustering_umi", help = "(default: 0.75) if the given proportion of UMI contains the kmer, include the kmer in a set of kmers representing the UMI clusters.", type = float, default = 0.75 )
         
+        arg_grp_size_distribution = parser.add_argument_group("Collecting Molecule Length Distributions")
+        arg_grp_size_distribution.add_argument( "-B", "--int_size_bin_in_base_pairs_for_collecting_size_distributions_at_single_cell_level", help = "(default: 50) the size of the bin (in base pairs) for collecting size distributions at the single-cell level", type = int, default = 50 )
+        
         args = parser.parse_args( )
 
         l_path_file_bam_input = args.l_path_file_bam_input
@@ -3074,6 +3079,7 @@ def LongExtractBarcodeFromBAM(
         int_min_n_overlap_kmer_for_clustering_umi = args.int_min_n_overlap_kmer_for_clustering_umi
         int_len_kmer_for_clustering_umi = args.int_len_kmer_for_clustering_umi
         float_min_proportion_read_to_select_kmer_representative_for_clustering_umi = args.float_min_proportion_read_to_select_kmer_representative_for_clustering_umi
+        int_size_bin_in_base_pairs_for_collecting_size_distributions_at_single_cell_level = args.int_size_bin_in_base_pairs_for_collecting_size_distributions_at_single_cell_level
 
     """
     Start of the pipeline
@@ -3758,12 +3764,15 @@ def LongExtractBarcodeFromBAM(
             
             ''' define a function for correcting UMI sequences retrieved from reads using the k-mer-based linear clustering methods '''
             def _cluster_umi( l_umi_for_clustering : list ) :
-                """ # 2023-08-12 18:44:33 
-                cluster UMI sequences of a single cell barcode
+                """ # 2023-08-14 23:49:02 
+                cluster UMI sequences of a single cell barcode, and return the lists of corrected UMI sequences and the number of duplicated UMIs for the corrected UMI sequence.
                 """
                 ''' handle simple cases '''
                 if len( l_umi_for_clustering ) <= 1 : # does not perform UMI clustering when the number of given UMI sequences is <= 1
-                    return l_umi_for_clustering
+                    if len( l_umi_for_clustering ) == 1 :
+                        return l_umi_for_clustering, [ 1 ]
+                    else :
+                        return [ ], [ ]
                 
                 ''' perform UMI clustering '''
                 # cluster umi with extracted k-mer
@@ -3771,16 +3780,20 @@ def LongExtractBarcodeFromBAM(
 
                 ''' retrieve a representative UMI sequence for each cluster based on the frequency, and replace the UMI sequences of the cluster with the representative sequence of the cluster '''
                 dict_seq_umi_to_str_name_umi_cluster = dict( ) # retrieve mapping
+                dict_seq_umi_to_int_num_duplicated_umis = dict( ) # for retrival of umi duplication levels
                 for id_c in dict_cluster : # for each cluster
                     c = dict_cluster[ id_c ] # retrieve the cluster
                     # set the seq_umi with the largest count as a name of current umi cluster
                     str_name_umi_cluster, _ = bk.DICTIONARY_Find_Max( c[ 'seq_count' ] )
                     # assign the current umi cluster name to the umi sequences belonging to the current cluster
+                    int_num_duplicated_umis = c["n_seq"] # retrieve the total number of molecules in the cluster
                     for seq_umi in c[ 'seq_count' ] :
                         dict_seq_umi_to_str_name_umi_cluster[ seq_umi ] = str_name_umi_cluster
+                        dict_seq_umi_to_int_num_duplicated_umis[ seq_umi ] = int_num_duplicated_umis
 
-                l_umi_corrected = list( dict_seq_umi_to_str_name_umi_cluster[ umi_uncorrected ] for umi_uncorrected in l_umi_for_clustering )
-                return l_umi_corrected
+                l_umi_corrected = list( dict_seq_umi_to_str_name_umi_cluster[ umi_uncorrected ] for umi_uncorrected in l_umi_for_clustering ) # retrieve list of corrected UMI sequences
+                l_num_duplicated_umis = list( dict_seq_umi_to_int_num_duplicated_umis[ umi_uncorrected ] for umi_uncorrected in l_umi_for_clustering ) # retrieve list of number of duplicated UMIs
+                return l_umi_corrected, l_num_duplicated_umis
             
             def _index_array( l_index : list ) :
                 """ # 2023-08-12 20:46:39 
@@ -3795,6 +3808,29 @@ def LongExtractBarcodeFromBAM(
                         dict_index[ index ] = [ ]
                     dict_index[ index ].append( i )
                 return dict_index
+            
+            def _combine_dictionary_of_size_distributions( dict_arr_dist_existing : dict, dict_arr_dist_new : dict ) :
+                """ # 2023-08-14 18:27:36 
+                combine two 'dict_arr_dist' object
+                """
+                for e in set( dict_arr_dist_existing ).intersection( dict_arr_dist_new ) : # for existing keys in the container
+                    dict_arr_dist_existing[ e ] = _combine_size_distribution( dict_arr_dist_existing[ e ], dict_arr_dist_new[ e ] ) # update the distribution
+                for e in set( dict_arr_dist_new ).difference( dict_arr_dist_existing ) : # new keys that do not exist in the container
+                    dict_arr_dist_existing[ e ] = dict_arr_dist_new[ e ] # copy distribution of a new key to existing container
+                return dict_arr_dist_existing
+            
+            def _batch_update_dictionary_of_size_distributions( dict_arr_dist : dict, dict_l_len : dict ) :
+                """ # 2023-08-14 18:27:36 
+                dict_arr_dist : dict 
+                dict_l_len : dict
+                
+                update size distributions in 'dict_arr_dist' using the list of sizes in 'dict_l_len'
+                """
+                for e in set( dict_arr_dist ).intersection( dict_l_len ) : # for existing keys in the container
+                    dict_arr_dist[ e ] = _batch_update_size_distribution( l_new_size = dict_l_len[ e ], arr_dist = dict_arr_dist[ e ] ) # update the distribution
+                for e in set( dict_l_len ).difference( dict_arr_dist ) : # new keys that do not exist in the container
+                    dict_arr_dist[ e ] = _batch_update_size_distribution( l_new_size = dict_l_len[ e ], arr_dist = None ) # create a new distribution
+                return dict_arr_dist
 
             """
             Re-analyze pre-processed BAM files
@@ -3816,7 +3852,6 @@ def LongExtractBarcodeFromBAM(
                 """
                 int_num_workers_for_bucket_processing = 3 # the number of workers for bucket processing
                 workers_for_bucket_processing = bk.Offload_Works( int_num_workers_for_bucket_processing )  # 💛 adjustment of the number of workers might be needed.
-                int_min_num_reads_in_a_bucket_for_parallel_processing = 100 # minimum number of reads in a bucket for offloaded in a worker processs
                     
                 """ open output files """
                 path_file_bam_barcoded = f"{path_folder_temp}{str_uuid}.barcoded.bam"
@@ -3837,13 +3872,11 @@ def LongExtractBarcodeFromBAM(
                     open and process the input BAM file
                     """
                     int_max_bucket_deletion_count_before_reinitialize = 10000 # the max number of bucket deletion count before re-initializing the bucket container (python dictionary, when too many keys are deleted, lead to 'memory leak')
+                    int_max_num_records_in_a_batch_of_buckets = 10000 # initialize the total number of records in a batch of buckets
                     ns = { 'int_total_num_records_processed' : 0, 'int_bucket_deletion_count' : 0 } # create a namespace for buckets # a counter counting the number of bucket deleted from 'dict_poly_a_site_to_l_l'. if the number exceed
                     ns[ 'dict_poly_a_site_to_l_l' ] = dict( ) # a container to collect reads for alignment end position
-                    ns[ 'l_buckets' ] = [ ] # a container of the list of buckets
-                    ns[ 'int_total_num_records_in_a_batch' ] = 0 # initialize the total number of records in a batch
                     ns[ 'dict_arr_dist' ] = _initialize_dict_arr_dist( ) # initialize 'dict_arr_dist'
-                    ns[ 'dict_arr_len_single_cell_level' ] = dict( ) 
-
+                    ns[ 'dict_arr_dist_single_cell_level' ] = dict( ) 
 
                     reference_name_current = None # initialize the current contig name
                     
@@ -3877,46 +3910,103 @@ def LongExtractBarcodeFromBAM(
                         'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__above1024', # 20
                     ] # list of distribution types
                     """
-                    def _process_bucket( l_dict_tags_existing ) :
-                        """ # 2023-08-12 15:34:56 
+                    def _process_buckets( l_l_dict_tags_existing ) :
+                        """ # 2023-08-14 15:46:16 
                         process reads in a bucket, and return the reads (for offloading)
                         """
-                        l_seq_cb_umi = list( dict_tags[ 'CU' ] for dict_tags in l_dict_tags_existing ) # retrieve 'l_seq_cb_umi'
-                        """ Correct the cell barcode sequence, and collect the read for UMI clustering """
-                        l_cb = [ ]
-                        for seq_cb_umi in l_seq_cb_umi : # retrieve cb_umi sequence
-                            cb_corrected = _correct_cell_barcode( seq_cb_umi ) # correct cell barcode
-                            l_cb.append( cb_corrected )
-                            
-                        ''' retrieve raw UMI sequence (uncertain boundaries, might contain more or less bases than the actual sequenced UMI sequence) '''
-                        l_umi_uncorrected = [ ]
-                        for seq_cb_umi, cb_assigned in zip( l_seq_cb_umi, l_cb ) :
-                            l_umi_uncorrected.append( np.nan if isinstance( cb_assigned, float ) else seq_cb_umi[ int_length_cb : ] )
-                        
-                        ''' correct UMI sequences '''
-                        if len( l_umi_uncorrected ) <= 1 : # if there is less than 2 umi sequences, clustering is not required.
-                            ''' handle simple cases '''
-                            l_umi_corrected = l_umi_uncorrected
-                        else :
-                            l_umi_uncorrected = np.array( l_umi_uncorrected, dtype = object ) # convert to numpy array
-                            l_umi_corrected = np.zeros( len( l_umi_uncorrected ), dtype = object ) # initialize an empty array
-                            # l_umi = l_umi_uncorrected
-                            ''' cluster UMI sequences for each cell barcodes '''
-                            dict_index = _index_array( l_cb ) # index cell barcode values
-                            for cb in dict_index :
-                                l_index = dict_index[ cb ] # retrieve indices of the entries for the current cell barcode
-                                l_umi_corrected[ l_index ] = _cluster_umi( l_umi_uncorrected[ l_index ] )
-                        
-                        ''' classify read and collect molecule size  '''
+                        # initialize
+                        l_cb_combined, l_umi_corrected_combined, l_umi_uncorrected_combined = [ ], [ ], [ ] # lists that will contain values of all buckets
                         # initialize 
                         l_l_len = list( [ ] for _ in range( len( l_name_type_dist ) ) ) # each list represents the list of lengths for each type of distribution in the same order
                         dict_arr_len_single_cell_level = dict( )
-                        for dict_tags_existing, cb, umi_corrected in zip( l_dict_tags_existing, l_cb, l_umi_corrected ) :
-                            l_l_len[ 0 ].append( dict_tags_existing[ 'LE' ] )
-                        dict_arr_len = dict( (n, l) for n, l in zip( l_name_type_dist, l_l_len ) if len( l ) > 0 ) # compose 'dict_arr_len' # include the list only when list is not empty
-                        return l_cb, l_umi_corrected, l_umi_uncorrected, dict_arr_len, dict_arr_len_single_cell_level
+                        ''' iterate each bucket '''
+                        for l_dict_tags_existing in l_l_dict_tags_existing : # analyze all the reads belonging to each bucket as a group.
+                            l_seq_cb_umi = list( dict_tags[ 'CU' ] for dict_tags in l_dict_tags_existing ) # retrieve 'l_seq_cb_umi'
+                            """ Correct the cell barcode sequence, and collect the read for UMI clustering """
+                            l_cb = [ ]
+                            for seq_cb_umi in l_seq_cb_umi : # retrieve cb_umi sequence
+                                cb_corrected = _correct_cell_barcode( seq_cb_umi ) # correct cell barcode
+                                l_cb.append( cb_corrected )
 
-                    def _post_process_bucket( res, l_l ) :
+                            ''' retrieve raw UMI sequence (uncertain boundaries, might contain more or less bases than the actual sequenced UMI sequence) '''
+                            l_umi_uncorrected = [ ]
+                            for seq_cb_umi, cb_assigned in zip( l_seq_cb_umi, l_cb ) :
+                                l_umi_uncorrected.append( np.nan if isinstance( cb_assigned, float ) else seq_cb_umi[ int_length_cb : ] )
+
+                            ''' correct UMI sequences '''
+                            if len( l_umi_uncorrected ) <= 1 : # if there is less than 2 umi sequences, clustering is not required.
+                                ''' handle simple cases '''
+                                l_umi_corrected = l_umi_uncorrected
+                                l_num_duplicated_umis = np.ones( len( l_umi_corrected ), dtype = int ) # number of duplication UMIs is 1 in this simple case
+                            else :
+                                l_umi_uncorrected = np.array( l_umi_uncorrected, dtype = object ) # convert to numpy array
+                                l_umi_corrected = np.zeros( len( l_umi_uncorrected ), dtype = object ) # initialize empty arrays
+                                l_num_duplicated_umis = np.zeros( len( l_umi_uncorrected ), dtype = object ) 
+                                # l_umi = l_umi_uncorrected
+                                ''' cluster UMI sequences for each cell barcodes '''
+                                dict_index = _index_array( l_cb ) # index cell barcode values
+                                for cb in dict_index :
+                                    l_index = dict_index[ cb ] # retrieve indices of the entries for the current cell barcode
+                                    l_umi_corrected[ l_index ], l_num_duplicated_umis[ l_index ] = _cluster_umi( l_umi_uncorrected[ l_index ] ) # perform UMI clustering
+
+                            ''' classify read and collect molecule size (before deduplication) '''
+                            dict_cb_umi_to_max_length = dict( ) # mapping for recording max molecule size for each unique cb-umi pair (since the smaller molecules with a UMI are likely fragments of the larger molecule with the same UMIs)
+                            for dict_tags_existing, cb, umi_corrected, int_num_duplicated_umis in zip( l_dict_tags_existing, l_cb, l_umi_corrected, l_num_duplicated_umis ) :
+                                int_molecule_size = dict_tags_existing[ 'LE' ] # molecule size excluding adaptors (only genomic regions covered by the read are counted)
+                                l_l_len[ 0 ].append( int_molecule_size ) # 'aligned_to_genome', # 0
+
+                                # retrieve flags for classifications
+                                flag_R1 = dict_tags_existing[ 'XR' ] > -1
+                                flag_TSO = dict_tags_existing[ 'XT' ] > -1
+                                if flag_R1 and flag_TSO : 
+                                    l_l_len[ 1 ].append( int_molecule_size ) # 'aligned_to_genome__R1__TSO', # 1 
+                                elif flag_TSO : 
+                                    l_l_len[ 2 ].append( int_molecule_size ) # 'aligned_to_genome__no_R1__TSO', # 2 
+                                elif flag_R1 : 
+                                    l_l_len[ 3 ].append( int_molecule_size ) # 'aligned_to_genome__R1__no_TSO', # 3 
+                                else : 
+                                    l_l_len[ 4 ].append( int_molecule_size ) # 'aligned_to_genome__no_R1__no_TSO', # 4 
+                                
+                                if flag_R1 : # only when R1 adaptor was found
+                                    flag_valid_CB = isinstance( cb, str ) # retrieve a flag indicating a valid cell barcode has been detected
+                                    
+                                    if not flag_valid_CB : 
+                                        l_l_len[ 5 ].append( int_molecule_size ) # 'aligned_to_genome__R1__no_valid_CB', # 5
+                                    else : # if valid CB was detected
+                                        l_l_len[ 6 ].append( int_molecule_size ) # 'aligned_to_genome__R1__valid_CB', # 6
+                                        int_length_internal_polyA = dict_tags_existing[ 'IA' ] # retrieve the length of the detected internal poly A
+                                        if int_length_internal_polyA > 0 : # when internal poly(A) tract has been detected
+                                            l_l_len[ 7 ].append( int_molecule_size ) # 'aligned_to_genome__R1__valid_CB__internal_polyA', # 7
+                                        else :
+                                            l_l_len[ 8 ].append( int_molecule_size ) # 'aligned_to_genome__R1__valid_CB__no_internal_polyA', # 8
+                                        l_l_len[ min( 10 + math.floor( math.log2( int_num_duplicated_umis ) ), 20 ) ].append( int_molecule_size ) # 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__1', # 10 ~ # 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__above1024', # 20
+                                        seq_cb_umi = cb + umi_corrected # compose cb-umi combination
+                                        # collect max molecule size for each unique cb-umi pair
+                                        if seq_cb_umi in dict_cb_umi_to_max_length : # if cb-umi pair already exist
+                                            if int_molecule_size > dict_cb_umi_to_max_length[ seq_cb_umi ] : # check whether 'int_molecule_size' is larger than the record max molecule size
+                                                dict_cb_umi_to_max_length[ seq_cb_umi ] = int_molecule_size # and update the max molecule size if needed
+                                        else :
+                                            dict_cb_umi_to_max_length[ seq_cb_umi ] = int_molecule_size # cb-umi pair does not exist, add the current molecule size
+                                        
+                            ''' classify read and collect molecule size (after deduplication, bulk-level) '''
+                            l_l_len[ 9 ].extend( list( dict_cb_umi_to_max_length.values( ) ) ) # 'aligned_to_genome__R1__valid_CB__UMI_deduplicated', # 9
+                            
+                            ''' classify read and collect molecule size (after deduplication, single-cell level)  '''
+                            for cb_umi in dict_cb_umi_to_max_length : # for each cb-umi pair
+                                int_molecule_size = dict_cb_umi_to_max_length[ cb_umi ] # retrieve the molecule size
+                                cb = cb_umi[ : int_length_cb ] # retrieve cell barcode
+                                if cb not in dict_arr_len_single_cell_level : # if the list for the current cell barcode does not exist, initialize the list
+                                    dict_arr_len_single_cell_level[ cb ] = [ ]
+                                dict_arr_len_single_cell_level[ cb ].append( math.floor( int_molecule_size / int_size_bin_in_base_pairs_for_collecting_size_distributions_at_single_cell_level ) ) # record molecule size at single-cell level
+                                
+                            ''' collect the CB/UMI correction results '''
+                            l_cb_combined.extend( l_cb )
+                            l_umi_corrected_combined.extend( l_umi_corrected )
+                            l_umi_uncorrected_combined.extend( l_umi_uncorrected )
+                        dict_arr_len = dict( (n, l) for n, l in zip( l_name_type_dist, l_l_len ) if len( l ) > 0 ) # compose 'dict_arr_len' # include the list only when list is not empty
+                        return l_cb_combined, l_umi_corrected_combined, l_umi_uncorrected_combined, dict_arr_len, dict_arr_len_single_cell_level
+
+                    def _post_process_buckets( res, l_l ) :
                         """ # 2023-08-12 16:11:02 
                         perform post-processing of the bucket analysis result
                         (1) write the result of the processed bucket and (2) update the summary metrics using the analysis result of the bucket.
@@ -3933,17 +4023,30 @@ def LongExtractBarcodeFromBAM(
                                 r.set_tags( l_tags )
                             newsamfile.write( r ) 
                         ''' update distributions '''
-                        dict_arr_dist = ns[ 'dict_arr_dist' ]
-                        for name_type_dist in dict_arr_len :
-                            dict_arr_dist[ name_type_dist ] = _batch_update_size_distribution( l_new_size = dict_arr_len[ name_type_dist ], arr_dist = dict_arr_dist[ name_type_dist ] ) # update distributions
-                        ns[ 'dict_arr_dist' ] = dict_arr_dist
-#                         ns[ 'dict_arr_len_single_cell_level' ]
+                        ns[ 'dict_arr_dist_single_cell_level' ] = _batch_update_dictionary_of_size_distributions( dict_arr_dist = ns[ 'dict_arr_dist_single_cell_level' ], dict_l_len = dict_arr_len_single_cell_level ) # update single-cell distributions
+                        ns[ 'dict_arr_dist' ] = _batch_update_dictionary_of_size_distributions( dict_arr_dist = ns[ 'dict_arr_dist' ], dict_l_len = dict_arr_len ) # update bulk-level distributions
 
                     def _write_results_from_offloaded_works( ) :
                         """ # 2023-08-12 21:57:27 
                         """
                         for res in workers_for_bucket_processing.wait_all( flag_return_results = True ).values( ) : # wait for all submitted works to be completed, and retrieve results for each work
-                            _post_process_bucket( res[ 'result' ], res[ 'associated_data' ] ) # save the sam records to the file
+                            _post_process_buckets( res[ 'result' ], res[ 'associated_data' ] ) # save the sam records to the file
+                    
+                    def _initialize_a_batch_of_buckets( ) :
+                        """ # 2023-08-14 16:24:10 
+                        """
+                        ns[ 'l_l_dict_tags_existing' ] = [ ] # a container of the list of buckets
+                        ns[ 'l_l' ] = [ ] # a container of the data associated with the list of buckets
+                        ns[ 'int_total_num_records_in_a_batch_of_buckets' ] = 0 # initialize the total number of records in a batch of buckets
+                        
+                    def _flush_the_current_batch_of_buckets( ) :
+                        """ # 2023-08-14 16:27:15 
+                        flush the current batch of buckets
+                        """
+                        if not workers_for_bucket_processing.is_worker_available : # if all workers are working, wait for a while until workers are idle
+                            _write_results_from_offloaded_works( ) # flush results from offloaded computations
+                        workers_for_bucket_processing.submit_work( _process_buckets, args = ( ns[ 'l_l_dict_tags_existing' ], ), associated_data = ns[ 'l_l' ] ) # submit the work for offloading (append the list of pysam objects as the data associated with the work) # flush the current batch of the buckets
+                        _initialize_a_batch_of_buckets( ) # initialize the next batch of the buckets
                     
                     def _empty_bucket( t_poly_a_site ) :
                         """ # 2023-08-10 21:21:29 
@@ -3965,15 +4068,14 @@ def LongExtractBarcodeFromBAM(
                             ns[ 'int_bucket_deletion_count' ] = 0 # reset the counter
 
                         ''' correct CB / cluster UMI sequences and save results to the file '''
-                        l_dict_tags_existing = list( dict_tags_existing for r, dict_tags_existing in l_l ) # exclude pysam data objects (cannot be pickled)
-                        int_num_reads_in_a_bucket = len( l_l ) # retrieve the number of reads in a bucket
-                        if int_num_reads_in_a_bucket < int_min_num_reads_in_a_bucket_for_parallel_processing : # 
-                            _post_process_bucket( _process_bucket( l_dict_tags_existing ), l_l ) # process a bucket in the current process, without offloading, and save the sam records to the file
-                        else :
-                            if not workers_for_bucket_processing.is_worker_available : # if all workers are working, wait for a while until workers are idle
-                                _write_results_from_offloaded_works( ) # flush results from offloaded computations
-                            workers_for_bucket_processing.submit_work( _process_bucket, args = ( l_dict_tags_existing, ), associated_data = l_l ) # submit the work for offloading (append 'l_r' as the data associated with the work)
+                        ns[ 'l_l_dict_tags_existing' ].append( list( dict_tags_existing for r, dict_tags_existing in l_l ) ) # exclude pysam data objects (cannot be pickled) # add bucket to the batch
+                        ns[ 'l_l' ].extend( l_l ) # append associated data
+                        ns[ 'int_total_num_records_in_a_batch_of_buckets' ] += len( l_l ) # update the number of reads in a batch
+                        if ns[ 'int_total_num_records_in_a_batch_of_buckets' ] > int_max_num_records_in_a_batch_of_buckets : # if the number of records in the batch of buckets exceed the limit, flush the current batch
+                            _flush_the_current_batch_of_buckets( ) # flush the current batch of the buckets
+                            _initialize_a_batch_of_buckets( ) # initialize the next batch of the buckets
                     
+                    _initialize_a_batch_of_buckets( ) # initialize the first batch of the buckets
                     with pysam.AlignmentFile( path_file_bam_preprocessed, 'rb' ) as samfile :
                         for r in samfile.fetch( name_contig ) : # analyze all reads (since the pre-processed BAM file only contains valid reads that are already filtered) for the given chromosome
                             seq, cigartuples, flags, reference_name, reference_start, reference_end = r.seq, r.cigartuples, r.flag, r.reference_name, r.reference_start, r.reference_end # retrieve attributes
@@ -4017,16 +4119,17 @@ def LongExtractBarcodeFromBAM(
                                 newsamfile.write( r ) # write the record to the output BAM file
                                 ns[ 'dict_arr_dist' ][ 'aligned_to_genome' ] = _update_size_distribution( new_size = dict_tags_existing[ 'LE' ], arr_dist = ns[ 'dict_arr_dist' ][ 'aligned_to_genome' ] ) # update distributions # ❤️❤️❤️❤️❤️
                             
-                        ''' when all reads of the contig were read, empty all buckets '''
+                        ''' when all reads of the contig were read, empty all buckets and flush the batch, and wait until all computation has been completed '''
                         for t_poly_a_site in list( ns[ 'dict_poly_a_site_to_l_l' ] ) : # retrieve list of 't_poly_a_site'
                             _empty_bucket( t_poly_a_site )
+                        _flush_the_current_batch_of_buckets( ) # flush the last batch of the buckets
                         _write_results_from_offloaded_works( ) # flush results from offloaded computations
 
                     """ report a batch has been completed """
                     pipe_sender.send( { 
                         'int_total_num_records_for_a_batch' : ns[ 'int_total_num_records_processed' ], # record the actual number of records processed for the batch
                         'dict_arr_dist' : ns[ 'dict_arr_dist' ], # return results
-                        'dict_arr_len_single_cell_level' : ns[ 'dict_arr_len_single_cell_level' ], 
+                        'dict_arr_len_single_cell_level' : ns[ 'dict_arr_dist_single_cell_level' ], 
                     } )  # report the number of processed records
 
                 """ close output files """
@@ -4053,15 +4156,9 @@ def LongExtractBarcodeFromBAM(
                 logger.info( f"[{path_file_bam_input}] total {ns[ 'int_num_read_currently_processed' ]} number of reads has been processed." ) # report
                 
                 # combine distributions (bulk)
-                for name_cat_dist in l_name_type_dist : # for each category
-                    ns[ 'dict_arr_dist' ][ name_cat_dist ] = _combine_size_distribution( ns[ 'dict_arr_dist' ][ name_cat_dist ], res[ 'dict_arr_dist' ][ name_cat_dist ] ) # combine and update the global distributions
+                ns[ 'dict_arr_dist' ] = _combine_dictionary_of_size_distributions( dict_arr_dist_existing = ns[ 'dict_arr_dist' ], dict_arr_dist_new = res[ 'dict_arr_dist' ] ) # combine and update the global distributions (bulk-level)
                 # combine distributions (single-cell)
-                dict_existing, dict_new = ns[ 'dict_arr_dist_single_cell_level' ], res[ 'dict_arr_len_single_cell_level' ]
-                for cb in set( dict_existing ).intersection( dict_new ) : # for existing cells in the container
-                    dict_existing[ cb ] = _combine_size_distribution( dict_existing[ cb ], dict_new[ cb ] ) # update the distribution
-                for cb in set( dict_new ).difference( dict_existing ) : # new cells that do not exist in the container
-                    dict_existing[ cb ] = dict_new[ cb ] # copy distribution of new cel to existing container
-                ns[ 'dict_arr_dist_single_cell_level' ] = dict_existing # update the container
+                ns[ 'dict_arr_dist_single_cell_level' ] = _combine_dictionary_of_size_distributions( dict_arr_dist_existing = ns[ 'dict_arr_dist_single_cell_level' ], dict_arr_dist_new = res[ 'dict_arr_len_single_cell_level' ] ) # update the container
                     
                 logger.info( f"[{path_file_bam_input}] total {np.sum(ns[ 'dict_arr_dist' ][ 'aligned_to_genome' ])} number of reads has been processed. (recalculation using 'dict_arr_dist')" ) # report
                     
@@ -4092,6 +4189,21 @@ def LongExtractBarcodeFromBAM(
                 """ combine results into a single output BAM file """
                 pysam.merge( '--threads', str( min( n_threads, 10 ) ), '-c', '-p', f"{path_folder_output}barcoded.bam", * glob.glob( f"{path_folder_temp}*.barcoded.sorted.bam" ) ) # merge output BAM files
                 pysam.index( f"{path_folder_output}barcoded.bam" ) # index the input BAM file
+                
+                ''' draw plots '''
+                # plot settings
+                int_max_molecule_size_plot = 10000
+                for name_cat_dist in _initialize_dict_arr_dist( ) : # for each category
+                    if ns[ 'dict_arr_dist' ][ name_cat_dist ] is not None :
+                        len_max_molecule_size_data = len( ns[ 'dict_arr_dist' ][ name_cat_dist ] ) # retrieve max molecule size 
+                        plt.plot( np.arange( min( int_max_molecule_size_plot, len_max_molecule_size_data ) ), ns[ 'dict_arr_dist' ][ name_cat_dist ] if len_max_molecule_size_data <= int_max_molecule_size_plot else ns[ 'dict_arr_dist' ][ name_cat_dist ][ : int_max_molecule_size_plot ] )
+                        plt.title( f"{name_cat_dist} ({ns[ 'dict_arr_dist' ][ name_cat_dist ].sum( )} molecules)" )
+                        bk.MPL_SAVE( f"{name_cat_dist}.distribution", folder = path_folder_graph, l_format=['.pdf', '.png'] )
+                
+                ''' export pickle files '''
+                # write distribution data as pickle files
+                bk.PICKLE_Write( f"{path_folder_output}dict_arr_dist.pkl", ns[ 'dict_arr_dist' ] )
+                bk.PICKLE_Write( f"{path_folder_output}dict_arr_dist_single_cell_level.pkl", ns[ 'dict_arr_dist_single_cell_level' ] )
                 
                 # write a flag indicating that the processing has been completed
                 with open( f"{path_folder_output}pipeline_completed.txt", 'w' ) as newfile :
