@@ -15,6 +15,14 @@ import subprocess
 import shutil
 import csv
 import intervaltree
+from multiprocessing import (
+    Pool,
+    get_context,
+    set_start_method,
+)  # for multiple processing  # with get_context("spawn").Pool() as pool:
+import multiprocessing
+import multiprocessing as mp
+import collections
 
 def MPL_SAVE(fig_name, l_format=[".pdf", ".png"], close_fig=True, **dict_save_fig):
     """With the given 'fig_name', save fiqures in both svg and png format
@@ -198,6 +206,20 @@ def DICTIONARY_Build_from_arr(arr, order_index_entry=True, index_start=0):
             for entry, index in zip(arr, np.arange(index_start, len(arr) + index_start))
         )
 
+def DICTIONARY_Find_Max(dict_value):  # 2020-07-29 23:55:58
+    """find key value with the maximum value in a given dictionary, and return 'key_max', 'value_max'"""
+    if len(dict_value) == 0:
+        return None, None  # if an empty dictionary is given, return None
+    key_max = next(
+        dict_value.__iter__()
+    )  # retrieve the a key and value from the dictionary as an initial key-value pair with 'max' value
+    value_max = dict_value[key_max]
+    for key in dict_value:
+        value = dict_value[key]
+        if value_max < value:
+            key_max = key
+            value_max = value
+    return key_max, value_max
 
 def UUID():
     """return a 128bit universal unique identifier"""

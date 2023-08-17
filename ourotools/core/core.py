@@ -1988,6 +1988,91 @@ def _combine_size_distribution( arr_dist_1, arr_dist_2 ) :
         arr_dist_2[ : len_arr_dist_1 ] += arr_dist_1
         return arr_dist_2
 
+def _index_array( l_index : list ) :
+    """ # 2023-08-12 20:46:39 
+    return a dictionary where key = unique value of 'l_index' and value = list of integer indices of the entries that are equal to the unique value.
+    Of note, ignore 'float' type values, including np.nan values.
+    """
+    dict_index = dict( )
+    for i, index in enumerate( l_index ) :
+        if isinstance( index, float ) :
+            continue
+        if index not in dict_index :
+            dict_index[ index ] = [ ]
+        dict_index[ index ].append( i )
+    return dict_index
+
+def _combine_dictionary_of_size_distributions( dict_arr_dist_existing : dict, dict_arr_dist_new : dict ) :
+    """ # 2023-08-14 18:27:36 
+    combine two 'dict_arr_dist' object
+    """
+    for e in set( dict_arr_dist_existing ).intersection( dict_arr_dist_new ) : # for existing keys in the container
+        dict_arr_dist_existing[ e ] = _combine_size_distribution( dict_arr_dist_existing[ e ], dict_arr_dist_new[ e ] ) # update the distribution
+    for e in set( dict_arr_dist_new ).difference( dict_arr_dist_existing ) : # new keys that do not exist in the container
+        dict_arr_dist_existing[ e ] = dict_arr_dist_new[ e ] # copy distribution of a new key to existing container
+    return dict_arr_dist_existing
+
+def _batch_update_dictionary_of_size_distributions( dict_arr_dist : dict, dict_l_len : dict ) :
+    """ # 2023-08-14 18:27:36 
+    dict_arr_dist : dict 
+    dict_l_len : dict
+
+    update size distributions in 'dict_arr_dist' using the list of sizes in 'dict_l_len'
+    """
+    for e in set( dict_arr_dist ).intersection( dict_l_len ) : # for existing keys in the container
+        dict_arr_dist[ e ] = _batch_update_size_distribution( l_new_size = dict_l_len[ e ], arr_dist = dict_arr_dist[ e ] ) # update the distribution
+    for e in set( dict_l_len ).difference( dict_arr_dist ) : # new keys that do not exist in the container
+        dict_arr_dist[ e ] = _batch_update_size_distribution( l_new_size = dict_l_len[ e ], arr_dist = None ) # create a new distribution
+    return dict_arr_dist
+    
+def _get_df_bar( dict_arr_dist : dict, l_name_type_dist : Union[ list, None ] = None, int_size_bin_in_base_pairs : int = 50, int_max_size_in_base_pairs : int = 7500 ) :
+    """ # 2023-08-15 15:42:39 
+    compose a dataframe containing summarized distributions
+    """
+    # set default values
+    if l_name_type_dist is None : # if 'l_name_type_dist' is None, use all key values of the given 'dict_arr_dist'
+        l_name_type_dist = list( dict_arr_dist )
+    
+    int_max_length = math.ceil( max( len( dict_arr_dist[ e ] ) for e in l_name_type_dist if dict_arr_dist[ e ] is not None ) / int_size_bin_in_base_pairs ) * int_size_bin_in_base_pairs # retrieve max length size of the distributions (should be multiple of 'int_size_bin_in_base_pairs')
+    l_arr = [ ]
+    for e in l_name_type_dist :
+        ''' compose array of distribution '''
+        arr = np.zeros( int_max_length, dtype = int )
+        arr_dist = dict_arr_dist[ e ]
+        if arr_dist is not None : # if 'arr_dist' is not empty copy the 'arr_dist' to the array
+            arr[ : len( arr_dist ) ] = arr_dist
+
+        ''' summarize and clip the distribution '''
+        arr = arr.reshape( ( int( int_max_length / int_size_bin_in_base_pairs ), int_size_bin_in_base_pairs ) ).sum( axis = 1 ) # summarize distribution
+        arr = arr[ : math.ceil( int_max_size_in_base_pairs / int_size_bin_in_base_pairs ) ] # clip distribution
+
+        l_arr.append( arr )
+    df_bar = pd.DataFrame( np.vstack( l_arr ), index = l_name_type_dist, columns = np.arange( 1, len( l_arr[ 0 ] ) + 1, dtype = int ) * int_size_bin_in_base_pairs )
+    return df_bar
+
+def _draw_bar_plot( df_bar, l_status : list, title : str = '', y_format : str = ':.3f', flag_save_figure : bool = False, path_folder_graph : Union[ str, None ] = None ) :
+    ''' # 2023-08-15 15:44:40 
+    draw barplot for the given 'df_bar'
+    Return plotly fig
+    maximum number of l_status (unique color will be assigned to each) is 56
+    '''
+    import plotly.express as px
+    import plotly.graph_objects as go
+    x = df_bar.columns.values # retrieve x categories
+    l_color = px.colors.qualitative.Dark24 + px.colors.qualitative.Pastel2 + px.colors.qualitative.Light24 # retrieve unique colors for each status # plotly express can draw barplot more easily, but for annotating each status with the same color annotation, for loop with go.Bar will be used instead
+    set_valid_status = set( df_bar.index.values ) # retrieve a set of valid status
+    l_go = list( go.Bar( x = x, y = df_bar.loc[ str_status ].values, name = str_status, marker_color = str_color, hovertemplate = 'size_bin: <b>%{x}</b><br><br>proportion: <b>%{y' + y_format + '}</b>' ) for str_status, str_color in zip( l_status, l_color ) if str_status in set_valid_status ) # retrieve graph object for each valid str_status
+
+    # compose a bar plot
+    fig = go.Figure( l_go[ 0 ] )
+    for go_bar in l_go[ 1 : ] :
+        fig.add_trace( go_bar )
+    fig.update_layout( barmode = 'stack', xaxis = { 'categoryorder' : 'category ascending' }, title_text = title )
+    if flag_save_figure and path_folder_graph is not None :
+        fig.write_html( f"{path_folder_graph}distribution.bar.{title}.html" ) # write HTML file
+    else :
+        return fig
+    
 def LongFilterNSplit(
     flag_usage_from_command_line_interface: bool = False,
     path_file_minimap_index_genome: Union[str, None] = None,
@@ -3545,21 +3630,26 @@ def LongExtractBarcodeFromBAM(
                     start__reference_name, start__reference_start = ns_batch[ 'start__reference_name' ], ns_batch[ 'start__reference_start' ]
                     end__reference_start = ns_batch[ 'end__reference_start' ] if 'end__reference_start' in ns_batch else None
                     with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
-                        for r in samfile.fetch( start__reference_name, start__reference_start, end__reference_start + 1 ) if end__reference_start is not None else samfile.fetch( start__reference_name, start__reference_start ) : # include the end position by adding +1
+                        for r in samfile.fetch( start__reference_name, start__reference_start, end__reference_start + 1 ) if end__reference_start is not None else samfile.fetch( start__reference_name, start__reference_start ) : # include the end position by adding +1 # if 'end__reference_start' is None, retrieve all reads remaining for the contig
+                            ''' if the batch has not been started, skip the read '''
+                            reference_start = r.reference_start
+                            if reference_start < start__reference_start : 
+                                continue
                             
                             """ filter read """
                             if r.mapq < int_min_mapq : # filter out reads with low mapq
                                 continue
-                            if r.seq is None : # consider only the primary alignment
+                            seq = r.seq
+                            if seq is None : # consider only the primary alignment
                                 continue
-                            seq, cigartuples, flags, reference_start = r.seq, r.cigartuples, r.flag, r.reference_start # retrieve attributes
+                            cigartuples, flags = r.cigartuples, r.flag # retrieve attributes
                             if int_cigarop_H == cigartuples[ 0 ][ 0 ] or int_cigarop_H == cigartuples[ -1 ][ 0 ] : # skip hard-clipped reads
                                 continue 
                             if _check_binary_flags( flags, 10 ) or _check_binary_flags( flags, 8 ) : # filter out optical duplicates or secondary alignments
                                 continue
                                 
                             ''' if the batch has been completed, exit the loop '''
-                            if end__reference_start is not None and r.reference_end > end__reference_start : 
+                            if end__reference_start is not None and reference_start > end__reference_start : 
                                 break
                             
                             ''' process read '''
@@ -3573,6 +3663,7 @@ def LongExtractBarcodeFromBAM(
                             reverse complemented:
                                 - poly T and cell barcodes located at the left
                             """
+                            int_total_num_records_processed += 1 # update 'int_total_num_records_processed'
                             # check whether the read was reverse complemented
                             flag_is_reverse_complemented = _check_binary_flags( flags, 4 ) 
                             
@@ -3612,7 +3703,6 @@ def LongExtractBarcodeFromBAM(
                                 l_cb_umi.append( seq_cb_umi ) # collect 'seq_cb_umi'
 
                             ''' write the SAM record ''' 
-                            int_total_num_records_processed += 1
                             r.set_tags( l_tags ) # set tags
                             newsamfile.write( r ) # write the record to the output BAM file
                             
@@ -3620,6 +3710,7 @@ def LongExtractBarcodeFromBAM(
                     pipe_sender.send( { 
                         'int_total_num_records_for_a_batch' : int_total_num_records_processed, # record the actual number of records processed for the batch
                         'l_cb_umi' : l_cb_umi,
+                        'ns_batch' : ns_batch, # for debugging
                     } )  # report the number of processed records
 
                 """ close output files """
@@ -3632,17 +3723,16 @@ def LongExtractBarcodeFromBAM(
                 if verbose:
                     logger.info(f"[Completed] all works completed (worker_id={str_uuid})")
 
-            ns = { 'int_num_read_currently_processed' : 0, 'int_num_records_with_cb_umi' : 0, 'l_cb_umi' : [ ] }  # define a namespace # initialize total number of reads processed by the algorithm
+            ns = { 'int_num_read_currently_processed' : 0, 'int_num_records_with_cb_umi' : 0, 'l_cb_umi' : [ ], 'l_l' : [ ] }  # define a namespace # initialize total number of reads processed by the algorithm
 
             def post_process_batch(res):
                 # update data using the received result
                 ns["int_num_read_currently_processed"] += res[ 'int_total_num_records_for_a_batch' ]
                 ns["int_num_records_with_cb_umi"] += len( res["l_cb_umi"] ) # update ns["int_num_records_with_cb_umi"]
                 ns["l_cb_umi"] += res["l_cb_umi"]
-                logger.info(
-                    f"[{path_file_bam_input}] total {ns[ 'int_num_read_currently_processed' ]} number of reads has been processed. CB/UMI sequence identification rate is {np.round(ns['int_num_records_with_cb_umi'] / ns['int_num_read_currently_processed'], 2 ) if ns['int_num_read_currently_processed'] > 0 else np.nan}"
-                )  # report
-                    
+                logger.info( f"[{path_file_bam_input}] total {ns[ 'int_num_read_currently_processed' ]} number of reads has been processed. CB/UMI sequence identification rate is {np.round(ns['int_num_records_with_cb_umi'] / ns['int_num_read_currently_processed'], 2 ) if ns['int_num_read_currently_processed'] > 0 else np.nan}" )  # report
+                ns[ 'l_l' ].append( [ res[ 'ns_batch' ][ 'int_num_reads_encountered_for_a_batch' ], res[ 'ns_batch' ][ 'start__reference_name' ], res[ 'ns_batch' ][ 'start__reference_start' ], np.nan if 'end__reference_start' not in res[ 'ns_batch' ] else res[ 'ns_batch' ][ 'end__reference_start' ], res[ 'int_total_num_records_for_a_batch' ] ] ) # for debugging
+            
             """
             Analyze an input BAM file
             """
@@ -3657,6 +3747,9 @@ def LongExtractBarcodeFromBAM(
                 flag_wait_for_a_response_from_worker_after_sending_termination_signal = True, # wait until all worker exists before resuming works in the main process
             )
             
+            ''' write temporary objects for debugging '''
+            df_bookmark = pd.DataFrame( ns[ 'l_l' ], columns = [ 'int_num_reads_encountered_for_a_batch', 'start__reference_name', 'start__reference_start', 'end__reference_start', 'int_total_num_records_for_a_batch' ] )
+            df_bookmark.to_csv( f"{path_folder_output}df_bookmark.tsv.gz", index = False, sep = '\t' ) # for debugging
             bk.PICKLE_Write( f"{path_folder_output}l_cb_umi.pickle", ns["l_cb_umi"] )# ❤️
             
             """ combine results into a single output BAM file """
@@ -3795,43 +3888,6 @@ def LongExtractBarcodeFromBAM(
                 l_num_duplicated_umis = list( dict_seq_umi_to_int_num_duplicated_umis[ umi_uncorrected ] for umi_uncorrected in l_umi_for_clustering ) # retrieve list of number of duplicated UMIs
                 return l_umi_corrected, l_num_duplicated_umis
             
-            def _index_array( l_index : list ) :
-                """ # 2023-08-12 20:46:39 
-                return a dictionary where key = unique value of 'l_index' and value = list of integer indices of the entries that are equal to the unique value.
-                Of note, ignore 'float' type values, including np.nan values.
-                """
-                dict_index = dict( )
-                for i, index in enumerate( l_index ) :
-                    if isinstance( index, float ) :
-                        continue
-                    if index not in dict_index :
-                        dict_index[ index ] = [ ]
-                    dict_index[ index ].append( i )
-                return dict_index
-            
-            def _combine_dictionary_of_size_distributions( dict_arr_dist_existing : dict, dict_arr_dist_new : dict ) :
-                """ # 2023-08-14 18:27:36 
-                combine two 'dict_arr_dist' object
-                """
-                for e in set( dict_arr_dist_existing ).intersection( dict_arr_dist_new ) : # for existing keys in the container
-                    dict_arr_dist_existing[ e ] = _combine_size_distribution( dict_arr_dist_existing[ e ], dict_arr_dist_new[ e ] ) # update the distribution
-                for e in set( dict_arr_dist_new ).difference( dict_arr_dist_existing ) : # new keys that do not exist in the container
-                    dict_arr_dist_existing[ e ] = dict_arr_dist_new[ e ] # copy distribution of a new key to existing container
-                return dict_arr_dist_existing
-            
-            def _batch_update_dictionary_of_size_distributions( dict_arr_dist : dict, dict_l_len : dict ) :
-                """ # 2023-08-14 18:27:36 
-                dict_arr_dist : dict 
-                dict_l_len : dict
-                
-                update size distributions in 'dict_arr_dist' using the list of sizes in 'dict_l_len'
-                """
-                for e in set( dict_arr_dist ).intersection( dict_l_len ) : # for existing keys in the container
-                    dict_arr_dist[ e ] = _batch_update_size_distribution( l_new_size = dict_l_len[ e ], arr_dist = dict_arr_dist[ e ] ) # update the distribution
-                for e in set( dict_l_len ).difference( dict_arr_dist ) : # new keys that do not exist in the container
-                    dict_arr_dist[ e ] = _batch_update_size_distribution( l_new_size = dict_l_len[ e ], arr_dist = None ) # create a new distribution
-                return dict_arr_dist
-
             """
             Re-analyze pre-processed BAM files
             """
@@ -4179,7 +4235,6 @@ def LongExtractBarcodeFromBAM(
             """ 
             post-processing
             """
-
             def post_processing():  # off-loading a single-core work
                 logger.info(
                     f"[{path_file_bam_input}] post-processing started"
@@ -4189,20 +4244,64 @@ def LongExtractBarcodeFromBAM(
                 """ combine results into a single output BAM file """
                 pysam.merge( '--threads', str( min( n_threads, 10 ) ), '-c', '-p', f"{path_folder_output}barcoded.bam", * glob.glob( f"{path_folder_temp}*.barcoded.sorted.bam" ) ) # merge output BAM files
                 pysam.index( f"{path_folder_output}barcoded.bam" ) # index the input BAM file
+
+                ''' summarize distributions '''
+                dict_arr_dist = ns[ 'dict_arr_dist' ] # retrieve 'dict_arr_dist'
+                l_l = [ ]
+                for e in dict_arr_dist :
+                    arr = dict_arr_dist[ e ]
+                    if arr is None :
+                        continue
+                    arr_bins = np.arange( len( arr ) ) # retrieve bin size of the histograms
+                    int_num_reads, int_num_base_pairs = arr.sum( ), ( arr * arr_bins ).sum( )
+                    int_avg_length_base_pairs = int_num_base_pairs / int_num_reads
+                    float_standard_deviation_length_base_pairs = np.sqrt( np.average((arr_bins - int_avg_length_base_pairs)**2, weights=arr) )
+                    l_l.append( [ e, int_num_reads, int_num_base_pairs, int_avg_length_base_pairs, float_standard_deviation_length_base_pairs ] )
+                df_summary_of_distributions = pd.DataFrame( l_l, columns = [ 'name_type_distribution', 'int_num_reads', 'int_num_base_pairs', 'int_avg_length_base_pairs', 'float_standard_deviation_length_base_pairs' ] )
+                df_summary_of_distributions.to_csv( f"{path_folder_output}df_summary_of_distributions.tsv.gz", sep = '\t', index = False ) # export 'df_summary_of_distributions'
                 
-                ''' draw plots '''
+                """
+                Draw plots of distributions
+                """
+                # create output folders
+                path_folder_graph_line, path_folder_graph_bar = f"{path_folder_graph}simple_line_graph/", f"{path_folder_graph}interactive_bar_graph/"
+                for path_folder in [ path_folder_graph_line, path_folder_graph_bar ] :
+                    os.makedirs( path_folder, exist_ok = True )
+
+                ''' draw simple line plots '''
                 # plot settings
-                int_max_molecule_size_plot = 10000
+                int_max_molecule_size_plot = 6500
                 for name_cat_dist in _initialize_dict_arr_dist( ) : # for each category
-                    if ns[ 'dict_arr_dist' ][ name_cat_dist ] is not None :
-                        len_max_molecule_size_data = len( ns[ 'dict_arr_dist' ][ name_cat_dist ] ) # retrieve max molecule size 
-                        plt.plot( np.arange( min( int_max_molecule_size_plot, len_max_molecule_size_data ) ), ns[ 'dict_arr_dist' ][ name_cat_dist ] if len_max_molecule_size_data <= int_max_molecule_size_plot else ns[ 'dict_arr_dist' ][ name_cat_dist ][ : int_max_molecule_size_plot ] )
-                        plt.title( f"{name_cat_dist} ({ns[ 'dict_arr_dist' ][ name_cat_dist ].sum( )} molecules)" )
-                        bk.MPL_SAVE( f"{name_cat_dist}.distribution", folder = path_folder_graph, l_format=['.pdf', '.png'] )
+                    if dict_arr_dist[ name_cat_dist ] is not None :
+                        len_max_molecule_size_data = len( dict_arr_dist[ name_cat_dist ] ) # retrieve max molecule size 
+                        plt.plot( np.arange( min( int_max_molecule_size_plot, len_max_molecule_size_data ) ), dict_arr_dist[ name_cat_dist ] if len_max_molecule_size_data <= int_max_molecule_size_plot else dict_arr_dist[ name_cat_dist ][ : int_max_molecule_size_plot ] )
+                        plt.title( f"{name_cat_dist} ({dict_arr_dist[ name_cat_dist ].sum( )} molecules)" )
+                        bk.MPL_SAVE( f"{name_cat_dist}.distribution", folder = path_folder_graph_line, l_format=['.pdf', '.png'] )
+                        
+                ''' draw interactive stacked bar graphs '''
+                df_bar = _get_df_bar( dict_arr_dist, int_size_bin_in_base_pairs = 50, int_max_size_in_base_pairs = int_max_molecule_size_plot ) # retrieve a dataframe for drawing a bar graph
+                _draw_bar_plot( 
+                    df_bar, 
+                    [ 'aligned_to_genome__R1__TSO', 'aligned_to_genome__no_R1__TSO',  'aligned_to_genome__R1__no_TSO', 'aligned_to_genome__no_R1__no_TSO', ],
+                    title = 'R1 and TSO Adaptor Identification',
+                    flag_save_figure = True, path_folder_graph = path_folder_graph_bar,
+                )
+                _draw_bar_plot( 
+                    df_bar, 
+                    [ 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__1', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__2to3', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__4to7', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__8to15', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__16to31', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__32to63', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__64to127', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__128to255', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__256to511', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__512to1023', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__above1024' ],
+                    title = 'UMI Duplication Counts',
+                    flag_save_figure = True, path_folder_graph = path_folder_graph_bar,
+                )
+                _draw_bar_plot( 
+                    df_bar, 
+                    ['aligned_to_genome__R1__valid_CB__no_internal_polyA', 'aligned_to_genome__R1__valid_CB__internal_polyA', 'aligned_to_genome__R1__no_valid_CB', 'aligned_to_genome__no_R1__TSO', 'aligned_to_genome__no_R1__no_TSO'],
+                    title = 'Internal poly(A) Detection',
+                    flag_save_figure = True, path_folder_graph = path_folder_graph_bar,
+                )
                 
                 ''' export pickle files '''
                 # write distribution data as pickle files
-                bk.PICKLE_Write( f"{path_folder_output}dict_arr_dist.pkl", ns[ 'dict_arr_dist' ] )
+                bk.PICKLE_Write( f"{path_folder_output}dict_arr_dist.pkl", dict_arr_dist )
                 bk.PICKLE_Write( f"{path_folder_output}dict_arr_dist_single_cell_level.pkl", ns[ 'dict_arr_dist_single_cell_level' ] )
                 
                 # write a flag indicating that the processing has been completed
@@ -4234,6 +4333,252 @@ def LongExtractBarcodeFromBAM(
 
     # wait all pipelines to be completed
     pipelines.wait_all()
+    logger.info(f"Completed.")
+    return 
+
+def LongCreateReferenceSizeDistribution(
+    flag_usage_from_command_line_interface: bool = False,
+    l_path_file_fastq_input: Union[List[str], None] = None,
+    path_folder_output: str = None,
+    float_memory_in_GiB: float = 50,
+    verbose: bool = True,
+) -> None :
+    """# 2023-08-10 16:30:50 
+    
+   
+
+    returns
+    
+    """
+    """
+    Parse arguments
+    """
+    if flag_usage_from_command_line_interface:  # parse arguments
+        """parse arguments when the function was called from the command-line interface"""
+        # {  } # unused arguments
+        # command line arguments
+        parser = argparse.ArgumentParser(
+            description=str_description,
+            usage="ourotools LongFilterNSplit",
+            formatter_class=argparse.RawTextHelpFormatter,
+        )
+        parser.add_argument("LongFilterNSplit")
+
+        arg_grp_general = parser.add_argument_group("General")
+        arg_grp_general.add_argument(
+            "-q",
+            "--l_path_file_fastq_input",
+            help="",
+            nargs="*",
+        )
+        arg_grp_general.add_argument(
+            "-o",
+            "--l_path_folder_output",
+            help="",
+            nargs="*",
+        )
+        arg_grp_general.add_argument(
+            "-t",
+            "--n_threads",
+            help="(default: 32) the number of processors to use concurrently.",
+            default=32,
+            type=int,
+        )
+        arg_grp_general.add_argument(
+            "-b",
+            "--int_num_reads_in_a_batch",
+            help="(default: 10000) the number of reads in a batch.",
+            default=10_000,
+            type=int,
+        )
+        arg_grp_general.add_argument(
+            "-s",
+            "--int_num_samples_analyzed_concurrently",
+            help="(default: 2) the number of samples that can be analyzed concurrently.",
+            default=2,
+            type=int,
+        )
+        arg_grp_general.add_argument(
+            "-m",
+            "--float_memory_in_GiB",
+            help="(default: 50) the maximum memory usage of the pipeline in GiB",
+            default=50,
+            type=float,
+        )
+        arg_grp_general.add_argument(
+            "-v", 
+            "--verbose", 
+            help="turn on verbose mode", 
+            action="store_true"
+        )
+        arg_grp_alignment = parser.add_argument_group("Alignment")
+        arg_grp_alignment.add_argument(
+            "-i",
+            "--path_file_minimap_index_genome",
+            help="",
+            type=str,
+        )
+        arg_grp_alignment.add_argument(
+            "-u",
+            "--l_path_file_minimap_index_unwanted",
+            help="",
+            nargs="*",
+        )
+        arg_grp_alignment.add_argument(
+            "-Q", 
+            "--int_min_mapq", 
+            help="(default: 1) minimum mapping quality of the alignment to consider a read (or parts of a read)  were aligned to the genome", 
+            default=1,
+            type=int,
+        )
+        arg_grp_alignment.add_argument(
+            "-x",
+            "--str_minimap_aligner_preset",
+            help="(default: 'splice') preset of the minimap2 aligner",
+            default="splice",
+            type=str,
+        )
+        arg_grp_poly_a_tail_detection = parser.add_argument_group("Poly A tail detection")
+        arg_grp_poly_a_tail_detection.add_argument(
+            "-w",
+            "--int_size_window_for_searching_poly_a_tail",
+            help="(default: 16) the size of the window from the end of the alignment to search for poly A tail.",
+            default=16,
+            type=int,
+        )
+        arg_grp_poly_a_tail_detection.add_argument(
+            "-A",
+            "--float_min_A_frequency_for_identifying_poly_A",
+            help="(default: 0.75) the minimum frequency to determine a sequence contains a poly A tract.",
+            default=0.75,
+            type=float,
+        )
+        arg_grp_poly_a_tail_detection.add_argument(
+            "-I",
+            "--int_max_size_intervening_sequence_between_alignment_end_and_poly_A",
+            help="(default: 20) the maximum size of the intervening sequence between alignment end position and poly A tract. it will be applied for both internal poly A or external (enzymatically attached) poly A.",
+            default=20,
+            type=int,
+        )
+        
+        arg_grp_read_splitting = parser.add_argument_group("Read Splitting ")
+        arg_grp_read_splitting.add_argument(
+            "-S",
+            "--int_min_size_intervening_sequence_for_splitting",
+            help="(default: 150) the minimum length of intervening sequence between alignments for splitting the reads.",
+            default=150,
+            type=int,
+        )
+        arg_grp_read_splitting.add_argument(
+            "-C",
+            "--int_max_intron_size_for_determining_chimeric_molecule",
+            help="(default: 200,000) the maximum allowed intron size for classifying considering the molecule as a intra-chromosomal chimeric read.",
+            default=200000,
+            type=int,
+        )
+        
+        args = parser.parse_args()
+
+        flag_usage_from_command_line_interface = args.flag_usage_from_command_line_interface
+        path_file_minimap_index_genome = args.path_file_minimap_index_genome
+        l_path_file_fastq_input = args.l_path_file_fastq_input
+        l_path_folder_output = args.l_path_folder_output
+        n_threads = args.n_threads
+        int_num_samples_analyzed_concurrently = args.int_num_samples_analyzed_concurrently
+        float_memory_in_GiB = args.float_memory_in_GiB
+        verbose = args.verbose
+        int_num_reads_in_a_batch = args.int_num_reads_in_a_batch
+        l_path_file_minimap_index_unwanted = args.l_path_file_minimap_index_unwanted
+        int_min_mapq = args.int_min_mapq
+        str_minimap_aligner_preset = args.str_minimap_aligner_preset
+        int_size_window_for_searching_poly_a_tail = args.int_size_window_for_searching_poly_a_tail
+        int_max_size_intervening_sequence_between_alignment_end_and_poly_A = args.int_max_size_intervening_sequence_between_alignment_end_and_poly_A
+        float_min_A_frequency_for_identifying_poly_A = args.float_min_A_frequency_for_identifying_poly_A
+        int_min_size_intervening_sequence_for_splitting = args.int_min_size_intervening_sequence_for_splitting
+        int_max_intron_size_for_determining_chimeric_molecule = args.int_max_intron_size_for_determining_chimeric_molecule
+
+    """
+    Start of the pipeline
+    """
+    logger.info(str_description)
+    logger.info(
+        "Ouro-Tools LongReadFilterNSplit, a preprocessing pipeline for filtering undesired reads and spliting chimeric reads FASTQ files"
+    )
+    logger.info(f"Started.")
+
+    """ handle special cases and invalid inputs """
+    if l_path_file_fastq_input is None or ( path_file_minimap_index_genome is None and am_genome is None ) : # when both the minimap2 aligner and index path are not given
+        logger.error(
+            "Required argument(s) is missing. to view help message, type -h or --help"
+        )
+        return -1
+
+    """ process required input directories """
+    path_file_minimap_index_genome = os.path.abspath(path_file_minimap_index_genome)
+    l_path_file_minimap_index_unwanted = list( os.path.abspath( e ) for e in l_path_file_minimap_index_unwanted )
+
+    """ process input directory  """
+    l_path_file_fastq_input = list(
+        os.path.abspath(path_file_fastq_input)
+        for path_file_fastq_input in l_path_file_fastq_input
+    )
+    if l_path_folder_output is not None:
+        """# when a valid list of output folders were given # ensure directories of the output folder ends with '/' characters"""
+        l_path_folder_output = list(
+            os.path.abspath(path_folder) + "/" for path_folder in l_path_folder_output
+        )
+    else:
+        """# compose a list of default 'path_folder_output' values for the given list of input files"""
+        l_path_file_fastq_input_reversed = deepcopy(
+            l_path_file_fastq_input[::-1]
+        )  # reverse the input file paths so that pop operation yield the element located at the front
+        l_path_folder_output = []
+        for str_mode_ouro_count in l_str_mode_ouro_count:
+            path_file_fastq = l_path_file_fastq_input_reversed.pop()
+            path_folder_output = (
+                f"{path_file_fastq.rsplit( '/', 1 )[ 0 ]}LongFilterNSplit_output/"
+            )
+            l_path_folder_output.append(path_folder_output)
+
+    """ 
+    Fixed Settings
+    """
+    # internal settings
+    int_highest_mapq = 60
+
+    """
+    Exit early when no samples is anlayzed
+    """
+    # if no samples will be analyzed, return
+    if len(l_path_folder_output) == 0:
+        logger.info(f"no output folders were given, exiting")
+        return
+        
+    """
+    Pipeline specific functions
+    """
+    def _initialize_dict_arr_dist( ) :
+        """ # 2023-08-03 11:49:26 
+        initialize 'dict_arr_dist'
+        """
+        return {
+            'aligned_to_unwanted_sequence' : None,
+            'cannot_aligned_to_genome' : None,
+            'aligned_to_genome' : None,
+
+            'aligned_to_genome__non_chimeric__no_poly_A' : None,
+            'aligned_to_genome__non_chimeric__external_poly_A__unrefenced_G' : None,
+            'aligned_to_genome__non_chimeric__internal_poly_A__unrefenced_G' : None,
+            'aligned_to_genome__non_chimeric__external_poly_A__no_unrefenced_G' : None,
+            'aligned_to_genome__non_chimeric__internal_poly_A__no_unrefenced_G' : None,
+
+            'aligned_to_genome__chimeric__no_poly_A' : None,
+            'aligned_to_genome__chimeric__external_poly_A__unrefenced_G' : None,
+            'aligned_to_genome__chimeric__internal_poly_A__unrefenced_G' : None,
+            'aligned_to_genome__chimeric__external_poly_A__no_unrefenced_G' : None,
+            'aligned_to_genome__chimeric__internal_poly_A__no_unrefenced_G' : None,
+        }
+        
     logger.info(f"Completed.")
     return 
 
