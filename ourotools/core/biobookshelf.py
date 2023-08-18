@@ -24,6 +24,23 @@ import multiprocessing
 import multiprocessing as mp
 import collections
 
+def Wide(int_percent_html_code_cell_width=95):
+    """
+    # 20210224
+    widen jupyter notebook cell
+    """
+    from IPython.core.display import display, HTML
+    display(HTML("<style>.container { width:100% !important; }</style>"))
+    display(
+        HTML(
+            "<style>div.cell{width:"
+            + str(int_percent_html_code_cell_width)
+            + "%;margin-left:"
+            + str(100 - int_percent_html_code_cell_width)
+            + "%;margin-right:auto;}</style>"
+        )
+    )
+
 def MPL_SAVE(fig_name, l_format=[".pdf", ".png"], close_fig=True, **dict_save_fig):
     """With the given 'fig_name', save fiqures in both svg and png format
     'l_format' : list of image extensions for saving files

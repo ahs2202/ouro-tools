@@ -2249,7 +2249,6 @@ def LongFilterNSplit(
         
         args = parser.parse_args()
 
-        flag_usage_from_command_line_interface = args.flag_usage_from_command_line_interface
         path_file_minimap_index_genome = args.path_file_minimap_index_genome
         l_path_file_fastq_input = args.l_path_file_fastq_input
         l_path_folder_output = args.l_path_folder_output
@@ -2994,7 +2993,7 @@ def LongExtractBarcodeFromBAM(
     str_seq_r1 : str = 'CTACACGACGCTCTTCCGATCT', # the sequence of R1 adaptor (in 10x GEX v3 kit, located upstream of CB and UMI)
     str_seq_tso : str = 'AAGCAGTGGTATCAACGCAGAG', # the sequence of TSO adaptor (in 10x GEX v3 kit, located at 5' end of the molecule)
     path_file_valid_cb : str = None, # (required argument) the path to tsv file of whitelist barcodes. For more details, please see 10x cellranger references.
-    n_cell_expected : int = 1000, # the number of expected cells
+    int_max_num_cell_expected : int = 20000, # the max number of expected cells
     int_len_sliding_window_internal_polyT : int = 10, # the length of sliding window for searching internal poly T (poly A) tract. (When poly-A tailed read is reverse complemented, R1 adaptor become situated in the forward direction
     int_len_window_internal_polyT : int = 30, # the size of window for searching for internal poly T
     float_min_T_fraction : float = 0.8, # the minimum T fraction for identifying the stretch of poly T tract
@@ -3020,7 +3019,7 @@ def LongExtractBarcodeFromBAM(
     str_seq_r1 : str = 'CTACACGACGCTCTTCCGATCT', # the sequence of R1 adaptor (in 10x GEX v3 kit, located upstream of CB and UMI)
     str_seq_tso : str = 'AAGCAGTGGTATCAACGCAGAG', # the sequence of TSO adaptor (in 10x GEX v3 kit, located at 5' end of the molecule)
     path_file_valid_cb : str = None, # (required argument) the path to tsv file of whitelist barcodes. For more details, please see 10x cellranger references.
-    n_cell_expected : int = 1000, # the number of expected cells
+    int_max_num_cell_expected : int = 20000, # the max number of expected cells
     int_len_sliding_window_internal_polyT : int = 10, # the length of sliding window for searching internal poly T (poly A) tract. (When poly-A tailed read is reverse complemented, R1 adaptor become situated in the forward direction
     int_len_window_internal_polyT : int = 30, # the size of window for searching for internal poly T
     float_min_T_fraction : float = 0.8, # the minimum T fraction for identifying the stretch of poly T tract
@@ -3126,7 +3125,7 @@ def LongExtractBarcodeFromBAM(
         
         arg_grp_cb_correction = parser.add_argument_group("Cell Barcode Correction")
         arg_grp_cb_correction.add_argument( "-V", "--path_file_valid_cb", help = "(required argument) the path to tsv file of whitelist barcodes. For more details, please see 10x cellranger references." ) # required argument
-        arg_grp_cb_correction.add_argument( "-N", "--n_cell_expected", help = "(default: 1000) the number of expected cells", default = 1000, type = int )
+        arg_grp_cb_correction.add_argument( "-N", "--int_max_num_cell_expected", help = "(default: 20000) the max number of expected cells", default = 1000, type = int )
 
         arg_grp_internal_polyt = parser.add_argument_group("Internal Poly(A) Tract-Primed Read Identification")
         arg_grp_internal_polyt.add_argument( "-S", "--int_len_sliding_window_internal_polyT", help = "(default: 10) the length of sliding window for searching internal poly T (poly A) tract. (When poly-A tailed read is reverse complemented, R1 adaptor become situated in the forward direction", type = int, default = 10 )
@@ -3157,7 +3156,7 @@ def LongExtractBarcodeFromBAM(
         int_length_cb = args.int_length_cb
         int_length_umi = args.int_length_umi
         path_file_valid_cb = args.path_file_valid_cb
-        n_cell_expected = args.n_cell_expected
+        int_max_num_cell_expected = args.int_max_num_cell_expected
         int_len_sliding_window_internal_polyT = args.int_len_sliding_window_internal_polyT
         int_len_window_internal_polyT = args.int_len_window_internal_polyT
         float_min_T_fraction = args.float_min_T_fraction
@@ -3762,18 +3761,18 @@ def LongExtractBarcodeFromBAM(
             """
             # internal settings
             n_droplets = 100000 # number of droplets generated in 10X Chromium instruments (number of barcoded beads) - with sufficient margin
-            n_minimum_count_cb_before_correction = 2 # threshold for filtering cell barcodes before correction
+            n_minimum_count_cb_before_correction = 3 # threshold for filtering cell barcodes before correction
             ''' retrieve list of potentially valid barcodes '''
             l_cb_umi = ns["l_cb_umi"]
             # retrieve all cb sequence by its normal length, and count each unique cb
             s_cb_count = pd.Series( bk.COUNTER( list( e[ : int_length_cb ] for e in l_cb_umi ) ) )
             # filtering uncorrected cb
             s_cb_count = s_cb_count[ s_cb_count >= n_minimum_count_cb_before_correction  ]
-            # sort uncorrected cb by their counts and only retrieve 'n_droplets' number of cell barcodes
-            if len( s_cb_count ) > n_droplets :
-                s_cb_count = s_cb_count.sort_values( ascending = False ).iloc[ : n_droplets ]
             # drop invalid barcodes
             s_cb_count = bk.Series_Subset( s_cb_count, set_valid_cb )
+            # sort valid cb by their counts and only retrieve 'int_max_num_cell_expected' number of cell barcodes
+            s_cb_count = s_cb_count.sort_values( ascending = False ).iloc[ : int_max_num_cell_expected ]
+
             # retrieve a list of valid barcodes
             l_cb_valid = s_cb_count.index.values
             set_cb_valid = set( l_cb_valid ) # retrieve a set of valid cell barcodes
@@ -4338,17 +4337,23 @@ def LongExtractBarcodeFromBAM(
 
 def LongCreateReferenceSizeDistribution(
     flag_usage_from_command_line_interface: bool = False,
-    l_path_file_fastq_input: Union[List[str], None] = None,
-    path_folder_output: str = None,
+    l_path_file_distributions: Union[List[str], None] = None, # list of path to the 'dict_arr_dist.pkl' output file of the 'LongExtractBarcodeFromBAM' pipeline for each sample
+    path_folder_output: str = None, # path to the output folder of the 'LongCreateReferenceSizeDistribution' pipeline
+    float_sigma_gaussian_filter : float = 20.0, # the standard deviation of the Gaussian filter that will be applied to the base-pair resolution distribution data (histogram with a bin size of 1bp)
+    float_max_correction_ratio : float = 5.0, # the maximum correction ratio allowed for estimating the confident molecule size ranges for count matrix normalization, where the correction ratio used for adjusting the distribution of the sample to that of the reference distribution is always below the given threshold, 'float_max_correction_ratio'
     float_memory_in_GiB: float = 50,
     verbose: bool = True,
 ) -> None :
-    """# 2023-08-10 16:30:50 
+    """# 2023-08-17 22:37:10 
+    flag_usage_from_command_line_interface: bool = False,
+    l_path_file_distributions: Union[List[str], None] = None, # list of path to the 'dict_arr_dist.pkl' output file of the 'LongExtractBarcodeFromBAM' pipeline for each sample
+    path_folder_output: str = None, # path to the output folder of the 'LongCreateReferenceSizeDistribution' pipeline
+    float_sigma_gaussian_filter : float = 20.0, # the standard deviation of the Gaussian filter that will be applied to the base-pair resolution distribution data (histogram with a bin size of 1bp)
+    float_max_correction_ratio : float = 5.0, # the maximum correction ratio allowed for estimating the confident molecule size ranges for count matrix normalization, where the correction ratio used for adjusting the distribution of the sample to that of the reference distribution is always below the given threshold, 'float_max_correction_ratio'
+    float_memory_in_GiB: float = 50,
+    verbose: bool = True,
     
-   
-
     returns
-    
     """
     """
     Parse arguments
@@ -4359,44 +4364,22 @@ def LongCreateReferenceSizeDistribution(
         # command line arguments
         parser = argparse.ArgumentParser(
             description=str_description,
-            usage="ourotools LongFilterNSplit",
+            usage="ourotools LongCreateReferenceSizeDistribution",
             formatter_class=argparse.RawTextHelpFormatter,
         )
-        parser.add_argument("LongFilterNSplit")
-
+        parser.add_argument("LongCreateReferenceSizeDistribution")
+        
         arg_grp_general = parser.add_argument_group("General")
         arg_grp_general.add_argument(
-            "-q",
-            "--l_path_file_fastq_input",
-            help="",
+            "-i",
+            "--l_path_file_distributions",
+            help="list of path to the 'dict_arr_dist.pkl' output file of the 'LongExtractBarcodeFromBAM' pipeline for each sample",
             nargs="*",
         )
         arg_grp_general.add_argument(
             "-o",
-            "--l_path_folder_output",
-            help="",
-            nargs="*",
-        )
-        arg_grp_general.add_argument(
-            "-t",
-            "--n_threads",
-            help="(default: 32) the number of processors to use concurrently.",
-            default=32,
-            type=int,
-        )
-        arg_grp_general.add_argument(
-            "-b",
-            "--int_num_reads_in_a_batch",
-            help="(default: 10000) the number of reads in a batch.",
-            default=10_000,
-            type=int,
-        )
-        arg_grp_general.add_argument(
-            "-s",
-            "--int_num_samples_analyzed_concurrently",
-            help="(default: 2) the number of samples that can be analyzed concurrently.",
-            default=2,
-            type=int,
+            "--path_folder_output",
+            help="path to the output folder of the 'LongCreateReferenceSizeDistribution' pipeline",
         )
         arg_grp_general.add_argument(
             "-m",
@@ -4411,91 +4394,31 @@ def LongCreateReferenceSizeDistribution(
             help="turn on verbose mode", 
             action="store_true"
         )
-        arg_grp_alignment = parser.add_argument_group("Alignment")
-        arg_grp_alignment.add_argument(
-            "-i",
-            "--path_file_minimap_index_genome",
-            help="",
-            type=str,
-        )
-        arg_grp_alignment.add_argument(
-            "-u",
-            "--l_path_file_minimap_index_unwanted",
-            help="",
-            nargs="*",
-        )
-        arg_grp_alignment.add_argument(
-            "-Q", 
-            "--int_min_mapq", 
-            help="(default: 1) minimum mapping quality of the alignment to consider a read (or parts of a read)  were aligned to the genome", 
-            default=1,
-            type=int,
-        )
-        arg_grp_alignment.add_argument(
-            "-x",
-            "--str_minimap_aligner_preset",
-            help="(default: 'splice') preset of the minimap2 aligner",
-            default="splice",
-            type=str,
-        )
-        arg_grp_poly_a_tail_detection = parser.add_argument_group("Poly A tail detection")
-        arg_grp_poly_a_tail_detection.add_argument(
-            "-w",
-            "--int_size_window_for_searching_poly_a_tail",
-            help="(default: 16) the size of the window from the end of the alignment to search for poly A tail.",
-            default=16,
-            type=int,
-        )
-        arg_grp_poly_a_tail_detection.add_argument(
-            "-A",
-            "--float_min_A_frequency_for_identifying_poly_A",
-            help="(default: 0.75) the minimum frequency to determine a sequence contains a poly A tract.",
-            default=0.75,
+        
+        arg_grp_gaussian_filter = parser.add_argument_group("Gaussian Filter ")
+        arg_grp_gaussian_filter.add_argument(
+            "-S",
+            "--float_sigma_gaussian_filter",
+            help="(default: 20.0) the standard deviation of the Gaussian filter that will be applied to the base-pair resolution distribution data (histogram with a bin size of 1bp).",
+            default=20.0,
             type=float,
         )
-        arg_grp_poly_a_tail_detection.add_argument(
-            "-I",
-            "--int_max_size_intervening_sequence_between_alignment_end_and_poly_A",
-            help="(default: 20) the maximum size of the intervening sequence between alignment end position and poly A tract. it will be applied for both internal poly A or external (enzymatically attached) poly A.",
-            default=20,
-            type=int,
-        )
-        
-        arg_grp_read_splitting = parser.add_argument_group("Read Splitting ")
-        arg_grp_read_splitting.add_argument(
-            "-S",
-            "--int_min_size_intervening_sequence_for_splitting",
-            help="(default: 150) the minimum length of intervening sequence between alignments for splitting the reads.",
-            default=150,
-            type=int,
-        )
-        arg_grp_read_splitting.add_argument(
+        arg_grp_gaussian_filter.add_argument(
             "-C",
-            "--int_max_intron_size_for_determining_chimeric_molecule",
-            help="(default: 200,000) the maximum allowed intron size for classifying considering the molecule as a intra-chromosomal chimeric read.",
-            default=200000,
-            type=int,
+            "--float_max_correction_ratio",
+            help="(default: 5.0) the maximum correction ratio allowed for estimating the confident molecule size ranges for count matrix normalization, where the correction ratio used for adjusting the distribution of the sample to that of the reference distribution is always below the given threshold, 'float_max_correction_ratio'.",
+            default=5.0,
+            type=float,
         )
-        
+
         args = parser.parse_args()
 
-        flag_usage_from_command_line_interface = args.flag_usage_from_command_line_interface
-        path_file_minimap_index_genome = args.path_file_minimap_index_genome
-        l_path_file_fastq_input = args.l_path_file_fastq_input
-        l_path_folder_output = args.l_path_folder_output
-        n_threads = args.n_threads
-        int_num_samples_analyzed_concurrently = args.int_num_samples_analyzed_concurrently
+        l_path_file_distributions = args.l_path_file_distributions
+        path_folder_output = args.path_folder_output
         float_memory_in_GiB = args.float_memory_in_GiB
         verbose = args.verbose
-        int_num_reads_in_a_batch = args.int_num_reads_in_a_batch
-        l_path_file_minimap_index_unwanted = args.l_path_file_minimap_index_unwanted
-        int_min_mapq = args.int_min_mapq
-        str_minimap_aligner_preset = args.str_minimap_aligner_preset
-        int_size_window_for_searching_poly_a_tail = args.int_size_window_for_searching_poly_a_tail
-        int_max_size_intervening_sequence_between_alignment_end_and_poly_A = args.int_max_size_intervening_sequence_between_alignment_end_and_poly_A
-        float_min_A_frequency_for_identifying_poly_A = args.float_min_A_frequency_for_identifying_poly_A
-        int_min_size_intervening_sequence_for_splitting = args.int_min_size_intervening_sequence_for_splitting
-        int_max_intron_size_for_determining_chimeric_molecule = args.int_max_intron_size_for_determining_chimeric_molecule
+        float_sigma_gaussian_filter = args.float_sigma_gaussian_filter
+        float_max_correction_ratio = args.float_max_correction_ratio
 
     """
     Start of the pipeline
