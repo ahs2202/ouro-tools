@@ -103,7 +103,6 @@ def To_window_path_compatible_str(a_string):
         .replace("*", "_")
     )
 
-
 def MATPLOTLIB_savefig(title, dpi=200, folder=None, close_fig=True, format=".png"):
     if "." not in format:
         format = "." + format
@@ -190,8 +189,182 @@ def MATPLOTLIB_basic_configuration(
     if show_colorbar:
         plt.colorbar()
 
-
 MPL_basic_configuration = MATPLOTLIB_basic_configuration
+
+
+def TYPE_Convert_NP_Array(data, dtype=None):
+    """Default dtype = Float"""
+    if dtype is None:
+        dtype = float
+    if type(data) is pd.Series:
+        data = data.values.astype(dtype)
+    elif type(data) is list:
+        data = np.array(data, dtype=dtype)
+    elif type(data) is set:
+        data = np.array(list(data), dtype=dtype)
+    elif type(data) is not np.ndarray:
+        print("ERROR: Invalid data type")
+        return -1
+    return data
+
+def MPL_1D_Sort_Plot(
+    data,
+    figsize=(5, 3.5),
+    annotate_xy_pos_first_column_label=(0.05, 1.09),
+    color_alpha=0.5,
+    color_threshold=0,
+    line_stype=".-",
+    x_label="Sorted Entries",
+    title="",
+    savefig=False,
+    color_above="g",
+    color_below="r",
+    color_percentile_alpha=0.5,
+    color_percentile_thres=None,
+    color_percentile_lower="b",
+    color_percentile_upper="orange",
+    thres_n_points=10000,
+    **dict_mpl_basic_configure,
+):
+    """(1) Convert iterable data like series or list into np.ndarray using 'TYPE_Convert_NP_Array' (2) Sort, (3) Visualize on a plot using green and red colors
+    to visualize deviation from the given threshold. if color_percentile_thres is not None, annotate upper and lower percentiles with the color given by color_percentile arguments
+    if 'data' is pandas.DataFrame with two columns, first sort values in the second column by the first column, visualize, and annotate unique_entries of the first column on the plot. The NaN values in the first column will be ignored.
+    """
+    bool_flag_sort_using_two_columns = (
+        isinstance(data, pd.DataFrame) and len(data.columns.values) == 2
+    )  # 'sort_using_two_columns' if a DataFrame with two columns are given as a 'data'.
+    if isinstance(
+        data, (pd.DataFrame, pd.Series)
+    ):  # set default title and y_label by using pandas.Series name if not given
+        data_name = data.name if isinstance(data, pd.Series) else data.columns.values[1]
+        if data_name:  # if data_name is not None
+            if "y_label" not in dict_mpl_basic_configure:
+                dict_mpl_basic_configure["y_label"] = (
+                    data.name if isinstance(data, pd.Series) else data.columns.values[1]
+                )
+            if len(title) == 0:
+                title = data_name  # set data_name as default title for the plot
+    if (
+        not bool_flag_sort_using_two_columns
+    ):  # convert data as an numpy array and sort the data if 'series__sort_by_index_first' is set to False or given 'data' is not pandas.Series
+        data = TYPE_Convert_NP_Array(data, dtype=float)
+        if type(data) is not np.ndarray:
+            return -1
+    if bool_flag_sort_using_two_columns:
+        data = data.dropna()  # remove np.nan values if present
+    else:
+        arr_mask_isnan = np.isnan(data)
+        if arr_mask_isnan.any():
+            data = data[~arr_mask_isnan]
+    int_ratio_shrinkage = (
+        int(len(data) / thres_n_points) if len(data) > thres_n_points else 1
+    )  # shrink the number of data values before sorting for efficient plotting. # limit the number of points beling plotting below 'thres_n_points'
+    if int_ratio_shrinkage > 1:
+        print(
+            "Since len( data ) = {} + ({} NaN values) > thres_n_points = {}, Perform random sampling of the data (one value for every {} values) for efficient visualization".format(
+                len(data), arr_mask_isnan.sum(), thres_n_points, int_ratio_shrinkage
+            )
+        )
+        data = (
+            data.iloc[::int_ratio_shrinkage]
+            if bool_flag_sort_using_two_columns
+            else data[::int_ratio_shrinkage]
+        )
+    data = (
+        data.sort_values(list(data.columns), inplace=False, ignore_index=True)
+        if bool_flag_sort_using_two_columns
+        else np.sort(data)
+    )  # sort data
+    arr_data = (
+        data.iloc[:, 1].values if bool_flag_sort_using_two_columns else data
+    )  # plot data
+    x_range = np.arange(len(arr_data))
+    x_axis = np.full_like(x_range, color_threshold)
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+    ax.plot(arr_data, line_stype, color="k")
+    if color_percentile_thres is not None:  # fill colors in the plot
+        index_thres = int(float(len(arr_data)) * color_percentile_thres / 100)
+        x_axis_plus_max = np.full_like(x_range, arr_data[-1])
+        ax.fill_between(
+            x_range[:index_thres],
+            x_axis_plus_max[:index_thres],
+            x_axis[:index_thres],
+            facecolor=color_percentile_lower,
+            interpolate=True,
+            alpha=color_percentile_alpha,
+        )
+        ax.fill_between(
+            x_range[-index_thres:],
+            x_axis_plus_max[-index_thres:],
+            x_axis[-index_thres:],
+            facecolor=color_percentile_upper,
+            interpolate=True,
+            alpha=color_percentile_alpha,
+        )
+    ax.fill_between(
+        x_range,
+        arr_data,
+        x_axis,
+        where=arr_data >= x_axis,
+        facecolor=color_above,
+        interpolate=True,
+        alpha=color_alpha,
+    )
+    ax.fill_between(
+        x_range,
+        arr_data,
+        x_axis,
+        where=arr_data <= x_axis,
+        facecolor=color_below,
+        interpolate=True,
+        alpha=color_alpha,
+    )
+    plt.sca(ax)  # set x_ticks properly after shrinkage
+    arr_xticks = plt.xticks()[0][1:-1]
+    plt.xticks(arr_xticks, (arr_xticks * int_ratio_shrinkage).astype(int))
+    if (
+        bool_flag_sort_using_two_columns
+    ):  # annotate unique entries in the first columns by which values of second columns were first sorted.
+        l_unqiue_entry = sorted(data.iloc[:, 0].unique())
+        dict_unique_entry_to_int_representation = dict(
+            (unique_entry, int_representation)
+            for int_representation, unique_entry in enumerate(l_unqiue_entry)
+        )
+        dict_int_representation_to_unique_entry = dict(
+            (int_representation, unique_entry)
+            for int_representation, unique_entry in enumerate(l_unqiue_entry)
+        )
+        data.iloc[:, 0] = list(
+            dict_unique_entry_to_int_representation[entry]
+            for entry in data.iloc[:, 0].values
+        )
+        l_start_of_unique_entry = (
+            [0] + list(np.where(np.diff(data.iloc[:, 0].values))[0]) + [len(data)]
+        )
+        for int_representation, unique_entry in enumerate(l_unqiue_entry):
+            x_pos = (
+                l_start_of_unique_entry[int_representation]
+                + l_start_of_unique_entry[int_representation + 1]
+            ) / 2
+            ax.annotate(
+                unique_entry,
+                xy=(x_pos, 1.02),
+                xycoords=("data", "axes fraction"),
+                ha="center",
+            )
+        ax.annotate(
+            data.columns.values[0],
+            xy=annotate_xy_pos_first_column_label,
+            xycoords=("axes fraction", "axes fraction"),
+            ha="center",
+        )
+    MATPLOTLIB_basic_configuration(
+        x_label=x_label,
+        title=TIME_GET_timestamp() + "\n" + title,
+        savefig=savefig,
+        **dict_mpl_basic_configure,
+    )
+
 
 
 class Map(object):

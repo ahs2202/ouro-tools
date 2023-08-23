@@ -2930,15 +2930,65 @@ def LongFilterNSplit(
                 ] :
                     bk.OS_Run( [ 'cat' ] + glob.glob( f"{path_folder_temp}*.{name_file}" ), stdout_binary = True, path_file_stdout = f"{path_folder_output}{name_file}" )
                     
-                ''' draw plots '''
+                ''' summarize distributions '''
+                dict_arr_dist = ns[ 'dict_arr_dist' ] # retrieve 'dict_arr_dist'
+                l_l = [ ]
+                for e in dict_arr_dist :
+                    arr = dict_arr_dist[ e ]
+                    if arr is None :
+                        continue
+                    arr_bins = np.arange( len( arr ) ) # retrieve bin size of the histograms
+                    int_num_reads, int_num_base_pairs = arr.sum( ), ( arr * arr_bins ).sum( )
+                    int_avg_length_base_pairs = int_num_base_pairs / int_num_reads
+                    float_standard_deviation_length_base_pairs = np.sqrt( np.average((arr_bins - int_avg_length_base_pairs)**2, weights=arr) )
+                    l_l.append( [ e, int_num_reads, int_num_base_pairs, int_avg_length_base_pairs, float_standard_deviation_length_base_pairs ] )
+                df_summary_of_distributions = pd.DataFrame( l_l, columns = [ 'name_type_distribution', 'int_num_reads', 'int_num_base_pairs', 'int_avg_length_base_pairs', 'float_standard_deviation_length_base_pairs' ] )
+                df_summary_of_distributions.to_csv( f"{path_folder_output}df_summary_of_distributions.tsv.gz", sep = '\t', index = False ) # export 'df_summary_of_distributions'
+                
+                """
+                Draw plots of distributions
+                """
+                # create output folders
+                path_folder_graph_noninteractive, path_folder_graph_interactive = f"{path_folder_graph}noninteractive_graph/", f"{path_folder_graph}interactive_graph/"
+                for path_folder in [ path_folder_graph_noninteractive, path_folder_graph_interactive ] :
+                    os.makedirs( path_folder, exist_ok = True )
+
+                ''' draw simple line plots '''
                 # plot settings
-                int_max_molecule_size_plot = 10000
+                int_max_molecule_size_plot = 6500
                 for name_cat_dist in _initialize_dict_arr_dist( ) : # for each category
-                    if ns[ 'dict_arr_dist' ][ name_cat_dist ] is not None :
-                        len_max_molecule_size_data = len( ns[ 'dict_arr_dist' ][ name_cat_dist ] ) # retrieve max molecule size 
-                        plt.plot( np.arange( min( int_max_molecule_size_plot, len_max_molecule_size_data ) ), ns[ 'dict_arr_dist' ][ name_cat_dist ] if len_max_molecule_size_data <= int_max_molecule_size_plot else ns[ 'dict_arr_dist' ][ name_cat_dist ][ : int_max_molecule_size_plot ] )
-                        plt.title( f"{name_cat_dist} ({ns[ 'dict_arr_dist' ][ name_cat_dist ].sum( )} molecules)" )
-                        bk.MPL_SAVE( f"{name_cat_dist}.distribution", folder = path_folder_graph, l_format=['.pdf', '.png'] )
+                    if dict_arr_dist[ name_cat_dist ] is not None :
+                        len_max_molecule_size_data = len( dict_arr_dist[ name_cat_dist ] ) # retrieve max molecule size 
+                        plt.plot( np.arange( min( int_max_molecule_size_plot, len_max_molecule_size_data ) ), dict_arr_dist[ name_cat_dist ] if len_max_molecule_size_data <= int_max_molecule_size_plot else dict_arr_dist[ name_cat_dist ][ : int_max_molecule_size_plot ] )
+                        plt.title( f"{name_cat_dist} ({dict_arr_dist[ name_cat_dist ].sum( )} molecules)" )
+                        bk.MPL_SAVE( f"{name_cat_dist}.distribution", folder = path_folder_graph_noninteractive, l_format=['.pdf', '.png'] )
+                        
+                ''' draw interactive stacked bar graphs '''
+                df_bar = _get_df_bar( dict_arr_dist, int_size_bin_in_base_pairs = 50, int_max_size_in_base_pairs = int_max_molecule_size_plot ) # retrieve a dataframe for drawing a bar graph
+                _draw_bar_plot( 
+                    df_bar, 
+                    [ 'aligned_to_unwanted_sequence', 'cannot_aligned_to_genome',  'aligned_to_genome', ],
+                    title = 'Alignment Results',
+                    flag_save_figure = True, path_folder_graph = path_folder_graph_interactive,
+                )
+                _draw_bar_plot( 
+                    df_bar, [ 
+                        'aligned_to_unwanted_sequence',
+                        'cannot_aligned_to_genome',
+                        'aligned_to_genome__non_chimeric__no_poly_A',
+                        'aligned_to_genome__non_chimeric__external_poly_A__unrefenced_G',
+                        'aligned_to_genome__non_chimeric__internal_poly_A__unrefenced_G',
+                        'aligned_to_genome__non_chimeric__external_poly_A__no_unrefenced_G',
+                        'aligned_to_genome__non_chimeric__internal_poly_A__no_unrefenced_G',
+                        'aligned_to_genome__chimeric__no_poly_A',
+                        'aligned_to_genome__chimeric__external_poly_A__unrefenced_G',
+                        'aligned_to_genome__chimeric__internal_poly_A__unrefenced_G',
+                        'aligned_to_genome__chimeric__external_poly_A__no_unrefenced_G',
+                        'aligned_to_genome__chimeric__internal_poly_A__no_unrefenced_G',
+                    ],
+                    title = 'Adaptor-Based Classification Results',
+                    flag_save_figure = True, path_folder_graph = path_folder_graph_interactive,
+                )
                 
                 ''' export pickle files '''
                 # write distribution data as a pickle file
@@ -3003,7 +3053,7 @@ def LongExtractBarcodeFromBAM(
     int_size_bin_in_base_pairs_for_collecting_size_distributions_at_single_cell_level : int = 50, # the size of the bin (in base pairs) for collecting size distributions at the single-cell level
     verbose: bool = True,
 ) -> None :
-    """# 2023-08-14 23:44:22 
+    """# 2023-08-23 22:44:23 
     
     flag_usage_from_command_line_interface: bool = False, # a flag indicating the usage in the command line
     l_path_file_bam_input: Union[list, None] = None, # list of input BAM files
@@ -3342,7 +3392,7 @@ def LongExtractBarcodeFromBAM(
         return dict( (e, None) for e in l_name_type_dist )
     
     def run_pipeline():
-        """# 2023-07-30 17:20:19 
+        """# 2023-08-23 22:44:15 
         analyze a pipeline for a given list of samples
         """
         # retrieve id of the pipeline
@@ -3749,11 +3799,14 @@ def LongExtractBarcodeFromBAM(
             ''' write temporary objects for debugging '''
             df_bookmark = pd.DataFrame( ns[ 'l_l' ], columns = [ 'int_num_reads_encountered_for_a_batch', 'start__reference_name', 'start__reference_start', 'end__reference_start', 'int_total_num_records_for_a_batch' ] )
             df_bookmark.to_csv( f"{path_folder_output}df_bookmark.tsv.gz", index = False, sep = '\t' ) # for debugging
-            bk.PICKLE_Write( f"{path_folder_output}l_cb_umi.pickle", ns["l_cb_umi"] )# ❤️
+#             bk.PICKLE_Write( f"{path_folder_output}l_cb_umi.pickle", ns["l_cb_umi"] ) # ❤️
             
             """ combine results into a single output BAM file """
             path_file_bam_preprocessed = f"{path_folder_temp}preprocessed.bam"
-            pysam.merge( '--threads', str( min( n_threads, 10 ) ), '-c', '-p', path_file_bam_preprocessed, * glob.glob( f"{path_folder_temp}*.preprocessed.bam" ) ) # merge output BAM files
+            l_path_file = glob.glob( f"{path_folder_temp}*.preprocessed.bam" ) # retrieve a list of BAM files to combine
+            pysam.merge( '--threads', str( min( n_threads, 10 ) ), '-c', '-p', path_file_bam_preprocessed, * l_path_file ) # merge output BAM files
+            for path_file in l_path_file : # delete the temporary files
+                os.remove( path_file )
             pysam.index( path_file_bam_preprocessed ) # index the input BAM file
 
             """ 
@@ -3823,6 +3876,9 @@ def LongExtractBarcodeFromBAM(
                 dict_kmer_from_cb_to_cb = dict( ( kmer, dict_kmer_from_cb_to_cb[ kmer ] ) for kmer in dict_kmer_from_cb_to_cb if dict_kmer_from_cb_to_cb[ kmer ] is not None ) # remove the kmer that are containing collisions
                 dict_len_kmer_to_kmer_from_cb_to_cb[ int_length_kmer_for_cb_ident ] = dict_kmer_from_cb_to_cb
             dict_len_kmer_to_kmer_from_cb_to_cb[ 'l_len_kmer' ] = sorted( dict_len_kmer_to_kmer_from_cb_to_cb[ 'l_len_kmer' ] )[ : : -1 ] # sort the list from largest kmer length to the smallest kmer length (for identifing cell barcode from which the current cb would likely to be derived from)
+            
+            bk.PICKLE_Write( f"{path_folder_output}dict_cb_with_error_to_cb.pickle", dict_cb_with_error_to_cb ) # ❤️
+            bk.PICKLE_Write( f"{path_folder_output}dict_len_kmer_to_kmer_from_cb_to_cb.pickle", dict_len_kmer_to_kmer_from_cb_to_cb ) # ❤️
 
             ''' define a function for correcting CB sequences retrieved from reads using the different levels of dictionaries '''
             def _correct_cell_barcode( cb_umi_padded : str ) :
@@ -3935,7 +3991,7 @@ def LongExtractBarcodeFromBAM(
 
                     reference_name_current = None # initialize the current contig name
                     
-                    set_e = set( ) # ❤️ # for debugging
+                    # set_e = set( ) # ❤️ # for debugging
                     """
                     l_name_type_dist = [
                         'aligned_to_genome', # 0
@@ -4110,9 +4166,9 @@ def LongExtractBarcodeFromBAM(
                         l_l = ns[ 'dict_poly_a_site_to_l_l' ].pop( t_poly_a_site ) # remove the bucket
                         ns[ 'int_bucket_deletion_count' ] += 1 # increase the counter
                         
-                        if t_poly_a_site in set_e : # ❤️
-                            logger.warn( f"{t_poly_a_site} already processed!" ) # ❤️
-                        set_e.add( t_poly_a_site ) # ❤️
+                        # if t_poly_a_site in set_e : # ❤️
+                        #     logger.warn( f"{t_poly_a_site} already processed!" ) # ❤️
+                        # set_e.add( t_poly_a_site ) # ❤️
                         
                         ''' if the number of deletion count exceed the deletion count, re-initialize the bucket container '''
                         if ns[ 'int_bucket_deletion_count' ] > int_max_bucket_deletion_count_before_reinitialize :
@@ -4172,7 +4228,10 @@ def LongExtractBarcodeFromBAM(
                                 ''' write the SAM record (record that does not contain the cell barcode - UMI sequence) ''' 
                                 ns[ 'int_total_num_records_processed' ] += 1
                                 newsamfile.write( r ) # write the record to the output BAM file
-                                ns[ 'dict_arr_dist' ][ 'aligned_to_genome' ] = _update_size_distribution( new_size = dict_tags_existing[ 'LE' ], arr_dist = ns[ 'dict_arr_dist' ][ 'aligned_to_genome' ] ) # update distributions # ❤️❤️❤️❤️❤️
+                                # update relevant distributions 
+                                ns[ 'dict_arr_dist' ][ 'aligned_to_genome' ] = _update_size_distribution( new_size = dict_tags_existing[ 'LE' ], arr_dist = ns[ 'dict_arr_dist' ][ 'aligned_to_genome' ] ) 
+                                name_type_dist = 'aligned_to_genome__no_R1__no_TSO' if dict_tags_existing[ 'XT' ] == -1 else 'aligned_to_genome__no_R1__TSO' # classify read based on the TSO search result
+                                ns[ 'dict_arr_dist' ][ name_type_dist ] = _update_size_distribution( new_size = dict_tags_existing[ 'LE' ], arr_dist = ns[ 'dict_arr_dist' ][ name_type_dist ] ) # update the size distribution associated with the read
                             
                         ''' when all reads of the contig were read, empty all buckets and flush the batch, and wait until all computation has been completed '''
                         for t_poly_a_site in list( ns[ 'dict_poly_a_site_to_l_l' ] ) : # retrieve list of 't_poly_a_site'
@@ -4192,8 +4251,8 @@ def LongExtractBarcodeFromBAM(
                 # sort the output sam file
                 path_file_bam_barcoded_sorted = f"{path_folder_temp}{str_uuid}.barcoded.sorted.bam"
                 pysam.sort( "-o", path_file_bam_barcoded_sorted, '-@', str( min( n_threads, 5 ) ), path_file_bam_barcoded )
-                # index the resulting BAM file
-                pysam.index( path_file_bam_barcoded_sorted )
+                os.remove( path_file_bam_barcoded ) # remove the temporary file
+                pysam.index( path_file_bam_barcoded_sorted ) # index the resulting BAM file
                 
                 """ report the worker has completed all works """
                 pipe_sender.send( 'completed' )  
@@ -4230,6 +4289,7 @@ def LongExtractBarcodeFromBAM(
                 + 2,  # one thread for generating batch, another thread for post-processing of the batch
                 flag_wait_for_a_response_from_worker_after_sending_termination_signal = True, # wait until all worker exists before resuming works in the main process
             )
+            os.remove( path_file_bam_preprocessed ) # delete the temporary file
 
             """ 
             post-processing
@@ -4241,7 +4301,10 @@ def LongExtractBarcodeFromBAM(
                 
                 # combine results into a single output file (initial read analysis)
                 """ combine results into a single output BAM file """
+                l_path_file = glob.glob( f"{path_folder_temp}*.barcoded.sorted.bam" ) # retrieve a list of BAM files to combine
                 pysam.merge( '--threads', str( min( n_threads, 10 ) ), '-c', '-p', f"{path_folder_output}barcoded.bam", * glob.glob( f"{path_folder_temp}*.barcoded.sorted.bam" ) ) # merge output BAM files
+                for path_file in l_path_file : # delete the temporary files
+                    os.remove( path_file )
                 pysam.index( f"{path_folder_output}barcoded.bam" ) # index the input BAM file
 
                 ''' summarize distributions '''
@@ -4263,8 +4326,8 @@ def LongExtractBarcodeFromBAM(
                 Draw plots of distributions
                 """
                 # create output folders
-                path_folder_graph_line, path_folder_graph_bar = f"{path_folder_graph}simple_line_graph/", f"{path_folder_graph}interactive_bar_graph/"
-                for path_folder in [ path_folder_graph_line, path_folder_graph_bar ] :
+                path_folder_graph_noninteractive, path_folder_graph_interactive = f"{path_folder_graph}noninteractive_graph/", f"{path_folder_graph}interactive_graph/"
+                for path_folder in [ path_folder_graph_noninteractive, path_folder_graph_interactive ] :
                     os.makedirs( path_folder, exist_ok = True )
 
                 ''' draw simple line plots '''
@@ -4275,7 +4338,7 @@ def LongExtractBarcodeFromBAM(
                         len_max_molecule_size_data = len( dict_arr_dist[ name_cat_dist ] ) # retrieve max molecule size 
                         plt.plot( np.arange( min( int_max_molecule_size_plot, len_max_molecule_size_data ) ), dict_arr_dist[ name_cat_dist ] if len_max_molecule_size_data <= int_max_molecule_size_plot else dict_arr_dist[ name_cat_dist ][ : int_max_molecule_size_plot ] )
                         plt.title( f"{name_cat_dist} ({dict_arr_dist[ name_cat_dist ].sum( )} molecules)" )
-                        bk.MPL_SAVE( f"{name_cat_dist}.distribution", folder = path_folder_graph_line, l_format=['.pdf', '.png'] )
+                        bk.MPL_SAVE( f"{name_cat_dist}.distribution", folder = path_folder_graph_noninteractive, l_format=['.pdf', '.png'] )
                         
                 ''' draw interactive stacked bar graphs '''
                 df_bar = _get_df_bar( dict_arr_dist, int_size_bin_in_base_pairs = 50, int_max_size_in_base_pairs = int_max_molecule_size_plot ) # retrieve a dataframe for drawing a bar graph
@@ -4283,19 +4346,19 @@ def LongExtractBarcodeFromBAM(
                     df_bar, 
                     [ 'aligned_to_genome__R1__TSO', 'aligned_to_genome__no_R1__TSO',  'aligned_to_genome__R1__no_TSO', 'aligned_to_genome__no_R1__no_TSO', ],
                     title = 'R1 and TSO Adaptor Identification',
-                    flag_save_figure = True, path_folder_graph = path_folder_graph_bar,
+                    flag_save_figure = True, path_folder_graph = path_folder_graph_interactive,
                 )
                 _draw_bar_plot( 
                     df_bar, 
                     [ 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__1', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__2to3', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__4to7', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__8to15', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__16to31', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__32to63', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__64to127', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__128to255', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__256to511', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__512to1023', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__above1024' ],
                     title = 'UMI Duplication Counts',
-                    flag_save_figure = True, path_folder_graph = path_folder_graph_bar,
+                    flag_save_figure = True, path_folder_graph = path_folder_graph_interactive,
                 )
                 _draw_bar_plot( 
                     df_bar, 
                     ['aligned_to_genome__R1__valid_CB__no_internal_polyA', 'aligned_to_genome__R1__valid_CB__internal_polyA', 'aligned_to_genome__R1__no_valid_CB', 'aligned_to_genome__no_R1__TSO', 'aligned_to_genome__no_R1__no_TSO'],
                     title = 'Internal poly(A) Detection',
-                    flag_save_figure = True, path_folder_graph = path_folder_graph_bar,
+                    flag_save_figure = True, path_folder_graph = path_folder_graph_interactive,
                 )
                 
                 ''' export pickle files '''
@@ -4338,18 +4401,39 @@ def LongExtractBarcodeFromBAM(
 def LongCreateReferenceSizeDistribution(
     flag_usage_from_command_line_interface: bool = False,
     l_path_file_distributions: Union[List[str], None] = None, # list of path to the 'dict_arr_dist.pkl' output file of the 'LongExtractBarcodeFromBAM' pipeline for each sample
-    path_folder_output: str = None, # path to the output folder of the 'LongCreateReferenceSizeDistribution' pipeline
-    float_sigma_gaussian_filter : float = 20.0, # the standard deviation of the Gaussian filter that will be applied to the base-pair resolution distribution data (histogram with a bin size of 1bp)
-    float_max_correction_ratio : float = 5.0, # the maximum correction ratio allowed for estimating the confident molecule size ranges for count matrix normalization, where the correction ratio used for adjusting the distribution of the sample to that of the reference distribution is always below the given threshold, 'float_max_correction_ratio'
+    l_name_file_distributions : Union[ None, List[ str ] ] = None, # list of the name representing each 'dict_arr_dist.pkl' output file. Should be unique and non-redundant. if None is given, the absolute, real (soft-link resolved) path of the pickle file will be be used as the name representing the file
+    path_folder_output: Union[ str, None ] = None, # path to the output folder of the 'LongCreateReferenceSizeDistribution' pipeline
+    # smoothening process
+    float_sigma_gaussian_filter : float = 8.0, # the standard deviation of the Gaussian filter that will be applied to the base-pair resolution distribution data (histogram with a bin size of 1bp)
+    # peak removal
+    int_min_total_read_count_for_a_peak : int = 50, # the minimum number of reads in a peak to be considered as a valid peak
+    float_min_ratio_read_count_peak_to_baseline : float = 0.05, # the minimum ratio of the number of reads in the peak to the number of reads included in the baseline
+    float_min_ratio_peak_height_to_baseline_height : float = 0.5, # the minimum ratio of the peak height to the height of the baseline
+    int_size_window_surveying_surrounding_values : int = 4, # the size of the window for estimation of the height of the peak base (since the peak is identified at 50% of its height)
+    int_num_iterative_peak_removal : int = 3, # the number of iterative peak removal process for each distribution
+    # correction ratio calculation & confidence estimation
+    float_max_correction_ratio : float = 10.0, # the maximum correction ratio allowed for estimating the confident molecule size ranges for count matrix normalization, where the correction ratio used for adjusting the distribution of the sample to that of the reference distribution is always below the given threshold, 'float_max_correction_ratio'
+    t_distribution_range_of_interest : List[ int ] = [ 1000, 3500 ], # define a range of distribution of interest for searching optimal coefficient for calculating normalization ratios
+    # generic    
     float_memory_in_GiB: float = 50,
     verbose: bool = True,
 ) -> None :
-    """# 2023-08-17 22:37:10 
-    flag_usage_from_command_line_interface: bool = False,
+    """# 2023-08-23 21:27:06 
     l_path_file_distributions: Union[List[str], None] = None, # list of path to the 'dict_arr_dist.pkl' output file of the 'LongExtractBarcodeFromBAM' pipeline for each sample
-    path_folder_output: str = None, # path to the output folder of the 'LongCreateReferenceSizeDistribution' pipeline
-    float_sigma_gaussian_filter : float = 20.0, # the standard deviation of the Gaussian filter that will be applied to the base-pair resolution distribution data (histogram with a bin size of 1bp)
-    float_max_correction_ratio : float = 5.0, # the maximum correction ratio allowed for estimating the confident molecule size ranges for count matrix normalization, where the correction ratio used for adjusting the distribution of the sample to that of the reference distribution is always below the given threshold, 'float_max_correction_ratio'
+    l_name_file_distributions : Union[ None, List[ str ] ] = None, # list of the name representing each 'dict_arr_dist.pkl' output file. Should be unique and non-redundant. if None is given, the absolute, real (soft-link resolved) path of the pickle file will be be used as the name representing the file
+    path_folder_output: Union[ str, None ] = None, # path to the output folder of the 'LongCreateReferenceSizeDistribution' pipeline
+    # smoothening process
+    float_sigma_gaussian_filter : float = 8.0, # the standard deviation of the Gaussian filter that will be applied to the base-pair resolution distribution data (histogram with a bin size of 1bp)
+    # peak removal
+    int_min_total_read_count_for_a_peak : int = 50, # the minimum number of reads in a peak to be considered as a valid peak
+    float_min_ratio_read_count_peak_to_baseline : float = 0.05, # the minimum ratio of the number of reads in the peak to the number of reads included in the baseline
+    float_min_ratio_peak_height_to_baseline_height : float = 0.5, # the minimum ratio of the peak height to the height of the baseline
+    int_size_window_surveying_surrounding_values : int = 4, # the size of the window for estimation of the height of the peak base (since the peak is identified at 50% of its height)
+    int_num_iterative_peak_removal : int = 3, # the number of iterative peak removal process for each distribution
+    # correction ratio calculation & confidence estimation
+    float_max_correction_ratio : float = 10.0, # the maximum correction ratio allowed for estimating the confident molecule size ranges for count matrix normalization, where the correction ratio used for adjusting the distribution of the sample to that of the reference distribution is always below the given threshold, 'float_max_correction_ratio'
+    t_distribution_range_of_interest : List[ int ] = [ 1000, 3500 ], # define a range of distribution of interest for searching optimal coefficient for calculating normalization ratios
+    # generic    
     float_memory_in_GiB: float = 50,
     verbose: bool = True,
     
@@ -4377,6 +4461,12 @@ def LongCreateReferenceSizeDistribution(
             nargs="*",
         )
         arg_grp_general.add_argument(
+            "-n",
+            "--l_name_file_distributions",
+            help="list of the name representing each 'dict_arr_dist.pkl' output file. Should be unique and non-redundant. if None is given, the absolute, real (soft-link resolved) path of the pickle file will be be used as the name representing the file",
+            nargs="*",
+        )
+        arg_grp_general.add_argument(
             "-o",
             "--path_folder_output",
             help="path to the output folder of the 'LongCreateReferenceSizeDistribution' pipeline",
@@ -4395,31 +4485,84 @@ def LongCreateReferenceSizeDistribution(
             action="store_true"
         )
         
-        arg_grp_gaussian_filter = parser.add_argument_group("Gaussian Filter ")
+        arg_grp_gaussian_filter = parser.add_argument_group("Gaussian Filter")
         arg_grp_gaussian_filter.add_argument(
             "-S",
             "--float_sigma_gaussian_filter",
-            help="(default: 20.0) the standard deviation of the Gaussian filter that will be applied to the base-pair resolution distribution data (histogram with a bin size of 1bp).",
-            default=20.0,
+            help="(default: 8.0) the standard deviation of the Gaussian filter that will be applied to the base-pair resolution distribution data (histogram with a bin size of 1bp).",
+            default=8.0,
             type=float,
         )
-        arg_grp_gaussian_filter.add_argument(
+        
+        arg_grp_peak_removal = parser.add_argument_group("Peak Removal")
+        arg_grp_peak_removal.add_argument(
+            "-P",
+            "--int_min_total_read_count_for_a_peak",
+            help="(default: 50) the minimum number of reads in a peak to be considered as a valid peak.",
+            default=50,
+            type=int,
+        )
+        arg_grp_peak_removal.add_argument(
+            "-R",
+            "--float_min_ratio_read_count_peak_to_baseline",
+            help="(default: 0.05) the minimum ratio of the number of reads in the peak to the number of reads included in the baseline.",
+            default=0.05,
+            type=float,
+        )
+        arg_grp_peak_removal.add_argument(
+            "-H",
+            "--float_min_ratio_peak_height_to_baseline_height",
+            help="(default: 0.5) the minimum ratio of the peak height to the height of the baseline.",
+            default=0.5,
+            type=float,
+        )
+        arg_grp_peak_removal.add_argument(
+            "-W",
+            "--int_size_window_surveying_surrounding_values",
+            help="(default: 4) the size of the window for estimation of the height of the peak base (since the peak is identified at 50% of its height).",
+            default=4,
+            type=int,
+        )
+        arg_grp_peak_removal.add_argument(
+            "-I",
+            "--int_num_iterative_peak_removal",
+            help="(default: 3) the number of iterative peak removal process for each distribution.",
+            default=3,
+            type=int,
+        )
+
+        arg_grp_correction = parser.add_argument_group("Distribution Correction") # correction ratio calculation & confidence estimation
+        arg_grp_correction.add_argument(
             "-C",
             "--float_max_correction_ratio",
-            help="(default: 5.0) the maximum correction ratio allowed for estimating the confident molecule size ranges for count matrix normalization, where the correction ratio used for adjusting the distribution of the sample to that of the reference distribution is always below the given threshold, 'float_max_correction_ratio'.",
-            default=5.0,
+            help="(default: 10.0) the maximum correction ratio allowed for estimating the confident molecule size ranges for count matrix normalization, where the correction ratio used for adjusting the distribution of the sample to that of the reference distribution is always below the given threshold, 'float_max_correction_ratio'.",
+            default=10.0,
             type=float,
+        )
+        arg_grp_correction.add_argument(
+            "-t",
+            "--t_distribution_range_of_interest",
+            help="(default: [ 1000, 3500 ]) define a range of distribution of interest for searching optimal coefficient for calculating normalization ratios.",
+            default=[ 1000, 3500 ],
+            nargs="*",
         )
 
         args = parser.parse_args()
 
         l_path_file_distributions = args.l_path_file_distributions
+        l_name_file_distributions = args.l_name_file_distributions
         path_folder_output = args.path_folder_output
         float_memory_in_GiB = args.float_memory_in_GiB
         verbose = args.verbose
         float_sigma_gaussian_filter = args.float_sigma_gaussian_filter
+        int_min_total_read_count_for_a_peak = args.int_min_total_read_count_for_a_peak
+        float_min_ratio_read_count_peak_to_baseline = args.float_min_ratio_read_count_peak_to_baseline
+        float_min_ratio_peak_height_to_baseline_height = args.float_min_ratio_peak_height_to_baseline_height
+        int_size_window_surveying_surrounding_values = args.int_size_window_surveying_surrounding_values
+        int_num_iterative_peak_removal = args.int_num_iterative_peak_removal
         float_max_correction_ratio = args.float_max_correction_ratio
-
+        t_distribution_range_of_interest = args.t_distribution_range_of_interest
+    
     """
     Start of the pipeline
     """
@@ -4430,39 +4573,24 @@ def LongCreateReferenceSizeDistribution(
     logger.info(f"Started.")
 
     """ handle special cases and invalid inputs """
-    if l_path_file_fastq_input is None or ( path_file_minimap_index_genome is None and am_genome is None ) : # when both the minimap2 aligner and index path are not given
+    if ( l_path_file_distributions is None ) or ( path_folder_output is None ) : # check whether the required input paths were given
         logger.error(
             "Required argument(s) is missing. to view help message, type -h or --help"
         )
         return -1
 
-    """ process required input directories """
-    path_file_minimap_index_genome = os.path.abspath(path_file_minimap_index_genome)
-    l_path_file_minimap_index_unwanted = list( os.path.abspath( e ) for e in l_path_file_minimap_index_unwanted )
-
     """ process input directory  """
-    l_path_file_fastq_input = list(
-        os.path.abspath(path_file_fastq_input)
-        for path_file_fastq_input in l_path_file_fastq_input
+    l_path_file_distributions = list(
+        os.path.abspath(path_file_distributions)
+        for path_file_distributions in l_path_file_distributions
     )
-    if l_path_folder_output is not None:
-        """# when a valid list of output folders were given # ensure directories of the output folder ends with '/' characters"""
-        l_path_folder_output = list(
-            os.path.abspath(path_folder) + "/" for path_folder in l_path_folder_output
-        )
-    else:
-        """# compose a list of default 'path_folder_output' values for the given list of input files"""
-        l_path_file_fastq_input_reversed = deepcopy(
-            l_path_file_fastq_input[::-1]
-        )  # reverse the input file paths so that pop operation yield the element located at the front
-        l_path_folder_output = []
-        for str_mode_ouro_count in l_str_mode_ouro_count:
-            path_file_fastq = l_path_file_fastq_input_reversed.pop()
-            path_folder_output = (
-                f"{path_file_fastq.rsplit( '/', 1 )[ 0 ]}LongFilterNSplit_output/"
-            )
-            l_path_folder_output.append(path_folder_output)
+    """# when a valid list of output folders were given # ensure directories of the output folder ends with '/' characters"""
+    path_folder_output = os.path.abspath(path_folder_output) + "/"
 
+    """ initialize 'l_name_file_distributions' when not given """
+    if l_name_file_distributions is None : # if valid 'l_name_file_distributions' is not given, initialize using real, absolute path
+        l_name_file_distributions = list( os.path.abspath( os.path.realpath( e ) ) for e in l_path_file_distributions ) # initialize
+            
     """ 
     Fixed Settings
     """
@@ -4473,34 +4601,249 @@ def LongCreateReferenceSizeDistribution(
     Exit early when no samples is anlayzed
     """
     # if no samples will be analyzed, return
-    if len(l_path_folder_output) == 0:
+    if len(l_path_file_distributions) == 0:
         logger.info(f"no output folders were given, exiting")
         return
         
     """
     Pipeline specific functions
     """
-    def _initialize_dict_arr_dist( ) :
-        """ # 2023-08-03 11:49:26 
-        initialize 'dict_arr_dist'
+
+    """
+    run pipeline
+    """
+    
+    """
+    internal setting
+    """
+    from scipy.ndimage import gaussian_filter
+    from scipy.signal import find_peaks
+    from scipy import optimize
+    import plotly.express as px
+    
+    logger.setLevel( logging.INFO ) # reset logging info after importing
+
+    name_type_dist_for_creating_reference = 'aligned_to_genome__R1__valid_CB__UMI_deduplicated' # define name of the type of the distribution for creating the reference
+    dict_kw_gaussian_filter = {
+        'sigma' : float_sigma_gaussian_filter, 
+        'output' : float, 
+        'mode' : 'nearest', 
+        'truncate' : 4
+    }
+    dict_kw_find_peaks = {
+        'rel_height' : 0.5, 
+        'width' : ( 0.5, 15 ), 
+        'prominence' : 1, 
+        'threshold' : 1
+    }
+
+    ''' read distributions '''
+    logger.info(f"reading distributions")
+    l_arr_dist = list( bk.PICKLE_Read( path_file_distributions )[ name_type_dist_for_creating_reference ] for path_file_distributions in l_path_file_distributions ) # retrieve distributions
+
+    ''' perform peak removal '''
+    logger.info(f"performing peak removal")
+    def _remove_peaks( 
+        arr,
+        int_min_total_read_count_for_a_peak : int = int_min_total_read_count_for_a_peak, 
+        float_min_ratio_read_count_peak_to_baseline : float = float_min_ratio_read_count_peak_to_baseline, 
+        float_min_ratio_peak_height_to_baseline_height : float = float_min_ratio_peak_height_to_baseline_height, 
+        int_size_window_surveying_surrounding_values : int = int_size_window_surveying_surrounding_values, 
+        dict_kw_find_peaks : dict = dict_kw_find_peaks,
+        flag_plot_graph : bool = False,
+        figsize : tuple = ( 30, 5 ),
+    ) :
+        """ # 2023-08-22 22:16:36 
+        remove peaks from the given distributions
         """
-        return {
-            'aligned_to_unwanted_sequence' : None,
-            'cannot_aligned_to_genome' : None,
-            'aligned_to_genome' : None,
+        ''' search peaks '''
+        arr_peaks, properties = find_peaks( arr, ** dict_kw_find_peaks ) 
 
-            'aligned_to_genome__non_chimeric__no_poly_A' : None,
-            'aligned_to_genome__non_chimeric__external_poly_A__unrefenced_G' : None,
-            'aligned_to_genome__non_chimeric__internal_poly_A__unrefenced_G' : None,
-            'aligned_to_genome__non_chimeric__external_poly_A__no_unrefenced_G' : None,
-            'aligned_to_genome__non_chimeric__internal_poly_A__no_unrefenced_G' : None,
+        ''' search for significant peaks '''
+        l_idx_of_significant_peak = [ ]
+        for idx_peak in range( len( arr_peaks ) ) : # iterate each peak
+            pos_peak_start = math.floor( properties["left_ips"][idx_peak] )
+            pos_peak_end = math.ceil( properties["right_ips"][idx_peak] )
+            int_height_peak = properties["prominences"][idx_peak]
+            int_height_baseline_and_peak = arr[ arr_peaks[ idx_peak ] ]
+            int_height_baseline = int_height_baseline_and_peak - int_height_peak # calculate baseline height
+            int_total_count_excluding_peak = ( ( arr[ pos_peak_start ] + arr[ pos_peak_end ] ) / 2 ) * ( pos_peak_end - pos_peak_start + 1 )
+            int_total_count_including_peak = np.sum( arr[ pos_peak_start : pos_peak_end + 1 ] )
+            int_total_count_peak = int_total_count_including_peak - int_total_count_excluding_peak # retrieve total count of peak
 
-            'aligned_to_genome__chimeric__no_poly_A' : None,
-            'aligned_to_genome__chimeric__external_poly_A__unrefenced_G' : None,
-            'aligned_to_genome__chimeric__internal_poly_A__unrefenced_G' : None,
-            'aligned_to_genome__chimeric__external_poly_A__no_unrefenced_G' : None,
-            'aligned_to_genome__chimeric__internal_poly_A__no_unrefenced_G' : None,
-        }
+            if ( int_total_count_peak >= int_min_total_read_count_for_a_peak ) and ( ( int_total_count_peak / int_total_count_excluding_peak ) >= float_min_ratio_read_count_peak_to_baseline ) and ( ( int_height_baseline <= 0 ) or ( ( int_height_peak / int_height_baseline ) > float_min_ratio_peak_height_to_baseline_height ) ) : # identify significant peak
+                l_idx_of_significant_peak.append( idx_peak ) # collect significant peak
+
+        ''' filter out insignificant peaks '''
+        # filter and retain only the significant peaks
+        arr_peaks = arr_peaks[ l_idx_of_significant_peak ]
+        for k in list( properties ) :
+            properties[ k ] = properties[ k ][ l_idx_of_significant_peak ]
+
+        ''' remove peaks from the distribution '''
+        arr_without_peak = arr.copy( ) # initialize 'arr_without_peak'
+
+        def __log_avg( a ) :
+            return np.exp( np.log( a ).mean( ) )
+        for idx_peak in range( len( arr_peaks ) ) : # iterate each peak
+            pos_peak_start, pos_peak_end = max( 0, math.floor( properties["left_ips"][idx_peak] - int_size_window_surveying_surrounding_values / 2 ) ), min( len( arr ) - 1, math.ceil( properties["right_ips"][idx_peak] + int_size_window_surveying_surrounding_values / 2 ) ) # shift peak start and end positions by 'int_size_window_surveying_surrounding_values'
+            val_start, val_end = __log_avg( arr[ pos_peak_start - int_size_window_surveying_surrounding_values : pos_peak_start + 1 ] ), __log_avg( arr[ pos_peak_end : pos_peak_end + int_size_window_surveying_surrounding_values + 1 ] ) # retrieve the log-average of read count values around the peak start and end positions
+            slope = ( val_end - val_start ) / ( pos_peak_end - pos_peak_start ) # retrieve the slope of the graph after removing the peak # linear interpolation
+            for pos in range( pos_peak_start, pos_peak_end + 1 ) : # remove the peak for the positions covered by the peak
+                arr_without_peak[ pos ] = val_start + slope * ( pos - pos_peak_start )
+
+        ''' plot '''
+        if flag_plot_graph :
+            fig, ax = plt.subplots( 1, 1, figsize = figsize )
+            ax.plot( arr, color = 'b', alpha = 0.2 ) # plot original distribution
+            ax.plot( arr_without_peak, color = 'b', alpha = 0.5 ) # plot distribution without peak
+            arr_dist_smoothened = gaussian_filter( arr_without_peak, sigma = 5, output = float, mode = 'nearest', truncate = 4 ) # smoothen the distribution
+            ax.plot( arr_dist_smoothened, '-', lw = 6.5, color = 'g' ) # plot smoothened graph
+            # annotate peaks
+            ax.plot( arr_peaks, arr[ arr_peaks ], 'x', color = 'C1' ) 
+            ax.vlines(x=arr_peaks, ymin=arr[arr_peaks] - properties["prominences"], ymax = arr[arr_peaks], color = "C1", alpha = 0.4)
+            ax.hlines(y=properties["width_heights"], xmin=properties["left_ips"], xmax=properties["right_ips"], color = "C1", alpha = 0.4)
+        return arr_without_peak # return the result
+    def _iterative_peak_removal( arr, int_num_iterative_peak_removal : int = 3 ) :
+        """ # 2023-08-22 22:37:33 
+        perform iterative peak removal
+        """
+        arr_without_peak = arr.copy( ) # initialize 'arr_without_peak'
+        for _ in range( int_num_iterative_peak_removal ) :
+            arr_without_peak = _remove_peaks( arr_without_peak ) # remove peaks
+        return arr_without_peak # return the result
+    l_arr_dist_peak_removed = list( _iterative_peak_removal( arr, int_num_iterative_peak_removal = int_num_iterative_peak_removal ) for arr in l_arr_dist )
+
+    ''' smoothen the distributions '''
+    logger.info(f"smoothening the distributions")
+    l_arr_dist_smoothened = list( gaussian_filter( arr, ** dict_kw_gaussian_filter ) for arr in l_arr_dist_peak_removed ) # smoothen the distributions
+
+    ''' calculate the log average of the distributions (reference distribution) '''
+    logger.info(f"creating the reference distribution")
+    def _log_average_of_distributions( l_arr_dist : List ) :
+        """ # 2023-08-22 22:51:51 
+        calculate log average of distributions + 1 - 1 (adding + 1 to each distribution and calculating log average of the distributions and subtract 1 from the distribution)
+        """
+        # copy 'arr_dist'
+        l_arr_dist = list( arr.copy( ) for arr in l_arr_dist )
+        # add +1
+        for arr in l_arr_dist :
+            arr += 1   
+        # perform log transformation
+        l_arr_dist = list( np.log( arr ) for arr in l_arr_dist )
+        # calculate average of the combined distributions
+        arr_dist_combined = None
+        for arr_dist in l_arr_dist :
+            arr_dist_combined = _combine_size_distribution( arr_dist_combined, arr_dist )
+        arr_dist_combined /= len( l_arr_dist )
+        # perform inverse of log transformation, and subtract 1
+        arr_dist_combined = np.exp( arr_dist_combined ) - 1
+        return arr_dist_combined
+    arr_dist_combined = _log_average_of_distributions( l_arr_dist_smoothened ) 
+
+    ''' calculate optimal correction ratios '''
+    logger.info(f"calculating the optimal correction ratios")
+    def _calculate_ratio( arr_dist_numerator, arr_dist_denominator, value_to_replace_nan = 0 ) :
+        len_numerator, len_denominator = len( arr_dist_numerator ), len( arr_dist_denominator )
+        # expand the other array whose length is shorter than the other
+        if len_numerator > len_denominator :
+            arr = np.zeros( len_numerator )
+            arr[ : len_denominator ] = arr_dist_denominator
+            arr_dist_denominator = arr
+        else :
+            arr = np.zeros( len_denominator )
+            arr[ : len_numerator ] = arr_dist_numerator
+            arr_dist_numerator = arr
+        res = arr_dist_numerator / arr_dist_denominator
+        res[ np.isnan( res ) ] = value_to_replace_nan # replace nan values
+        return res
+
+    l_optimal_coefficient = [ ]
+    l_arr_ratio_to_ref = [ ]
+    slice_distribution_range_of_interest = slice( * t_distribution_range_of_interest ) # define a range of distribution of interest for searching optimal coefficient for calculating normalization ratios
+    for arr in l_arr_dist_smoothened :
+        def f( ratio ) : # define a function to optimize
+            """ # 2023-08-23 14:57:49 
+            """
+            arr_ratio = _calculate_ratio( arr_dist_combined[ slice_distribution_range_of_interest ], arr[ slice_distribution_range_of_interest ] * ratio ) # use 'slice_distribution_range_of_interest' range for calculating score for searching the optimal cooefficient
+            score = np.abs( np.log( arr_ratio[ ( arr_ratio != 0 ) & ( ~ np.isinf( arr_ratio ) ) ] ) ).mean( )
+            return score
+
+        grid = (0, 100, 0.1) # define the range for the search
+        float_optimal_coefficient = optimize.brute(f, (grid, ))[ 0 ]
+        l_optimal_coefficient.append( float_optimal_coefficient )
+        l_arr_ratio_to_ref.append( _calculate_ratio( arr_dist_combined, arr * float_optimal_coefficient ) )
+        # print( f"'{n}' x {np.round( float_optimal_coefficient, 2 )},\t{np.round( f( 1 ), 2 )} > {np.round( f( float_optimal_coefficient ), 2 )}" ) # print the optimization results
+
+    ''' plot graph (interactive) '''
+    # create output folders
+    path_folder_graph = f"{path_folder_output}graph/"
+    path_folder_graph_noninteractive, path_folder_graph_interactive = f"{path_folder_graph}noninteractive_graph/", f"{path_folder_graph}interactive_graph/"
+    for path_folder in [ path_folder_graph, path_folder_graph_noninteractive, path_folder_graph_interactive ] :
+        os.makedirs( path_folder, exist_ok = True )
+    # display correction ratios
+    # compose a dataframe for plotting
+    l_l = [ ] # initialize the container
+    for arr, name in zip( l_arr_ratio_to_ref, l_name_file_distributions ) :
+        for i in range( len( arr ) ) :
+            l_l.append( [ name, i, arr[ i ] ] )
+    df_ratio = pd.DataFrame( l_l, columns = [ 'name_file_distributions', 'molecule_size_in_base_pairs', 'correction_ratio_to_reference' ] )
+
+    # plot a plotly graph
+    fig = px.line( df_ratio, x = 'molecule_size_in_base_pairs', y = 'correction_ratio_to_reference', color = 'name_file_distributions' )
+    fig.update_yaxes( range = [ 0, float_max_correction_ratio ] )
+    fig.write_html( f'{path_folder_graph_interactive}correction_ratio_to_reference.html' ) # write a html page
+
+    ''' record the size range where correction can be performed confidently  '''
+    l_l = [ ]
+    for arr, name, path_file in zip( l_arr_ratio_to_ref, l_name_file_distributions, l_path_file_distributions ) :
+        arr_pos_invalid = [ 0 ] + list( np.where( arr > float_max_correction_ratio )[ 0 ] ) + [ len( arr ) ] # add start and end of the array as the boundary
+        st_range_of_interest, en_range_of_interest = None, None
+        for i in range( len( arr_pos_invalid ) - 1 ) :
+            st, en = arr_pos_invalid[ i ], arr_pos_invalid[ i + 1 ]
+            int_size_overlap = bk.INTERVAL_Overlap( [ st, en ], t_distribution_range_of_interest )
+            if int_size_overlap > 0 : # if the overlap exists
+                st_range_of_interest, en_range_of_interest = st, en # record the start and end positions of interest.
+                break
+        l_l.append( [ path_file, name, st_range_of_interest, en_range_of_interest, int_size_overlap, t_distribution_range_of_interest ] )
+    df_range_confident = pd.DataFrame( l_l, columns = [ 'path_file', 'name', 'start_range_of_interest', 'end_range_of_interest', 'int_size_overlap', 't_distribution_range_of_interest' ] ) # compose the dataframe
+    df_range_confident.to_csv( f'{path_folder_output}df_range_confident.tsv.gz', sep = '\t', index = False ) # save as a file
+
+    ''' plot graph (non-interactive) '''
+    for name_col in [ 'start_range_of_interest', 'end_range_of_interest' ] :
+        bk.MPL_1D_Sort_Plot( df_range_confident[ name_col ] )
+        bk.MPL_SAVE( f"{name_col}", folder = path_folder_graph_noninteractive, l_format=['.pdf', '.png'] )
+
+    ''' export data '''
+    logger.info(f"exporting output data")
+    # compose a namespace
+    dict_output = {
+        'setting' : {
+            'flag_usage_from_command_line_interface' : flag_usage_from_command_line_interface,
+            'l_path_file_distributions' : l_path_file_distributions,
+            'l_name_file_distributions' : l_name_file_distributions,
+            'float_sigma_gaussian_filter' : float_sigma_gaussian_filter,
+            'int_min_total_read_count_for_a_peak' : int_min_total_read_count_for_a_peak,
+            'float_min_ratio_read_count_peak_to_baseline' : float_min_ratio_read_count_peak_to_baseline,
+            'float_min_ratio_peak_height_to_baseline_height' : float_min_ratio_peak_height_to_baseline_height,
+            'int_size_window_surveying_surrounding_values' : int_size_window_surveying_surrounding_values,
+            'int_num_iterative_peak_removal' : int_num_iterative_peak_removal,
+            'float_max_correction_ratio' : float_max_correction_ratio,
+            't_distribution_range_of_interest' : t_distribution_range_of_interest,
+            'float_memory_in_GiB' : float_memory_in_GiB,
+            'verbose' : verbose,
+            'name_type_dist_for_creating_reference' : name_type_dist_for_creating_reference,
+            'dict_kw_gaussian_filter' : dict_kw_gaussian_filter,
+        },
+        'l_arr_dist' : l_arr_dist,
+        'l_arr_dist_peak_removed' : l_arr_dist_peak_removed,
+        'l_arr_dist_smoothened' : l_arr_dist_smoothened,
+        'l_optimal_coefficient' : l_optimal_coefficient,
+        'l_arr_ratio_to_ref' : l_arr_ratio_to_ref,
+        'arr_dist_combined' : arr_dist_combined,
+        'df_range_confident' : df_range_confident,
+    }
+    bk.PICKLE_Write( f"{path_folder_output}dict_output.pickle", dict_output )
         
     logger.info(f"Completed.")
     return 
