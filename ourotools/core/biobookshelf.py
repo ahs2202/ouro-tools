@@ -1708,7 +1708,7 @@ def Multiprocessing(
 
 
 class Offload_Works:
-    """# 2023-08-12 16:59:52 
+    """# 2023-08-27 18:26:25 
     a class for offloading works in a separate server process without blocking the main process. similar to async. methods, but using processes instead of threads.
 
     int_max_num_workers : Union[ int, None ] = None # maximum number of worker processes. if the maximum number of works are offloaded, submitting a new work will fail. By default, there will be no limit of the number of worker processes
@@ -1742,7 +1742,7 @@ class Offload_Works:
         """# 2023-01-07 12:30:24
         return the number of active worker processes that are actively doing the works
         """
-        self.collect_results()  # collect completed results
+        self.collect_results( flag_return_results = False )  # collect completed results
         return len(self._dict_worker)
 
     @property
@@ -1750,7 +1750,7 @@ class Offload_Works:
         """# 2023-01-07 12:30:31
         return the number of completed results
         """
-        self.collect_results()  # collect completed results
+        self.collect_results( flag_return_results = False )  # collect completed results
         return len(self._dict_res)
 
     @property
@@ -1760,11 +1760,11 @@ class Offload_Works:
         """
         return self._int_max_num_workers
 
-    def collect_results(self):
-        """# 2023-01-07 12:37:00
+    def collect_results(self, flag_return_results : bool = False):
+        """# 2023-08-27 18:18:40 
         collect completed results of the submitted works to the current object and store the results internally.
 
-        return the number of collected results
+        flag_return_results : bool = False # If True, return the dictionary containing the all the completed results. The returned results will be flushed from the internal data container. If False, return the number of collected results
         """
         int_num_collected_results = 0  # count the number of collected works
         for str_uuid_work in list(self._dict_worker):
@@ -1775,7 +1775,12 @@ class Offload_Works:
                 del self._dict_worker[str_uuid_work]  # delete the record of the worker
                 int_num_collected_results += 1
             del worker
-        return int_num_collected_results
+        if flag_return_results :
+            dict_result = self._dict_res # retrieve all completed results
+            self._dict_res = dict( ) # initialize the internal container for saving results
+            return dict_result   
+        else :
+            return int_num_collected_results
 
     def submit_work(self, func, args: tuple = (), kwargs: dict = dict(), associated_data = None ):
         """# 2023-08-12 16:59:57 
@@ -1833,14 +1838,14 @@ class Offload_Works:
 
         return True if the work has been completed. return False if the work has not been completed.
         """
-        self.collect_results()  # collect the completed results
+        self.collect_results( flag_return_results = False )  # collect the completed results
         return str_uuid_work in self._dict_res
 
     def wait(self, str_uuid_work: str):
         """# 2023-01-07 13:24:14
         wait until the given work has been completed.
         """
-        self.collect_results()  # collect the completed results
+        self.collect_results( flag_return_results = False )  # collect the completed results
 
         # if the work currently active, wait until the work is completed and collect the result
         if str_uuid_work in self._dict_worker:
@@ -1867,14 +1872,14 @@ class Offload_Works:
         wait all works to be completed.
         flag_return_results : bool = False # wait for all submitted works, and return results as a dictionary
         """
-        self.collect_results()  # collect the completed results
+        self.collect_results( flag_return_results = False )  # collect the completed results
 
         for str_uuid_work in list(self._dict_worker):  # for each uncompleted work
             self.wait(str_uuid_work)  # wait until the work is completed
             
         if flag_return_results : # return the results
-            dict_result = self._dict_res # return all results
-            self._dict_res = dict( ) # initialize the internal container for saving dictionary results
+            dict_result = self._dict_res # retrieve all completed results
+            self._dict_res = dict( ) # initialize the internal container for saving results
             return dict_result
 
 

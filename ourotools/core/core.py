@@ -69,7 +69,7 @@ from tqdm import tqdm as progress_bar  # for progress bar
 import argparse
 import traceback
 import os, sys, getopt
-from io import StringIO
+from io import StringIO, BytesIO
 import time
 import math
 import mappy
@@ -87,13 +87,16 @@ logger = logging.getLogger("ouro-count")
 # define version
 _version_ = "0.0.1"
 _scelephant_version_ = _version_
-_last_modified_time_ = "2023-08-10 16:40:52"
+_last_modified_time_ = "2023-08-24 14:40:43 "
 
 str_release_note = [
     """
     # %% RELEASE NOTE %%
     # 2023-08-10 16:41:24 
     draft version of 'LongFilterNSplit' function completed
+    
+    # 2023-08-24 14:40:47 
+    draft version of 'LongExtractBarcodeFromBAM' and 'LongCreateReferenceSizeDistribution' function completed.
 
     ##### Future implementations #####
 
@@ -3799,7 +3802,7 @@ def LongExtractBarcodeFromBAM(
             ''' write temporary objects for debugging '''
             df_bookmark = pd.DataFrame( ns[ 'l_l' ], columns = [ 'int_num_reads_encountered_for_a_batch', 'start__reference_name', 'start__reference_start', 'end__reference_start', 'int_total_num_records_for_a_batch' ] )
             df_bookmark.to_csv( f"{path_folder_output}df_bookmark.tsv.gz", index = False, sep = '\t' ) # for debugging
-#             bk.PICKLE_Write( f"{path_folder_output}l_cb_umi.pickle", ns["l_cb_umi"] ) # ❤️
+            # bk.PICKLE_Write( f"{path_folder_output}l_cb_umi.pickle", ns["l_cb_umi"] ) # ❤️
             
             """ combine results into a single output BAM file """
             path_file_bam_preprocessed = f"{path_folder_temp}preprocessed.bam"
@@ -3877,8 +3880,9 @@ def LongExtractBarcodeFromBAM(
                 dict_len_kmer_to_kmer_from_cb_to_cb[ int_length_kmer_for_cb_ident ] = dict_kmer_from_cb_to_cb
             dict_len_kmer_to_kmer_from_cb_to_cb[ 'l_len_kmer' ] = sorted( dict_len_kmer_to_kmer_from_cb_to_cb[ 'l_len_kmer' ] )[ : : -1 ] # sort the list from largest kmer length to the smallest kmer length (for identifing cell barcode from which the current cb would likely to be derived from)
             
-            bk.PICKLE_Write( f"{path_folder_output}dict_cb_with_error_to_cb.pickle", dict_cb_with_error_to_cb ) # ❤️
-            bk.PICKLE_Write( f"{path_folder_output}dict_len_kmer_to_kmer_from_cb_to_cb.pickle", dict_len_kmer_to_kmer_from_cb_to_cb ) # ❤️
+            # bk.PICKLE_Write( f"{path_folder_output}dict_cb_with_error_to_cb.pickle", dict_cb_with_error_to_cb ) # ❤️
+            # bk.PICKLE_Write( f"{path_folder_output}dict_len_kmer_to_kmer_from_cb_to_cb.pickle", dict_len_kmer_to_kmer_from_cb_to_cb ) # ❤️
+            # bk.PICKLE_Write( f"{path_folder_output}set_cb_valid.pickle", set_cb_valid ) # ❤️
 
             ''' define a function for correcting CB sequences retrieved from reads using the different levels of dictionaries '''
             def _correct_cell_barcode( cb_umi_padded : str ) :
@@ -3983,7 +3987,9 @@ def LongExtractBarcodeFromBAM(
                     open and process the input BAM file
                     """
                     int_max_bucket_deletion_count_before_reinitialize = 10000 # the max number of bucket deletion count before re-initializing the bucket container (python dictionary, when too many keys are deleted, lead to 'memory leak')
-                    int_max_num_records_in_a_batch_of_buckets = 10000 # initialize the total number of records in a batch of buckets
+                    int_max_num_records_in_a_batch_of_buckets = 20000 # initialize the total number of records in a batch of buckets
+                    int_max_num_batches_in_the_result_container_before_flushing = 1 # the max number of batches whose results can be stored in the container before flushing the result to the storage. if this number is too large, the process will consume too much memory 
+                    
                     ns = { 'int_total_num_records_processed' : 0, 'int_bucket_deletion_count' : 0 } # create a namespace for buckets # a counter counting the number of bucket deleted from 'dict_poly_a_site_to_l_l'. if the number exceed
                     ns[ 'dict_poly_a_site_to_l_l' ] = dict( ) # a container to collect reads for alignment end position
                     ns[ 'dict_arr_dist' ] = _initialize_dict_arr_dist( ) # initialize 'dict_arr_dist'
@@ -4020,6 +4026,9 @@ def LongExtractBarcodeFromBAM(
                         'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__512to1023', # 19
                         'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__above1024', # 20
                     ] # list of distribution types
+                    """
+                    """
+                    define functions for offloading works for multiprocessing
                     """
                     def _process_buckets( l_l_dict_tags_existing ) :
                         """ # 2023-08-14 15:46:16 
@@ -4137,10 +4146,11 @@ def LongExtractBarcodeFromBAM(
                         ns[ 'dict_arr_dist_single_cell_level' ] = _batch_update_dictionary_of_size_distributions( dict_arr_dist = ns[ 'dict_arr_dist_single_cell_level' ], dict_l_len = dict_arr_len_single_cell_level ) # update single-cell distributions
                         ns[ 'dict_arr_dist' ] = _batch_update_dictionary_of_size_distributions( dict_arr_dist = ns[ 'dict_arr_dist' ], dict_l_len = dict_arr_len ) # update bulk-level distributions
 
-                    def _write_results_from_offloaded_works( ) :
-                        """ # 2023-08-12 21:57:27 
+                    def _write_results_from_offloaded_works( flag_wait_all : bool = False ) :
+                        """ # 2023-08-27 18:11:43 
+                        flag_wait_all : bool = False # if True, wait until all processes completed their works, if False, write results currently contained in the workers object.
                         """
-                        for res in workers_for_bucket_processing.wait_all( flag_return_results = True ).values( ) : # wait for all submitted works to be completed, and retrieve results for each work
+                        for res in ( workers_for_bucket_processing.wait_all if flag_wait_all else workers_for_bucket_processing.collect_results )( flag_return_results = True ).values( ) : # 'flag_wait_all' is True, wait until all processes completed their works. # wait for all submitted works to be completed, and retrieve results for each work
                             _post_process_buckets( res[ 'result' ], res[ 'associated_data' ] ) # save the sam records to the file
                     
                     def _initialize_a_batch_of_buckets( ) :
@@ -4149,16 +4159,21 @@ def LongExtractBarcodeFromBAM(
                         ns[ 'l_l_dict_tags_existing' ] = [ ] # a container of the list of buckets
                         ns[ 'l_l' ] = [ ] # a container of the data associated with the list of buckets
                         ns[ 'int_total_num_records_in_a_batch_of_buckets' ] = 0 # initialize the total number of records in a batch of buckets
-                        
+
                     def _flush_the_current_batch_of_buckets( ) :
-                        """ # 2023-08-14 16:27:15 
+                        """ # 2023-08-27 18:11:36 
                         flush the current batch of buckets
+                        
+                        flag_wait_all : bool = False # if True, wait until all processes completed their works, if False, write results currently contained in the workers object.
                         """
-                        if not workers_for_bucket_processing.is_worker_available : # if all workers are working, wait for a while until workers are idle
-                            _write_results_from_offloaded_works( ) # flush results from offloaded computations
+                        if not workers_for_bucket_processing.is_worker_available : # if all workers are working, wait for a while until all workers are idle 
+                            _write_results_from_offloaded_works( flag_wait_all = False ) # flush results from offloaded computations, without waiting all works to be completed 
+                            _write_results_from_offloaded_works( flag_wait_all = True ) # flush results from offloaded computations, waiting all works to be completed 
+                        elif workers_for_bucket_processing.int_num_completed_results >= int_max_num_batches_in_the_result_container_before_flushing : # if the result container became too large, empty the container
+                            _write_results_from_offloaded_works( flag_wait_all = False ) # flush results from offloaded computations, without waiting all works to be completed 
                         workers_for_bucket_processing.submit_work( _process_buckets, args = ( ns[ 'l_l_dict_tags_existing' ], ), associated_data = ns[ 'l_l' ] ) # submit the work for offloading (append the list of pysam objects as the data associated with the work) # flush the current batch of the buckets
                         _initialize_a_batch_of_buckets( ) # initialize the next batch of the buckets
-                    
+
                     def _empty_bucket( t_poly_a_site ) :
                         """ # 2023-08-10 21:21:29 
                         empty bucket for the 't_poly_a_site' by clustering UMI of the reads of the bucket and write the reads to the output BAM file
@@ -4237,7 +4252,7 @@ def LongExtractBarcodeFromBAM(
                         for t_poly_a_site in list( ns[ 'dict_poly_a_site_to_l_l' ] ) : # retrieve list of 't_poly_a_site'
                             _empty_bucket( t_poly_a_site )
                         _flush_the_current_batch_of_buckets( ) # flush the last batch of the buckets
-                        _write_results_from_offloaded_works( ) # flush results from offloaded computations
+                        _write_results_from_offloaded_works( flag_wait_all = True ) # wait for all works to be completed, and flush results from offloaded computations
 
                     """ report a batch has been completed """
                     pipe_sender.send( { 
@@ -4847,6 +4862,4283 @@ def LongCreateReferenceSizeDistribution(
         
     logger.info(f"Completed.")
     return 
+
+def LongExportNormalizedCountMatrix(
+    scidx: Union[dict, None] = None,
+    flag_usage_from_command_line_interface: bool = False,
+    path_folder_ref: Union[str, None] = None,
+    path_file_fa_genome: Union[str, None] = None,
+    path_file_gtf_genome: Union[str, None] = None,
+    path_file_fa_transcriptome: Union[str, None] = None,
+    l_path_file_bam_input: Union[list, None] = None,
+    l_path_folder_output: [list[str], None] = None,
+    n_threads: int = 16,
+    float_memory_in_GiB: float = 50,
+    int_num_sam_records_for_each_chunk: int = 300000,
+    str_name_gtf_attr_for_name_transcript: str = "transcript_name",
+    int_min_mapq_unique_mapped_for_gex_data: int = 255,
+    int_min_mapq_unique_mapped_for_atac_data: int = 60,
+    int_n_bases_padding_around_interval: int = 10,
+    path_file_tsv_repeatmasker_ucsc: Union[str, None] = None,
+    l_repClass_repeatmasker_ucsc: list[str] = [
+        "SINE",
+        "LINE",
+        "LTR",
+        "DNA",
+        "Retroposon",
+    ],
+    int_min_length_repeatmasker_ucsc: int = 100,
+    flag_use_gene_isoform_and_intron_assignment_from_10x_cellranger: bool = False,
+    flag_include_read_aligned_to_opposite_strand: bool = False,
+    flag_include_read_aligned_to_intron: bool = False,
+    str_name_gtf_attr_for_id_gene: str = "gene_id",
+    str_name_gtf_attr_for_name_gene: str = "gene_name",
+    str_name_gtf_attr_for_id_transcript: str = "transcript_id",
+    path_file_gff_regulatory_element=None,
+    str_name_gff_attr_id_regulatory_element="ID",
+    flag_does_not_merge_overlapping_genes_with_the_same_gene_name_and_strand_orientation: bool = False,
+    int_min_length_regulatory_element: int = 50,
+    int_bp_padding_regulatory_element_anno: int = 2000,
+    float_max_prop_unfiltered_rpmk=1,
+    flag_does_not_delete_sequence_and_sequence_qual: bool = False,
+    flag_skip_read_analysis_summary_output_bam_file: bool = False,
+    flag_skip_read_analysis_summary_output_tsv_file: bool = False,
+    flag_turn_off_catching_all_reads_by_binning: bool = False,
+    int_bp_for_bins: int = 100,
+    flag_exclude_reads_assigned_to_features_and_count_every_read_in_bam_during_binning: bool = False,
+    flag_include_strand_specific_counts: bool = False,
+    verbose: bool = True,
+    l_str_mode_scarab_count: list[
+        Literal[
+            "gex5prime-single-end",
+            "gex5prime-paired-end",
+            "gex3prime-single-end",
+            "gex3prime",
+            "gex",
+            "gex5prime",
+            "atac",
+            "multiome",
+        ]
+    ] = ["gex3prime"],
+    int_bp_padding_for_defining_promoter_from_transcript_start: int = 2000,
+    int_min_mapq_minimap2_tx_assignment=30,
+    flag_does_not_remove_the_version_information_from_id_transcript_in_the_file_fa_transcriptome: bool = False,
+    flag_does_not_make_gene_names_unique: bool = False,
+    str_name_bam_tag_cb_corrected: str = "CB",
+    str_name_bam_tag_cb_uncorrected: str = "CR",
+    str_name_bam_tag_umi_corrected: str = "UB",
+    str_name_bam_tag_umi_uncorrected: str = "UR",
+    flag_skip_exon_and_splice_junc_counting: bool = False,
+    path_file_fa_for_cram: Union[str, None] = None,
+    int_num_samples_analyzed_concurrently: int = 2,
+    flag_does_not_collect_variant_information: bool = False,
+    flag_skip_intron_retention_counting: bool = False,
+    int_min_length_intron_for_detecting_intron_retention_event: int = 10,
+    flag_output_variant_information_with_annotations: bool = False,
+    int_min_num_of_reads_for_filtering_genomic_variant: int = 10,
+    float_min_prop_of_reads_for_filtering_genomic_variant=0.1,
+    path_file_vcf_for_filtering_variant: Union[str, None] = None,
+    int_min_count_features_for_filtering_barcodes: int = 50,
+    dict_num_manager_processes_for_each_data_object: dict = {
+        'dict_it_promoter' : 0,
+        'dict_t_splice_junc_to_info_genome' : 0,
+        'dict_it_exon' : 0,
+        'dict_it_exon_transcriptome' : 3,
+        'dict_it_splice_junc_transcriptome' : 3,
+        'dict_it_splice_donor_and_acceptor_genome' : 3,
+        'dict_it_rpmk' : 5,
+        'dict_it_reg' : 3,
+        'dict_fa_transcriptome' : 2,
+    },
+    l_seqname_to_skip: list = ["MT"],
+    flag_no_strand_specificity : bool = False,
+) -> dict:
+    """# 2023-08-08 00:56:31 
+    perform secondary analysis of cell-ranger output (barcoded BAM)
+
+    l_str_mode_scarab_count : list[ Literal[ "gex5prime-single-end", 'gex5prime-paired-end', "gex3prime-single-end", 'gex3prime', 'gex', 'gex5prime', 'atac', 'multiome' ] ] = [ 'gex3prime' ], # list of scarab_count operation mode
+
+    scidx : Union[ dict, None ] = None, # a loaded scarab index object. if given, the object will be used instead loading the index from the disk.
+    path_file_fa_for_cram : Union[ str, None ] = None, # path to the fasta file used for CRAM. If the fasta file has not been indexed, it will be automatically indexed
+    flag_does_not_collect_variant_information : bool = False, # does not collect the variant information at all. it will improve performance at the cost of the reduced output information.
+    flag_output_variant_information_with_annotations : bool = False, # If True, record variants for each individual feature (gene, isoform, genome bin, etc.). If False, variant information will be recorded for only the 'variant' feature type (require 'path_file_vcf_for_filtering_variant' argument to be active).
+    int_min_num_of_reads_for_filtering_genomic_variant : int = 10, # for a variant to be exported as a feature, at least this number of reads should be present for the variant
+    float_min_prop_of_reads_for_filtering_genomic_variant = 0.1, # for a variant to be exported as a feature, at least this proportion of reads should be present for the variant
+    path_file_vcf_for_filtering_variant : Union[ str, None ] = None, # A path to the vcf file for filtering variants. When a valid VCF file is given, variant filtering criteria, 'float_min_prop_of_reads_for_filtering_genomic_variant' and 'int_min_num_of_reads_for_filtering_genomic_variant' will be ignored. Also, a new feature type 'variant' will be added in the count matrix containing coverate of each variant and its reference allele at single-cell level. (warning) due to the internal algorithm for distributing workloads across the workers, count records for 'variant' features can be duplicated (matrix contains more than one records describing counts of a unique pair of cell and feature).
+    int_min_count_features_for_filtering_barcodes : int = 50, # the minimum number of features for filtering barcodes.
+    int_num_samples_analyzed_concurrently : int = 2, # the number of samples that can be analyzed concurrently to reduce bottlenecks due to processing of very large chunks.
+    l_seqname_to_skip : list = [ 'MT' ], # the list of names of the chromosomes of the reference genome to skip the analysis. By default, reads aligned to the mitochondrial genomes will be skipped. Because gene boundaries of the mitochondrial genome-encoded genes are often overlapping, an entire mitochondrial genome often assigned as a single chunk, creating a huge bottleneck in the analysis pipeline.
+    flag_skip_intron_retention_counting: bool = False, # skip exporting counts of intron retention events
+    int_min_length_intron_for_detecting_intron_retention_event: int = 10, # the minimum length of intron to be present in a read in order to detect an intron retention event in the read.
+    dict_num_manager_processes_for_each_data_object : dict = {
+        'dict_it_promoter' : 0,
+        'dict_t_splice_junc_to_info_genome' : 0,
+        'dict_it_exon' : 0,
+        'dict_it_exon_transcriptome' : 3,
+        'dict_it_splice_junc_transcriptome' : 3,
+        'dict_it_splice_donor_and_acceptor_genome' : 3,
+        'dict_it_rpmk' : 5,
+        'dict_it_reg' : 3,
+        'dict_fa_transcriptome' : 2,
+    }
+    flag_no_strand_specificity : bool = False, # flag indicating whether to ignore strand information of the reads in the input BAM files.
+    # the number of manager processes to use for each data object that will be shared across the forked processes. If 0 is given, no manager process will be used. Instead, the object will be directly accessed in the forked process, incurring memory bloating.
+    # generally, it is better to use more number of manager processes for data object that are more frequently accessed. If increasing the number of manager processes does not improve performance, considering not using the manager process and accessing the object directly.
+    # the expected size of bloated memory per process for each data object is given below.
+    #
+    #   'object name'                                       'the size of bloated memory per process'
+    #   dict_it_exon_transcriptome                          1.617437 GB per process
+    #   dict_it_rpmk                                        1.452151 GB per process
+    #   dict_it_splice_junc_transcriptome                   1.381314 GB per process
+    #   dict_it_splice_donor_and_acceptor_genome            ???????? GB per process (not measured)
+    #   dict_fa_transcriptome                               0.460438 GB per process
+    #   dict_it_exon                                        0.271540 GB per process
+    #   dict_it_reg                                         0.271540 GB per process
+    #   dict_t_splice_junc_to_info_genome                   0.188898 GB per process
+    #   dict_it_promoter                                    0.141673 GB per process
+    #   dict_fa_genome                                      0.082643 GB per process
+    #   dict_id_tx_to_id_gene                               0.070837 GB per process
+    #   dict_id_tx_to_name_tx                               0.070837 GB per process
+    #   dict_it_gene                                        0.059031 GB per process
+    #   dict_id_gene_to_l_id_tx                             0.059031 GB per process
+    #   dict_index_df_gtf_gene                              0.047224 GB per process
+    #   arr_data_df_gtf_gene                                0.047224 GB per process
+    #   dict_seqname_to_mask_gtf_reg                        0.035418 GB per process
+    #   dict_seqname_to_mask_gtf_intron_near_splice_site    0.035418 GB per process
+    #   dict_seqname_to_mask_gtf_rpmk_unfiltered            0.035418 GB per process
+    #   dict_seqname_to_mask_gtf_rpmk_filtered              0.035418 GB per process
+    #   dict_seqname_to_mask_gtf_exon                       0.035418 GB per process
+    #
+    # if pre-loaded 'scidx' is given, this argument will be ignored.
+
+    returns
+    a loaded scarab-count index ('scidx')
+    """
+    """
+    Parse arguments
+    """
+    if flag_usage_from_command_line_interface:  # parse arguments
+        """parse arguments when the function was called from the command-line interface"""
+        # { 'K', 'k' } # unused arguments
+        # command line arguments
+        parser = argparse.ArgumentParser(
+            description=str_description,
+            usage="scarab count",
+            formatter_class=argparse.RawTextHelpFormatter,
+        )
+        parser.add_argument("count")
+
+        arg_grp_general = parser.add_argument_group("General")
+        arg_grp_general.add_argument(
+            "-b",
+            "--l_path_file_bam_input",
+            help="A barcoded BAM file (or a list of such files, separated by spaces), sorted by read alignment position, from cellranger (GEX, ATAC, or ARC for multiome data) or similar pipelines. To process more than one samples, paths of multiple BAM files can be given. For a multiome sample, two barcoded BAM file paths (the BAM file path for the GEX data comes first, followed by the BAM file path for the ATAC data) should be given for each sample (with an appropriate argument for the '--l_str_mode_scarab_count' argument)",
+            nargs="*",
+        )
+        arg_grp_general.add_argument(
+            "-o",
+            "--l_path_folder_output",
+            help="(default: scarab_output/ subdirectory of the folder where an input BAM file for the sample resides. For a multiome sample, scarab_output/ subdirectory of the folder where an input GEX BAM file resides) a directory of an output folder or a list of output folders, separated by spaces. The number of output folders should be same as the number of samples",
+            nargs="*",
+        )
+        arg_grp_general.add_argument(
+            "-i",
+            "--l_str_mode_scarab_count",
+            help="one of [ 'gex', 'atac', 'multiome' ] (default: 'gex') an operating mode of scarab short-read. 'gex' for gene expression profiling, 'atac' for chromatin accessibility profiling, 'multiome' for gene expression profiling and chromatin accessibility profiling for the same single cells. If more than a single scarab count mode is used for different samples (e.g. 'gex' for the first sample and 'atac' for the second sample), multiple arguments separated by a space can be given. If multiple operating modes are given, the number of modes should be same as the number of samples",
+            default=["gex"],
+            nargs="*",
+        )
+        arg_grp_general.add_argument(
+            "-a",
+            "--path_folder_ref",
+            help="path_folder_ref (Default: ref/ folder inside the 'path_folder_output' folder) if given, instead of processing and building annotation data from the input files, the reference data saved in the given folder will be used to load annotations required for analyzing reads.",
+        )
+        arg_grp_general.add_argument(
+            "-t",
+            "--n_threads",
+            help="n_threads (default : 16) scarab-count pipeline is scalable upto ~50 threads (processes). The use of Python Multiprocessing Manager process to share some of data across workers limits the number of processes.",
+            default=16,
+            type=int,
+        )
+        arg_grp_general.add_argument(
+            "-j",
+            "--float_memory_in_GiB",
+            help="float_memory_in_GiB",
+            default=70,
+            type=float,
+        )
+        arg_grp_general.add_argument(
+            "--int_min_count_features_for_filtering_barcodes",
+            help="int_min_count_features_for_filtering_barcodes",
+            default=50,
+            type=int,
+        )
+        arg_grp_general.add_argument(
+            "--int_num_samples_analyzed_concurrently",
+            help="the number of samples that can be analyzed concurrently.",
+            default=2,
+            type=int,
+        )
+        arg_grp_general.add_argument(
+            "--dict_num_manager_processes_for_each_data_object",
+            help="(default: { 'dict_it_promoter' : 0, 'dict_t_splice_junc_to_info_genome' : 0, 'dict_it_exon' : 0, 'dict_it_exon_transcriptome' : 2, 'dict_it_splice_junc_transcriptome' : 2, 'dict_it_rpmk' : 3, 'dict_it_reg' : 2, 'dict_fa_transcriptome' : 2, }) the number of manager processes to use for each data object that will be shared across the forked processes. If 0 is given, no manager process will be used. Instead, the object will be directly accessed in the forked process, incurring memory bloating.",
+            default="{ 'dict_it_promoter' : 0, 'dict_t_splice_junc_to_info_genome' : 0, 'dict_it_exon' : 0, 'dict_it_exon_transcriptome' : 2, 'dict_it_splice_junc_transcriptome' : 2, 'dict_it_rpmk' : 3, 'dict_it_reg' : 2, 'dict_fa_transcriptome' : 2, }",
+            type=str,
+        )
+        arg_grp_general.add_argument(
+            "-B", "--verbose", help="turn on verbose mode", action="store_true"
+        )
+
+        arg_grp_annotation_gene = parser.add_argument_group("Annotation - Genes")
+        arg_grp_annotation_gene.add_argument(
+            "-g",
+            "--path_file_fa_genome",
+            help="path_file_fa_genome. Using Ensembl version is highly recommended (chromosome name should not contain 'chr')",
+        )
+        arg_grp_annotation_gene.add_argument(
+            "--l_seqname_to_skip",
+            help="(default: [ 'MT' ]) the list of names of the chromosomes of the reference genome to skip the analysis. By default, reads aligned to the mitochondrial genomes will be skipped. Because gene boundaries of the mitochondrial genome-encoded genes are often overlapping, an entire mitochondrial genome often assigned as a single chunk, creating a huge bottleneck in the analysis pipeline.",
+            default=["MT"],
+            nargs="*",
+        )
+        arg_grp_annotation_gene.add_argument(
+            "-G",
+            "--path_file_gtf_genome",
+            help="path_file_gtf_genome Using Ensembl annotation is highly recommended (chromosome name should not contain 'chr')",
+        )
+        arg_grp_annotation_gene.add_argument(
+            "-T", "--path_file_fa_transcriptome", help="path_file_fa_transcriptome"
+        )
+        arg_grp_annotation_gene.add_argument(
+            "-J",
+            "--flag_does_not_remove_the_version_information_from_id_transcript_in_the_file_fa_transcriptome",
+            help="flag_does_not_remove_the_version_information_from_id_transcript_in_the_file_fa_transcriptome (Default: False) does not drop the integer 'version_info' after the '.' at the end of the 'id_transcript' from the given fasta file containing transcriptome sequences",
+            action="store_true",
+        )
+
+        # process gene annotations
+        arg_grp_annotation_gene.add_argument(
+            "-D",
+            "--str_name_gtf_attr_for_id_gene",
+            help="str_name_gtf_attr_for_id_gene",
+            default="gene_id",
+        )
+        arg_grp_annotation_gene.add_argument(
+            "-N",
+            "--str_name_gtf_attr_for_name_gene",
+            help="str_name_gtf_attr_for_name_gene",
+            default="gene_name",
+        )
+        arg_grp_annotation_gene.add_argument(
+            "-Y",
+            "--str_name_gtf_attr_for_id_transcript",
+            help="str_name_gtf_attr_for_id_transcript",
+            default="transcript_id",
+        )
+        arg_grp_annotation_gene.add_argument(
+            "-Z",
+            "--str_name_gtf_attr_for_name_transcript",
+            help="str_name_gtf_attr_for_name_transcript",
+            default="transcript_name",
+        )
+
+        # modify gene annotations for more accurate analysis in downstream applications (e.g. scanpy)
+        arg_grp_annotation_gene.add_argument(
+            "-u",
+            "--flag_does_not_make_gene_names_unique",
+            help="(Default: False) flag_does_not_make_gene_names_unique",
+            action="store_true",
+        )
+        arg_grp_annotation_gene.add_argument(
+            "-c",
+            "--flag_does_not_merge_overlapping_genes_with_the_same_gene_name_and_strand_orientation",
+            help="(Default: False) flag_does_not_merge_overlapping_genes_with_the_same_gene_name_and_strand_orientation",
+            action="store_true",
+        )
+        arg_grp_annotation_gene.add_argument(
+            "-p",
+            "--int_bp_padding_for_defining_promoter_from_transcript_start",
+            help="int_bp_padding_for_defining_promoter_from_transcript_start (default : 2000) the number of base pairs from the transcript start site for defining promoter regions of a gene",
+            default=2000,
+            type=int,
+        )
+
+        # regulatory elements
+        arg_grp_annotation_reg = parser.add_argument_group(
+            "Annotation - Regulatory Elements"
+        )
+        arg_grp_annotation_reg.add_argument(
+            "-F",
+            "--path_file_gff_regulatory_element",
+            help="path_file_gff_regulatory_element",
+        )
+        arg_grp_annotation_reg.add_argument(
+            "-R",
+            "--str_name_gff_attr_id_regulatory_element",
+            help="str_name_gff_attr_id_regulatory_element",
+            default="ID",
+        )
+        arg_grp_annotation_reg.add_argument(
+            "-M",
+            "--int_min_length_regulatory_element",
+            help="int_min_length_regulatory_element",
+            default=50,
+            type=int,
+        )
+        arg_grp_annotation_reg.add_argument(
+            "-E",
+            "--int_bp_padding_regulatory_element_anno",
+            help="int_bp_padding_regulatory_element_anno",
+            default=2000,
+            type=int,
+        )
+        arg_grp_annotation_reg.add_argument(
+            "-v",
+            "--float_max_prop_unfiltered_rpmk",
+            help="float_max_prop_unfiltered_rpmk (default: 1) (i.e. no filtering based on the proportion of reads overlapped with unfiltered repeatmasker elements)",
+            default=1,
+            type=float,
+        )
+
+        # repeatmasker
+        arg_grp_annotation_rpmk = parser.add_argument_group(
+            "Annotation - Repeats (UCSC)"
+        )
+        arg_grp_annotation_rpmk.add_argument(
+            "-U",
+            "--path_file_tsv_repeatmasker_ucsc",
+            help="path_file_tsv_repeatmasker_ucsc: a TSV file downloaded from UCSC Table Browser (all fields)",
+        )
+        arg_grp_annotation_rpmk.add_argument(
+            "-C",
+            "--l_repClass_repeatmasker_ucsc",
+            help="(default: [ 'SINE', 'LINE', 'LTR', 'DNA', 'Retroposon' ]) l_repClass_repeatmasker_ucsc: list of repClass in the given UCSC repeatmasker annotations to be analyzed",
+            default=["SINE", "LINE", "LTR", "DNA", "Retroposon"],
+            nargs="*",
+        )
+        arg_grp_annotation_rpmk.add_argument(
+            "-l",
+            "--int_min_length_repeatmasker_ucsc",
+            help="int_min_length_repeatmasker_ucsc: ignore repeatmasker annotations with length smaller than the given length",
+            default=100,
+            type=int,
+        )
+
+        # repeatmasker
+        arg_grp_annotation_rpmk = parser.add_argument_group(
+            "Annotation - Catch-All (binning)"
+        )
+        arg_grp_annotation_rpmk.add_argument(
+            "-W",
+            "--flag_turn_off_catching_all_reads_by_binning",
+            help="flag_turn_off_catching_all_reads_by_binning: Does not collect read counts of the reads confidently aligned to the reference genome and count the reads based on the orientation and position of the alignment for each genomic bins",
+            action="store_true",
+        )
+        arg_grp_annotation_rpmk.add_argument(
+            "-L",
+            "--int_bp_for_bins",
+            help="(default: 500) int_bp_for_bins: number of base pairs for each genomic bin for binning. For example, when 'int_bp_for_bins' is 500, genomic bins will be chr1:1-500, chr1:501-1000, ... ... ",
+            default=100,
+            type=int,
+        )
+        arg_grp_annotation_rpmk.add_argument(
+            "-I",
+            "--flag_exclude_reads_assigned_to_features_and_count_every_read_in_bam_during_binning",
+            help="flag_exclude_reads_assigned_to_features_and_count_every_read_in_bam_during_binning: if True, reads assigned to features (both gene/miscellaneous) will be excluded when counting reads for each genomic bin. When this flag is not set, EVERY reads confidently aligned to the reference genome will be counted for each corresponding genomic bin",
+            action="store_true",
+        )
+
+        # for exporting count matrix containing genomic variation information
+        arg_grp_variant = parser.add_argument_group("Variant Calling / Filtering")
+        arg_grp_variant.add_argument(
+            "-V",
+            "--flag_does_not_collect_variant_information",
+            help="(Default: False) set this flag to True to reduce the output file size and speed up the run by not analyzing variant information present in the sequencing data. The variant information collected and stored in BAM file can be retrieved easily later to look for possible SNPs and allele specific expression",
+            action="store_true",
+        )
+        arg_grp_variant.add_argument(
+            "--flag_output_variant_information_with_annotations",
+            help="(Default: False) If True, record variants for each individual feature (gene, isoform, genome bin, etc.). If False, only the minimal number of features for recording variants (the number of reads covering the variant for each cell) will be included in the output. Setting this flag to True will slightly decrease the performance",
+            action="store_true",
+        )
+        arg_grp_variant.add_argument(
+            "-f",
+            "--int_min_num_of_reads_for_filtering_genomic_variant",
+            help="(int_min_num_of_reads_for_filtering_genomic_variant) (default: 10) minimum number of UMI counts required to include the information about the detected genomic variation in the output count matrix. Setting this value to a negative number (e.g. -1) will disable the behavior of 'scarab' exporting genomic variation information into the count matrix, which can significantly increase the run time and the size of the output count matrix for a typical 'int_min_num_of_reads_for_filtering_genomic_variant' value between 1~10. ",
+            default=10,
+            type=int,
+        )
+        arg_grp_variant.add_argument(
+            "-d",
+            "--float_min_prop_of_reads_for_filtering_genomic_variant",
+            help="(default: 0.1) minimum proportion of UMI counts required to include the information about the detected genomic variation in the output count matrix. The variant should be above both thresholds, 'float_min_prop_of_reads_for_filtering_genomic_variant' and 'int_min_num_of_reads_for_filtering_genomic_variant'",
+            default=0.1,
+            type=float,
+        )
+        arg_grp_variant.add_argument(
+            "-K",
+            "--path_file_vcf_for_filtering_variant",
+            help="A path to the vcf file for filtering variants. When a valid VCF file is given, variant filtering criteria, 'float_min_prop_of_reads_for_filtering_genomic_variant' and 'int_min_num_of_reads_for_filtering_genomic_variant' will be ignored. Also, a new feature type 'variant' will be added in the count matrix containing coverate of each variant and its reference allele at single-cell level. (warning) due to the internal algorithm for distributing workloads across the workers, count records for 'variant' features can be duplicated (matrix contains more than one records describing counts of a unique pair of cell and feature).",
+        )
+
+        # BAM file processing
+        arg_grp_bam_processing = parser.add_argument_group(
+            "Barcoded BAM File Processing"
+        )
+        arg_grp_bam_processing.add_argument(
+            "-H",
+            "--path_file_fa_for_cram",
+            help="path to the fasta file used for CRAM. If the fasta file has not been indexed, it will be automatically indexed.",
+        )
+        arg_grp_bam_processing.add_argument(
+            "-n",
+            "--int_num_sam_records_for_each_chunk",
+            help="int_num_sam_records_for_each_chunk: default = 300000. the minimum number of SAM records for each chunk that will be processed by a single process during multiprocessing. For a smaller BAM file (1~3 GB), decreasing this number below 100000 reads are recommended to make use of multiple threads of the machine.",
+            default=300000,
+            type=int,
+        )
+        arg_grp_bam_processing.add_argument(
+            "-m",
+            "--int_min_mapq_unique_mapped_for_gex_data",
+            help="int_min_mapq_unique_mapped_for_gex_data: default = 255. Minimum mapping quality of aligned reads in the input BAM file (Gene Expression data) to be included in the analysis. For gene expression data (BAM files aligned with STAR Aligner), recommended value is 255.",
+            default=255,
+            type=int,
+        )
+        arg_grp_bam_processing.add_argument(
+            "-r",
+            "--int_min_mapq_unique_mapped_for_atac_data",
+            help="int_min_mapq_unique_mapped_for_atac_data: default = 60. Minimum mapping quality of aligned reads in the input BAM file (ATAC-seq data) to be included in the analysis. For ATAC data (BAM file aligned with BWA Aligner), recommended value is 60.",
+            default=60,
+            type=int,
+        )
+        arg_grp_bam_processing.add_argument(
+            "-e",
+            "--int_min_mapq_minimap2_tx_assignment",
+            help="int_min_mapq_minimap2_tx_assignment: default = 30. Minimum mapping quality required for assigning reads to a unique isoform using minimap2 short-read alignment mode",
+            default=30,
+            type=int,
+        )
+        arg_grp_bam_processing.add_argument(
+            "-k",
+            "--flag_skip_exon_and_splice_junc_counting",
+            help="flag_skip_exon_and_splice_junc_counting: (Default = False) Skip exon and splice_junciton detection and counting. This will slighly increase the processing time and the smaller number of features in the output count matrix. when 'flag_use_gene_isoform_and_intron_assignment_from_10x_cellranger' is True, the exon and splice-junction counting behaviors will be disabled",
+            action="store_true",
+        )
+
+        # for instructing barcoded BAM tag names
+        arg_grp_bam_processing.add_argument(
+            "-x",
+            "--str_name_bam_tag_cb_corrected",
+            help="str_name_bam_tag_cb_corrected",
+            default="CB",
+        )
+        arg_grp_bam_processing.add_argument(
+            "-y",
+            "--str_name_bam_tag_cb_uncorrected",
+            help="str_name_bam_tag_cb_uncorrected",
+            default="CR",
+        )
+        arg_grp_bam_processing.add_argument(
+            "-z",
+            "--str_name_bam_tag_umi_corrected",
+            help="str_name_bam_tag_umi_corrected",
+            default="UB",
+        )
+        arg_grp_bam_processing.add_argument(
+            "-w",
+            "--str_name_bam_tag_umi_uncorrected",
+            help="str_name_bam_tag_umi_uncorrected",
+            default="UR",
+        )
+
+        # count matrix output
+        arg_grp_bam_processing.add_argument(
+            "-s",
+            "--flag_include_strand_specific_counts",
+            help="flag_include_strand_specific_counts: in addition to the typical gene and isoform counts, include count of reads aligned in antisense direction as a separate features. For other features, including repeats, regulatory elements, and genomic regions, include separate features for sense and antisense reads",
+            action="store_true",
+        )
+        
+        arg_grp_bam_processing.add_argument(
+            "--flag_skip_intron_retention_counting",
+            help="(Default: False) set this flag to True to skip exporting counts of intron retention events",
+            action="store_true",
+        )
+        
+        arg_grp_bam_processing.add_argument(
+            "--int_min_length_intron_for_detecting_intron_retention_event",
+            help="(Default: 10). The minimum length of intron to be present in a read in order to detect an intron retention event in the read.",
+            default=10,
+            type=int,
+        )
+        
+        arg_grp_bam_processing.add_argument(
+            "--flag_no_strand_specificity",
+            help="(Default: False) set this flag to True to consider reads in the input BAM file as reads without strand-specificity information",
+            action="store_true",
+        )
+
+        # for multiprocessing (bookmarks)
+        arg_grp_bam_processing.add_argument(
+            "-P",
+            "--int_n_bases_padding_around_interval",
+            help="int_n_bases_padding_around_interval",
+            default=10,
+            type=int,
+        )
+
+        # 10X cellranger count behavior
+        arg_grp_bam_processing.add_argument(
+            "-X",
+            "--flag_use_gene_isoform_and_intron_assignment_from_10x_cellranger",
+            help="(Default: False) flag_use_gene_isoform_and_intron_assignment_from_10x_cellranger. Setting this flag to True will disable exon and splice-junction counting behavior, due to a possible inconsistency between reference annotations used in cellranger and scarab",
+            action="store_true",
+        )
+        arg_grp_bam_processing.add_argument(
+            "-O",
+            "--flag_include_read_aligned_to_opposite_strand",
+            help="(Default: False) flag_include_read_aligned_to_opposite_strand",
+            action="store_true",
+        )
+        arg_grp_bam_processing.add_argument(
+            "-A",
+            "--flag_include_read_aligned_to_intron",
+            help="(Default: False) flag_include_read_aligned_to_intron",
+            action="store_true",
+        )
+
+        # setting for output annotated BAM file
+        arg_grp_bam_output = parser.add_argument_group("Annotated BAM Output")
+        arg_grp_bam_output.add_argument(
+            "-Q",
+            "--flag_skip_read_analysis_summary_output_bam_file",
+            help="(Default: False) set this flag to True in order to skip writing the analysis results of individual reads in the BAM file format",
+            action="store_true",
+        )
+        arg_grp_bam_output.add_argument(
+            "-q",
+            "--flag_skip_read_analysis_summary_output_tsv_file",
+            help="(Default: False) set this flag to True in order to skip writing the analysis results of individual reads in the TSV file format",
+            action="store_true",
+        )
+        arg_grp_bam_output.add_argument(
+            "-S",
+            "--flag_does_not_delete_sequence_and_sequence_qual",
+            help="(Default: False) set this flag to True in order to disable a behavior that removes seq and qual records from SAM records to reduce the output file size",
+            action="store_true",
+        )
+        
+        args = parser.parse_args()
+
+        flag_skip_exon_and_splice_junc_counting = (
+            args.flag_skip_exon_and_splice_junc_counting
+        )
+        flag_include_strand_specific_counts = args.flag_include_strand_specific_counts
+        flag_does_not_remove_the_version_information_from_id_transcript_in_the_file_fa_transcriptome = (
+            args.flag_does_not_remove_the_version_information_from_id_transcript_in_the_file_fa_transcriptome
+        )
+        int_min_mapq_minimap2_tx_assignment = args.int_min_mapq_minimap2_tx_assignment
+        int_bp_padding_for_defining_promoter_from_transcript_start = (
+            args.int_bp_padding_for_defining_promoter_from_transcript_start
+        )
+        int_num_sam_records_for_each_chunk = args.int_num_sam_records_for_each_chunk
+        int_min_mapq_unique_mapped_for_gex_data = (
+            args.int_min_mapq_unique_mapped_for_gex_data
+        )
+        int_min_mapq_unique_mapped_for_atac_data = (
+            args.int_min_mapq_unique_mapped_for_atac_data
+        )
+        l_str_mode_scarab_count = args.l_str_mode_scarab_count
+        verbose = args.verbose
+        l_path_file_bam_input = args.l_path_file_bam_input
+        l_path_folder_output = args.l_path_folder_output
+        path_file_fa_genome = args.path_file_fa_genome
+        path_file_gtf_genome = args.path_file_gtf_genome
+        path_file_fa_transcriptome = args.path_file_fa_transcriptome
+        path_folder_ref = args.path_folder_ref
+        n_threads = args.n_threads
+        float_memory_in_GiB = args.float_memory_in_GiB
+        int_n_bases_padding_around_interval = args.int_n_bases_padding_around_interval
+        int_min_num_of_reads_for_filtering_genomic_variant = (
+            args.int_min_num_of_reads_for_filtering_genomic_variant
+        )
+        path_file_tsv_repeatmasker_ucsc = args.path_file_tsv_repeatmasker_ucsc
+        l_repClass_repeatmasker_ucsc = args.l_repClass_repeatmasker_ucsc
+        int_min_length_repeatmasker_ucsc = args.int_min_length_repeatmasker_ucsc
+        flag_use_gene_isoform_and_intron_assignment_from_10x_cellranger = (
+            args.flag_use_gene_isoform_and_intron_assignment_from_10x_cellranger
+        )
+        flag_include_read_aligned_to_opposite_strand = (
+            args.flag_include_read_aligned_to_opposite_strand
+        )
+        flag_include_read_aligned_to_intron = args.flag_include_read_aligned_to_intron
+        str_name_gtf_attr_for_id_gene = args.str_name_gtf_attr_for_id_gene
+        str_name_gtf_attr_for_name_gene = args.str_name_gtf_attr_for_name_gene
+        str_name_gtf_attr_for_id_transcript = args.str_name_gtf_attr_for_id_transcript
+        str_name_gtf_attr_for_name_transcript = (
+            args.str_name_gtf_attr_for_name_transcript
+        )
+        path_file_gff_regulatory_element = args.path_file_gff_regulatory_element
+        str_name_gff_attr_id_regulatory_element = (
+            args.str_name_gff_attr_id_regulatory_element
+        )
+        int_min_length_regulatory_element = args.int_min_length_regulatory_element
+        int_bp_padding_regulatory_element_anno = (
+            args.int_bp_padding_regulatory_element_anno
+        )
+        float_max_prop_unfiltered_rpmk = args.float_max_prop_unfiltered_rpmk
+        flag_does_not_make_gene_names_unique = args.flag_does_not_make_gene_names_unique
+        flag_does_not_merge_overlapping_genes_with_the_same_gene_name_and_strand_orientation = (
+            args.flag_does_not_merge_overlapping_genes_with_the_same_gene_name_and_strand_orientation
+        )
+        str_name_bam_tag_cb_corrected = args.str_name_bam_tag_cb_corrected
+        str_name_bam_tag_cb_uncorrected = args.str_name_bam_tag_cb_uncorrected
+        str_name_bam_tag_umi_corrected = args.str_name_bam_tag_umi_corrected
+        str_name_bam_tag_umi_uncorrected = args.str_name_bam_tag_umi_uncorrected
+        flag_skip_read_analysis_summary_output_bam_file = (
+            args.flag_skip_read_analysis_summary_output_bam_file
+        )
+        flag_skip_read_analysis_summary_output_tsv_file = (
+            args.flag_skip_read_analysis_summary_output_tsv_file
+        )
+        flag_does_not_delete_sequence_and_sequence_qual = (
+            args.flag_does_not_delete_sequence_and_sequence_qual
+        )
+        flag_does_not_collect_variant_information = (
+            args.flag_does_not_collect_variant_information
+        )
+        float_min_prop_of_reads_for_filtering_genomic_variant = (
+            args.float_min_prop_of_reads_for_filtering_genomic_variant
+        )
+        flag_turn_off_catching_all_reads_by_binning = (
+            args.flag_turn_off_catching_all_reads_by_binning
+        )
+        int_bp_for_bins = args.int_bp_for_bins
+        flag_exclude_reads_assigned_to_features_and_count_every_read_in_bam_during_binning = (
+            args.flag_exclude_reads_assigned_to_features_and_count_every_read_in_bam_during_binning
+        )
+        path_file_fa_for_cram = args.path_file_fa_for_cram
+        int_min_count_features_for_filtering_barcodes = (
+            args.int_min_count_features_for_filtering_barcodes
+        )
+        path_file_vcf_for_filtering_variant = args.path_file_vcf_for_filtering_variant
+        flag_output_variant_information_with_annotations = (
+            args.flag_output_variant_information_with_annotations
+        )
+        dict_num_manager_processes_for_each_data_object = ast.literal_eval(
+            args.dict_num_manager_processes_for_each_data_object
+        )  # parse dictionary in a string
+        int_num_samples_analyzed_concurrently = (
+            args.int_num_samples_analyzed_concurrently
+        )
+        l_seqname_to_skip = args.l_seqname_to_skip
+        flag_skip_intron_retention_counting = args.flag_skip_intron_retention_counting
+        flag_no_strand_specificity = args.flag_no_strand_specificity
+        int_min_length_intron_for_detecting_intron_retention_event = args.int_min_length_intron_for_detecting_intron_retention_event
+
+    """
+    Start of the Scarab-Count Program
+    """
+    logger.info(str_description)
+    logger.info(
+        "Scarab Short Read: secondary analysis of 10X barcoded BAM file for isoform and misc. annotation analysis"
+    )
+    logger.info(f"[Scarab-Count Start] Program Started.")
+
+    """ handle special cases and invalid inputs """
+    if l_path_file_bam_input is None or (
+        path_folder_ref is None
+        and (
+            path_file_gtf_genome is None
+            or path_file_fa_transcriptome is None
+            or path_file_fa_genome is None
+        )
+    ):
+        logger.error(
+            "Required argument(s) is missing. to view help message, type -h or --help"
+        )
+        return -1
+    set_valid_str_mode_scarab_count = {
+        "gex5prime-single-end",
+        "gex5prime-paired-end",
+        "gex3prime-single-end",
+        "gex3prime",
+        "gex",
+        "gex5prime",
+        "atac",
+        "multiome",
+    }  # define a valid set of 'str_mode_scarab_count'
+    if (
+        sum(
+            str_mode_scarab_count not in set_valid_str_mode_scarab_count
+            for str_mode_scarab_count in l_str_mode_scarab_count
+        )
+        > 0
+    ):
+        logger.error(
+            f"invalid 'str_mode_scarab_count' mode detected. Only one of {set_valid_str_mode_scarab_count} can be used. exiting"
+        )
+        return -1
+    # replace short-hand to the full-length scarab_count mode
+    dict_str_mode_scarab_count_short_hand = {
+        "gex3prime": "gex3prime-single-end",
+        "gex": "gex3prime-single-end",
+        "gex5prime": "gex5prime-single-end",
+    }  # define mapping
+    l_str_mode_scarab_count = list(
+        dict_str_mode_scarab_count_short_hand[e]
+        if e in dict_str_mode_scarab_count_short_hand
+        else e
+        for e in l_str_mode_scarab_count
+    )  # replace short-hand to the full-length scarab_count mode
+    if (
+        len(l_str_mode_scarab_count) == 1
+    ):  # if only a single operating mode for scarab count has been given, apply (broadcast) the operating mode to all samples
+        l_str_mode_scarab_count = list(l_str_mode_scarab_count) * len(
+            l_path_folder_output
+        )
+    if len(l_path_folder_output) != len(l_str_mode_scarab_count):
+        logger.error(
+            "the number of samples are not equal to the number of given Scarab operating modes (the 'l_str_mode_scarab_count' argument), exiting"
+        )
+        return -1
+    # check the number of input BAM files
+    int_num_of_expected_input_bam_files = sum(
+        2 if str_mode_scarab_count == "multiome" else 1
+        for str_mode_scarab_count in l_str_mode_scarab_count
+    )  # calculate the number of expected input BAM files based on the given 'l_str_mode_scarab_count' argument.
+    if len(l_path_file_bam_input) != int_num_of_expected_input_bam_files:
+        logger.error(
+            f"the number of given input BAM files are {len( l_path_file_bam_input )}, which is different from the expected number of input BAM files (expected {int_num_of_expected_input_bam_files} files) from the given 'l_str_mode_scarab_count' argument, exiting"
+        )
+        return -1
+
+    """ process required input directories """
+    if path_file_fa_genome is not None:
+        path_file_fa_genome = os.path.abspath(path_file_fa_genome)
+    if path_file_gtf_genome is not None:
+        path_file_gtf_genome = os.path.abspath(path_file_gtf_genome)
+    if path_file_fa_transcriptome is not None:
+        path_file_fa_transcriptome = os.path.abspath(path_file_fa_transcriptome)
+    if path_file_fa_for_cram is not None:
+        path_file_fa_for_cram = os.path.abspath(path_file_fa_for_cram)
+
+    """ process input directoy  """
+    l_path_file_bam_input = list(
+        os.path.abspath(path_file_bam_input)
+        for path_file_bam_input in l_path_file_bam_input
+    )
+    if l_path_folder_output is not None:
+        """# when a valid list of output folders were given # ensure directories of the output folder ends with '/' characters"""
+        l_path_folder_output = list(
+            os.path.abspath(path_folder) + "/" for path_folder in l_path_folder_output
+        )
+    else:
+        """# compose a list of default 'path_folder_output' values for the given list of input BAM files"""
+        l_path_file_bam_input_reversed = deepcopy(
+            l_path_file_bam_input[::-1]
+        )  # reverse the input BAM file paths so that pop operation yield the element located at the front
+        l_path_folder_output = []
+        for str_mode_scarab_count in l_str_mode_scarab_count:
+            path_file_bam_input = l_path_file_bam_input_reversed.pop()
+            if (
+                str_mode_scarab_count == "multiome"
+            ):  # consume one more input BAM file path (a file path for ATAC-seq data) for a 'multiome' sample
+                _ = l_path_file_bam_input_reversed.pop()
+            path_folder_output = (
+                f"{path_file_bam_input.rsplit( '/', 1 )[ 0 ]}scarab_output/"
+            )
+            l_path_folder_output.append(path_folder_output)
+
+    """ set default reference annotation folder (a subdirectory inside the output folder of the first BAM file input) """
+    if path_folder_ref is None:
+        path_folder_ref = l_path_folder_output[0].rsplit("/", 1)[0] + "ref/"
+    path_folder_ref = os.path.abspath(path_folder_ref)
+    path_folder_ref += "/"
+
+    # parse optional arguments receiving directories
+    if path_file_tsv_repeatmasker_ucsc is not None:
+        path_file_tsv_repeatmasker_ucsc = os.path.abspath(
+            path_file_tsv_repeatmasker_ucsc
+        )
+    if path_file_gff_regulatory_element is not None:
+        path_file_gff_regulatory_element = os.path.abspath(
+            path_file_gff_regulatory_element
+        )
+
+    """ 
+    Fixed Settings
+    """
+    # settings for compatibility
+    int_window_size_from_the_end_of_exon_to_ignore_mutation_calling_from_splice_site_detection_error = (
+        75  # size of typically small exon that causes splicing site detection error
+    )
+
+    # internal settings
+    (
+        flag_use_gene_assignment_from_10x_cellranger,
+        flag_use_isoform_assignment_from_10x_cellranger,
+        flag_use_intronic_read_assignment_from_10x_cellranger,
+    ) = (False, False, False)
+    if flag_use_gene_isoform_and_intron_assignment_from_10x_cellranger:
+        (
+            flag_use_gene_assignment_from_10x_cellranger,
+            flag_use_isoform_assignment_from_10x_cellranger,
+            flag_use_intronic_read_assignment_from_10x_cellranger,
+        ) = (True, True, True)
+
+    # process arguments
+    set_seqname_to_skip = set(l_seqname_to_skip)
+
+    """
+    Preprocess gene, isoform, and miscellaneous annotations
+    """
+    # load annotations
+    if scidx is None:
+        scidx = Preprocess_and_Load_Annotations(
+            path_folder_ref,
+            path_file_gtf_genome,
+            str_name_gtf_attr_for_id_gene,
+            str_name_gtf_attr_for_name_gene,
+            str_name_gtf_attr_for_id_transcript,
+            str_name_gtf_attr_for_name_transcript,
+            flag_does_not_merge_overlapping_genes_with_the_same_gene_name_and_strand_orientation,
+            flag_does_not_make_gene_names_unique,
+            int_window_size_from_the_end_of_exon_to_ignore_mutation_calling_from_splice_site_detection_error,
+            path_file_tsv_repeatmasker_ucsc,
+            l_repClass_repeatmasker_ucsc,
+            int_min_length_repeatmasker_ucsc,
+            path_file_gff_regulatory_element,
+            str_name_gff_attr_id_regulatory_element,
+            int_min_length_regulatory_element,
+            int_bp_padding_regulatory_element_anno,
+            path_file_fa_transcriptome,
+            path_file_fa_genome,
+            int_bp_padding_for_defining_promoter_from_transcript_start,
+            flag_does_not_remove_the_version_information_from_id_transcript_in_the_file_fa_transcriptome,
+            dict_num_manager_processes_for_each_data_object=dict_num_manager_processes_for_each_data_object,
+        )
+    # return scidx
+    """
+    Preprocess variant annotations
+    """
+    # retrieve a flag indicating how variant filtering
+    flag_filter_variant_using_predefined_set = (
+        path_file_vcf_for_filtering_variant is not None
+    )
+    if (
+        flag_filter_variant_using_predefined_set
+    ):  # read predefined set of variants for filtering variants
+        df_vcf = pd.read_csv(
+            path_file_vcf_for_filtering_variant,
+            comment="#",
+            skip_blank_lines=True,
+            sep="\t",
+            header=None,
+            usecols=[0, 1, 3, 4],
+        )  # load vcf file, loading only required columns
+        df_vcf.columns = ["CHROM", "POS", "REF", "ALT"]
+        df_vcf["CHROM"] = (
+            df_vcf.CHROM.astype(str)
+            .astype(object)
+            .apply(__chromosome_name_remove_chr__)
+        )  # process chromosome name
+        set_var_name_valid = set(
+            f"{chrom}:{pos}:{ref}>{alt}" for chrom, pos, ref, alt in df_vcf.values
+        )  # retrieve set of variant names for filtering
+        """ build an interval tree of genomic positions of a predefined set of variants """
+        dict_it_pos_variant_predefined_set = (
+            dict()
+        )  # a dictionary of interval tree for identifying reads overlapping with a predefined set of variants
+        for chrom, pos, ref, alt in df_vcf.values:  # 1-based
+            if (
+                chrom not in dict_it_pos_variant_predefined_set
+            ):  # initialize the interval tree
+                dict_it_pos_variant_predefined_set[chrom] = intervaltree.IntervalTree()
+            dict_it_pos_variant_predefined_set[chrom][pos - 1 : pos] = (
+                chrom,
+                pos,
+            )  # update interval tree for searching variant positions
+
+    """
+    Exit early when no samples is anlayzed
+    """
+    # if no samples will be analyzed, return
+    if len(l_path_folder_output) == 0:
+        logger.info(f"[Scarab-Count Start] Program Completed.")
+        return scidx  # return the loaded index object
+
+    """
+    Initiate pipelines for off-loading works
+    """
+    pipelines = bk.Offload_Works(
+        None
+    )  # no limit for the number of works that can be submitted.
+
+    int_num_samples_analyzed_concurrently = min(
+        len(l_path_folder_output), int_num_samples_analyzed_concurrently
+    )  # if the number of samples are smaller than 'int_num_samples_analyzed_concurrently', adjust 'int_num_samples_analyzed_concurrently' so that it matches the number of samples
+
+    n_threads = int(
+        np.ceil(n_threads / int_num_samples_analyzed_concurrently)
+    )  # divide the number of processes that can be used by each pipeline by the number of pipelines that will be run concurrently.
+
+    def run_pipeline():
+        """# 2023-07-27 12:09:01 
+        analyze a pipeline for a given list of samples
+        """
+        # retrieve id of the pipeline
+        str_uuid_pipeline = bk.UUID()
+        logger.info(
+            f"[Pipeline Start] Forked Pipeline (id={str_uuid_pipeline}) Started."
+        )
+
+        """
+        Initiate workers for off-loading works
+        """
+        workers = bk.Offload_Works(
+            None
+        )  # no limit for the number of works that can be submitted.
+
+        """
+        Run scarab count for each sample
+        """
+        l_path_file_bam_input_reversed = deepcopy(
+            l_path_file_bam_input[::-1]
+        )  # reverse the input BAM file paths so that pop operation yield the element located at the front
+        for (
+            str_mode_scarab_count_for_the_current_sample,
+            path_folder_output_for_the_current_sample,
+        ) in zip(
+            l_str_mode_scarab_count, l_path_folder_output
+        ):  # retrieve scarab count operating mode and an output folder for the current sample
+            """settings for each scarab count operating mode"""
+            if (
+                str_mode_scarab_count_for_the_current_sample == "multiome"
+            ):  # Multiome run mode
+                l_path_file_bam_input_for_the_current_sample = [
+                    l_path_file_bam_input_reversed.pop(),
+                    l_path_file_bam_input_reversed.pop(),
+                ]  # retrieve two samples for the multiome sample
+                l_str_mode_scarab_count_for_the_current_sample = [
+                    "gex3prime-single-end",
+                    "atac",
+                ]
+                l_path_folder_output_for_the_current_sample = [
+                    f"{path_folder_output_for_the_current_sample}gex/",
+                    f"{path_folder_output_for_the_current_sample}atac/",
+                ]
+                l_int_min_mapq_unique_mapped_for_the_current_sample = [
+                    int_min_mapq_unique_mapped_for_gex_data,
+                    int_min_mapq_unique_mapped_for_atac_data,
+                ]
+            elif (
+                str_mode_scarab_count_for_the_current_sample[:4] == "atac"
+            ):  # ATAC run mode
+                l_path_file_bam_input_for_the_current_sample = [
+                    l_path_file_bam_input_reversed.pop()
+                ]  # retrieve one sample for the atac sample
+                l_str_mode_scarab_count_for_the_current_sample = [
+                    str_mode_scarab_count_for_the_current_sample
+                ]
+                l_path_folder_output_for_the_current_sample = [
+                    path_folder_output_for_the_current_sample
+                ]
+                l_int_min_mapq_unique_mapped_for_the_current_sample = [
+                    int_min_mapq_unique_mapped_for_atac_data
+                ]
+            elif (
+                str_mode_scarab_count_for_the_current_sample[:3] == "gex"
+            ):  # GEX run mode
+                l_path_file_bam_input_for_the_current_sample = [
+                    l_path_file_bam_input_reversed.pop()
+                ]  # retrieve one sample for the gex sample
+                l_str_mode_scarab_count_for_the_current_sample = [
+                    str_mode_scarab_count_for_the_current_sample
+                ]
+                l_path_folder_output_for_the_current_sample = [
+                    path_folder_output_for_the_current_sample
+                ]
+                l_int_min_mapq_unique_mapped_for_the_current_sample = [
+                    int_min_mapq_unique_mapped_for_gex_data
+                ]
+
+            """
+            define a function to release a lock
+            """
+
+            def release_lock():
+                """# 2023-01-14 20:36:17
+                release the lock file
+                """
+                path_file_lock = (
+                    f"{path_folder_output_for_the_current_sample}scarab_count.lock"
+                )
+
+                # check the existence of output files for the output folder of each BAM file of the current sample
+                flag_all_output_files_exist = True  # initialize the flag
+                for path_folder_output in l_path_folder_output_for_the_current_sample:
+                    if not os.path.exists(
+                        f"{path_folder_output}count_matrix.export_completed.txt"
+                    ):
+                        flag_all_output_files_exist = False
+                        break
+                    if not flag_skip_read_analysis_summary_output_bam_file:
+                        if not os.path.exists(
+                            f"{path_folder_output}bam_output.export_completed.txt"
+                        ):
+                            flag_all_output_files_exist = False
+                            break
+
+                # check the existence of the output folder for the current sample
+                if str_mode_scarab_count_for_the_current_sample == "multiome":
+                    if not os.path.exists(
+                        f"{path_folder_output_for_the_current_sample}count_matrix.export_completed.txt"
+                    ):
+                        flag_all_output_files_exist = False
+
+                # check the existence of the lock file
+                if (
+                    os.path.exists(path_file_lock) and flag_all_output_files_exist
+                ):  # if all output files exist and the lock file exists
+                    # check whether the lock file has been created by the current pipeline
+                    with open(path_file_lock, "rt") as file_lock:
+                        flag_lock_acquired = file_lock.read() == str_uuid_pipeline
+                    if (
+                        flag_lock_acquired
+                    ):  # if the lock file has been created by the current pipeline, delete the lock file
+                        os.remove(path_file_lock)
+                    # lock has been released
+                    if verbose:
+                        logger.warning(
+                            f"[{path_folder_output_for_the_current_sample}] The forked pipeline (id={str_uuid_pipeline}) released the lock"
+                        )
+                else:
+                    if verbose:
+                        logger.warning(
+                            f"[{path_folder_output_for_the_current_sample}] The forked pipeline (id={str_uuid_pipeline}) attempted to release the lock, but some output files are missing, and the lock will not be released."
+                        )
+
+            """
+            Run pipeline for each sample
+            """
+            """
+            create a lock
+            """
+            os.makedirs(path_folder_output_for_the_current_sample, exist_ok=True)
+            path_file_lock = (
+                f"{path_folder_output_for_the_current_sample}scarab_count.lock"
+            )
+            # check the existence of the lock file
+            if os.path.exists(path_file_lock):
+                logger.warning(
+                    f"[Output folder unavailable] the output folder {path_folder_output_for_the_current_sample} contains a lock file, which appears to be processed by a different process. Therefore, the output folder will be skipped."
+                )
+                continue
+            flag_lock_acquired = False  # initialize 'flag_lock_acquired'
+            try:
+                # create the lock file
+                with open(path_file_lock, "wt") as newfile_lock:
+                    newfile_lock.write(str_uuid_pipeline)
+                # check whether the lock file has been created correctly (check for collision).
+                with open(path_file_lock, "rt") as file_lock:
+                    flag_lock_acquired = file_lock.read() == str_uuid_pipeline
+            except Exception as e:
+                logger.critical(
+                    e, exc_info=True
+                )  # if an exception occurs, print the error message
+            if not flag_lock_acquired:
+                logger.warning(
+                    f"[Output folder unavailable] an attempt to acquire a lock for the output folder {path_folder_output_for_the_current_sample} failed, which appears to be processed by a different process. Therefore, the output folder will be skipped."
+                )
+                continue
+            # lock has been acquired
+
+            """
+            Run pipeline for each BAM file
+            """
+            for (
+                path_file_bam_input,
+                str_mode_scarab_count,
+                path_folder_output,
+                int_min_mapq_unique_mapped,
+            ) in zip(
+                l_path_file_bam_input_for_the_current_sample,
+                l_str_mode_scarab_count_for_the_current_sample,
+                l_path_folder_output_for_the_current_sample,
+                l_int_min_mapq_unique_mapped_for_the_current_sample,
+            ):
+                # define folders and directories
+                path_file_bam_input = os.path.abspath(path_file_bam_input)
+                if path_folder_output is None:  # set default 'path_folder_output'
+                    path_folder_output = (
+                        f"{path_file_bam_input.rsplit( '/', 1 )[ 0 ]}scarab_output/"
+                    )
+                path_folder_output = os.path.abspath(path_folder_output)
+                path_folder_output += "/"
+                path_folder_temp = f"{path_folder_output}temp/"
+                path_folder_graph = f"{path_folder_output}graph/"
+
+                """ if the output folder already exists """
+                if os.path.exists(path_folder_output):
+                    """check whether the pipeline has been completed"""
+                    if (
+                        os.path.exists(
+                            f"{path_folder_output}filtered_feature_bc_matrix/matrix.mtx.gz"
+                        )
+                        and (
+                            not os.path.exists(
+                                f"{path_folder_output}raw_feature_bc_matrix/_barcodes.tsv.gz"
+                            )
+                        )
+                        and (
+                            not os.path.exists(
+                                f"{path_folder_output}raw_feature_bc_matrix/_features.tsv.gz"
+                            )
+                        )
+                    ):  # intermediate files should not exists, while all output files should exist
+                        logger.info(
+                            f"[Output folder Already Exists] the output folder {path_folder_output} contains a valid count matrix file. Therefore, the output folder will be skipped."
+                        )
+                        continue  # skip if the pipeline has been completed for the output folder
+                    else:
+                        """if required output files does not exist or the an intermediate file exists, remove the entire output folder, and rerun Scarab"""
+                        if (
+                            len(glob.glob(f"{path_folder_output}*/")) > 0
+                        ):  # detect a folder inside the output folder and report the presence of the existing folders.
+                            logger.info(
+                                f"[Output folder Already Exists] the output folder {path_folder_output} does not contain a valid count matrix file. The output folder will be cleaned and the pipeline will start anew."
+                            )
+                        # delete the folders
+                        for path_folder in glob.glob(f"{path_folder_output}*/"):
+                            shutil.rmtree(path_folder)
+                        # delete the files, excluding the lock file
+                        for path_file in glob.glob(f"{path_folder_output}*"):
+                            if (
+                                path_file_lock != path_file
+                            ):  # does not delete the lock file
+                                os.remove(path_file)
+
+                """ create directories """
+                for path_folder in [
+                    path_folder_output,
+                    path_folder_temp,
+                    path_folder_graph,
+                    path_folder_ref,
+                ]:
+                    os.makedirs(path_folder, exist_ok=True)
+
+                """ index input bam files if index files do not exist """
+                flag_corrupted_bam_file = False
+                for path_file_bam in [path_file_bam_input]:
+                    path_file_index = (
+                        f"{path_file_bam}.bai"
+                        if path_file_bam.rsplit(".", 1)[1].lower() == "bam"
+                        else f"{path_file_bam}.crai"
+                    )  # retrieve path of the index of the input BAM (or CRAM) file
+                    if not os.path.exists(path_file_index):
+                        try:
+                            pysam.index(path_file_bam)
+                        except:
+                            flag_corrupted_bam_file = True
+                if flag_corrupted_bam_file:
+                    logger.info(
+                        f"[Corrupted input BAM file] the input BAM file {path_file_bam} cannot be indexed. Therefore, the input file will be skipped."
+                    )
+                    continue
+
+                """
+                Report program arguments
+                """
+                # record arguments used for the program (metadata)
+                dict_program_setting = {
+                    "version": _version_,  # record version
+                    # external
+                    "path_file_bam_input": path_file_bam_input,
+                    "path_file_fa_genome": path_file_fa_genome,
+                    "path_file_gtf_genome": path_file_gtf_genome,
+                    "path_file_fa_transcriptome": path_file_fa_transcriptome,
+                    "path_folder_output": path_folder_output,
+                    "path_folder_ref": path_folder_ref,
+                    "n_threads": n_threads,
+                    "float_memory_in_GiB": float_memory_in_GiB,
+                    "int_min_mapq_unique_mapped": int_min_mapq_unique_mapped,
+                    "int_n_bases_padding_around_interval": int_n_bases_padding_around_interval,
+                    "path_file_tsv_repeatmasker_ucsc": path_file_tsv_repeatmasker_ucsc,
+                    "l_repClass_repeatmasker_ucsc": l_repClass_repeatmasker_ucsc,
+                    "int_min_length_repeatmasker_ucsc": int_min_length_repeatmasker_ucsc,
+                    "flag_use_gene_isoform_and_intron_assignment_from_10x_cellranger": flag_use_gene_isoform_and_intron_assignment_from_10x_cellranger,
+                    "flag_include_read_aligned_to_opposite_strand": flag_include_read_aligned_to_opposite_strand,
+                    "flag_include_read_aligned_to_intron": flag_include_read_aligned_to_intron,
+                    "str_name_gtf_attr_for_id_gene": str_name_gtf_attr_for_id_gene,
+                    "str_name_gtf_attr_for_name_gene": str_name_gtf_attr_for_name_gene,
+                    "str_name_gtf_attr_for_id_transcript": str_name_gtf_attr_for_id_transcript,
+                    "str_name_gtf_attr_for_name_transcript": str_name_gtf_attr_for_name_transcript,
+                    "path_file_gff_regulatory_element": path_file_gff_regulatory_element,
+                    "str_name_gff_attr_id_regulatory_element": str_name_gff_attr_id_regulatory_element,
+                    "int_min_length_regulatory_element": int_min_length_regulatory_element,
+                    "int_bp_padding_regulatory_element_anno": int_bp_padding_regulatory_element_anno,
+                    "float_max_prop_unfiltered_rpmk": float_max_prop_unfiltered_rpmk,
+                    "flag_does_not_make_gene_names_unique": flag_does_not_make_gene_names_unique,
+                    "flag_does_not_merge_overlapping_genes_with_the_same_gene_name_and_strand_orientation": flag_does_not_merge_overlapping_genes_with_the_same_gene_name_and_strand_orientation,
+                    "str_name_bam_tag_cb_corrected": str_name_bam_tag_cb_corrected,
+                    "str_name_bam_tag_cb_uncorrected": str_name_bam_tag_cb_uncorrected,
+                    "str_name_bam_tag_umi_corrected": str_name_bam_tag_umi_corrected,
+                    "str_name_bam_tag_umi_uncorrected": str_name_bam_tag_umi_uncorrected,
+                    "flag_does_not_delete_sequence_and_sequence_qual": flag_does_not_delete_sequence_and_sequence_qual,
+                    "flag_does_not_collect_variant_information": flag_does_not_collect_variant_information,
+                    "int_min_num_of_reads_for_filtering_genomic_variant": int_min_num_of_reads_for_filtering_genomic_variant,
+                    "float_min_prop_of_reads_for_filtering_genomic_variant": float_min_prop_of_reads_for_filtering_genomic_variant,
+                    "flag_turn_off_catching_all_reads_by_binning": flag_turn_off_catching_all_reads_by_binning,
+                    "int_bp_for_bins": int_bp_for_bins,
+                    "flag_exclude_reads_assigned_to_features_and_count_every_read_in_bam_during_binning": flag_exclude_reads_assigned_to_features_and_count_every_read_in_bam_during_binning,
+                    "int_bp_padding_for_defining_promoter_from_transcript_start": int_bp_padding_for_defining_promoter_from_transcript_start,
+                    "flag_skip_exon_and_splice_junc_counting": flag_skip_exon_and_splice_junc_counting,
+                    'flag_skip_intron_retention_counting' : flag_skip_intron_retention_counting,
+                    'flag_no_strand_specificity' : flag_no_strand_specificity,
+                    "path_file_fa_for_cram": path_file_fa_for_cram,
+                    "flag_output_variant_information_with_annotations": flag_output_variant_information_with_annotations,
+                    "path_file_vcf_for_filtering_variant": path_file_vcf_for_filtering_variant,
+                    "int_min_count_features_for_filtering_barcodes": int_min_count_features_for_filtering_barcodes,
+                    "dict_num_manager_processes_for_each_data_object": dict_num_manager_processes_for_each_data_object,
+                    "l_seqname_to_skip": l_seqname_to_skip,
+                    "flag_skip_read_analysis_summary_output_bam_file": flag_skip_read_analysis_summary_output_bam_file,
+                    "flag_skip_read_analysis_summary_output_tsv_file": flag_skip_read_analysis_summary_output_tsv_file,
+                    # internal
+                    "path_folder_temp": path_folder_temp,
+                    "path_folder_graph": path_folder_graph,
+                    "path_folder_ref": path_folder_ref,
+                    "int_window_size_from_the_end_of_exon_to_ignore_mutation_calling_from_splice_site_detection_error": int_window_size_from_the_end_of_exon_to_ignore_mutation_calling_from_splice_site_detection_error,
+                    "flag_use_gene_assignment_from_10x_cellranger": flag_use_gene_assignment_from_10x_cellranger,
+                    "flag_use_isoform_assignment_from_10x_cellranger": flag_use_isoform_assignment_from_10x_cellranger,
+                    "flag_use_intronic_read_assignment_from_10x_cellranger": flag_use_intronic_read_assignment_from_10x_cellranger,
+                }
+                logger.info(
+                    f"[Setting] program will be run with the following setting for the input BAM file {path_file_bam_input} : {str( dict_program_setting )}"
+                )
+
+                """ export program setting """
+                path_file_json_setting_program = (
+                    f"{path_folder_output}program_setting.json"
+                )
+                if os.path.exists(path_file_json_setting_program):
+                    with open(path_file_json_setting_program, "r") as file:
+                        j = json.load(file)
+                    if j != dict_program_setting:
+                        logger.info(
+                            f"[Warning] the current program setting is different from the previous program setting recorded in the pipeline folder. The previous setting will be used."
+                        )
+                        with open(path_file_json_setting_program, "r") as file:
+                            dict_program_setting = json.load(
+                                file
+                            )  # override current program setting with previous program setting
+                with open(path_file_json_setting_program, "w") as newfile:
+                    json.dump(dict_program_setting, newfile)
+
+                # fixed setting
+                name_ref = "genome"
+                flag_ignore_record_with_flag_secondary_alignment = True
+                flag_ignore_record_with_flag_optical_or_pcr_duplicate = True
+                flag_ignore_reads_with_ambiguous_gene_assignment = True
+
+                # define interger representation of the CIGAR operations used in BAM files
+                int_cigarop_S = 4
+                int_cigarop_H = 5
+
+                """ load setting for reference annotations """
+                path_file_json_ref_setting = f"{path_folder_ref}ref_setting.json"
+                with open(path_file_json_ref_setting, "r") as file:
+                    dict_setting_ref = json.load(
+                        file
+                    )  # override current program setting with previous program setting
+                # parse settings update values in the local scope
+                dict_seqname_to_len_seq = dict_setting_ref["dict_seqname_to_len_seq"]
+
+                """ initialize base count array """
+                dict_base_to_index = dict(
+                    (str_base, index) for index, str_base in enumerate("ATGC")
+                )
+                int_n_base_types = len(
+                    dict_base_to_index
+                )  # retrieve the number of base types
+                dict_seqname_to_index_chunk_to_base_count = dict(
+                    (seqname, dict()) for seqname in dict_seqname_to_len_seq
+                )
+
+                """ load local settings """
+                flag_is_mode_scarab_count_atac = str_mode_scarab_count == "atac"
+                flag_is_5prime, flag_is_paired_end = None, None  # initialize the fiags
+                if not flag_is_mode_scarab_count_atac:
+                    flag_is_5prime = "gex5prime" in str_mode_scarab_count
+                    flag_is_paired_end = "paired-end" in str_mode_scarab_count
+
+                """ define internal parameters according to the scarab count modes """
+                flag_use_gene_assignment_from_10x_cellranger_for_the_current_bam_file = flag_use_gene_assignment_from_10x_cellranger  # retrieve 'flag_use_gene_assignment_from_10x_cellranger_for_the_current_bam_file'
+                # for a header line for annotated count matrix
+                l_col_df_count = ["barcode", "feature", "id_feature", "read_count"]
+                if flag_is_mode_scarab_count_atac:
+                    """data columns"""
+                    # a list of names of columns for defining unique molecules assigned to a single feature for ATAC reads (following 10X cellranger ATAC > v1.2)
+                    l_col_for_identifying_unique_molecules = [
+                        "CB",
+                        "refstart",
+                        "refend",
+                    ]  # first element should be 'CB'
+                    # a list of names of columns for collecting information about the current alignment (full record)
+                    # 'str_l_seg' is required for variant calling
+                    l_col = [
+                        "qname",
+                        "mapq",
+                        "refname",
+                        "flag",
+                        "refstart",
+                        "refend",
+                        "str_l_seg",
+                        "CB",
+                        "CR",
+                        "int_flag_classification",
+                        "id_rpmk",
+                        "id_gene",
+                        "id_reg",
+                        "id_promoter",
+                        "l_name_variant",
+                    ]
+                    # a list of names of columns for collecting information about the current alignment just for counting (only essential information to reduce memory footprint)
+                    l_col_for_counting = [
+                        "qname",
+                        "mapq",
+                        "flag",
+                        "str_l_seg",
+                        "CB",
+                        "refstart",
+                        "refend",
+                        "int_flag_classification",
+                        "l_name_variant",
+                    ]
+                    # a list of names of columns that will be added as BAM tags to the output BAM file # should be a contiguous subset of 'l_col'
+                    l_name_col_newanno = l_col[-5:]
+
+                    flag_use_gene_assignment_from_10x_cellranger_for_the_current_bam_file = (
+                        False  # no gene assignment for ATAC data
+                    )
+                else:
+                    # a list of names of columns for defining unique molecules assigned to a single feature for ATAC reads (following 10X cellranger  > v1.2)
+                    l_col_for_identifying_unique_molecules = [
+                        "CB",
+                        "UB",
+                    ]  # first element should be 'CB'
+                    # a list of names of columns for collecting information about the current alignment (full record)
+                    # 'str_l_seg' is required for variant calling
+                    l_col = [
+                        "qname",
+                        "mapq",
+                        "refname",
+                        "flag",
+                        "refstart",
+                        "refend",
+                        "str_l_seg",
+                        "CB",
+                        "CR",
+                        "UB",
+                        "UR",
+                        "TX",
+                        "AN",
+                        "GX",
+                        "GN",
+                        "MM",
+                        "RE",
+                        "xf",
+                        "int_flag_classification",
+                        "id_rpmk",
+                        "int_max_num_base_pairs_overlap_with_rpmk",
+                        "id_gene",
+                        "int_num_base_pairs_overlap_with_exons_of_the_assigned_gene_id",
+                        "int_base_gene_exon_count",
+                        "int_base_filtered_rpmk_count",
+                        "id_reg",
+                        "int_base_unfiltered_rpmk_count",
+                        "int_base_reg_count",
+                        "id_tx_assigned_by_minimap2",
+                        "l_name_variant",
+                    ]
+                    # a list of names of columns for collecting information about the current alignment just for counting (only essential information to reduce memory footprint)
+                    l_col_for_counting = [
+                        "qname",
+                        "mapq",
+                        "flag",
+                        "str_l_seg",
+                        "CB",
+                        "UB",
+                        "TX",
+                        "RE",
+                        "int_flag_classification",
+                        "id_tx_assigned_by_minimap2",
+                        "l_name_variant",
+                    ]
+                    # a list of names of columns that will be added as BAM tags to the output BAM file # should be a contiguous subset of 'l_col'
+                    l_name_col_newanno = l_col[-12:]
+
+                # shared settings across scarab modes
+                dict_name_col_newanno_to_sam_tag_name = {
+                    "int_flag_classification": ("XC", "i"),
+                    "id_rpmk": ("XR", "Z"),
+                    "int_max_num_base_pairs_overlap_with_rpmk": ("YR", "i"),
+                    "id_gene": ("XG", "Z"),
+                    "int_num_base_pairs_overlap_with_exons_of_the_assigned_gene_id": (
+                        "YG",
+                        "i",
+                    ),
+                    "int_base_gene_exon_count": ("YX", "i"),
+                    "int_base_filtered_rpmk_count": ("YF", "i"),
+                    "id_reg": ("XE", "Z"),
+                    "int_base_unfiltered_rpmk_count": ("YU", "i"),
+                    "int_base_reg_count": ("YE", "i"),
+                    "id_tx_assigned_by_minimap2": ("XT", "Z"),
+                    "l_name_variant": ("XV", "Z"),
+                }
+                l_index_col_for_counting = list(
+                    l_col.index(col) for col in l_col_for_counting
+                )  # retrieve a list of column indices used for counting
+
+                """
+                int_flag_classification : binary flags
+
+                gene        | 0x1 : a flag indicating an overlap(s) with gene body 
+                gene        | 0x2 : a flag indicating that the read can be assigned to more than one genes (gene assignment was ambiguous)
+                gene        | 0x4 : a flag indicating completely intronic reads (GEX mode specific)
+                gene        | 0x8 : a flag indicating mostly exonic reads (>90% overlaps with exons) (GEX mode specific)
+                promoter    | 0x10 : a flag indicating an overlap(s) with promoter regions (ATAC mode specific)
+                promoter    | 0x20 : a flag indicating that the read can be assigned to more than one promoter regions (promoter assignment was ambiguous) (ATAC mode specific)
+                repeats     | 0x40 : a flag indicating overlap with filtered repeatmasker annotations
+                repeats     | 0x80 : a flag indicating that the read can be assigned to more than one filtered repeatmasker annotations (ambiguous assignment to filtered repeatmasker annotations)
+                repeats     | 0x100 : a flag indicating complete overlap with filtered repeatmasek
+                regulatory  | 0x200 : a flag indicating overlap with regulatory element(s)
+                regulatory  | 0x400 : a flag indicating overlap with both repeatmasker annotations and regulatory element(s)
+                regulatory  | 0x800 : a flag indicating overlap with regulatory element annotations and not overlapping with unfiltered repeatmasker annotations
+                regulatory  | 0x1000 : a flag indicating that the read can be assigned to more than one regulatory elements (ambiguous assignment to regulatory annotations)
+                regulatory  | 0x2000 : a flag indicating complete overlap with regulatory element annotations
+                """
+                int_flag_class_overlap_with_gene_body = 1 << 0
+                int_flag_class_ambiguous_assignment_to_gene = 1 << 1
+                int_flag_class_completely_intronic = 1 << 2
+                int_flag_class_mostly_exonic = 1 << 3
+                int_flag_class_overlap_with_promoter = 1 << 4
+                int_flag_class_ambiguous_assignment_to_promoter = 1 << 5
+                int_flag_class_overlap_with_filtered_rpmk_anno = 1 << 6
+                int_flag_class_ambiguous_assignment_to_filtered_rpmk_anno = 1 << 7
+                int_flag_class_complete_overlap_with_filtered_rpmk_anno = 1 << 8
+                int_flag_class_overlap_with_reg = 1 << 9
+                int_flag_class_overlap_with_reg_and_rpmk = 1 << 10
+                int_flag_class_overlap_with_reg_not_overlap_with_unfiltered_rpmk_anno = (
+                    1 << 11
+                )
+                int_flag_class_ambiguous_assignment_to_reg = 1 << 12
+                int_flag_class_complete_overlap_with_reg_not_overlap_with_unfiltered_rpmk_anno = (
+                    1 << 13
+                )
+
+                """
+                Settings for BAM/CRAM files
+                """
+                flag_is_cram = (
+                    path_file_bam_input.rsplit(".", 1)[0].lower() == "cram"
+                )  # retrieve a flag indicating that the file is a CRAM file
+                if flag_is_cram:
+                    if path_file_fa_for_cram is None:  # show warning
+                        if verbose:
+                            logger.warning(
+                                "a CRAM file has been given but reference genome path has not been given. A default location stored in CRAM file will be used."
+                            )
+                    else:
+                        if not os.path.exists(
+                            f"{path_file_fa_for_cram}.fai"
+                        ):  # if the reference fasta file has not been indexed
+                            bk.OS_Run(
+                                ["samtools", "faidx", path_file_fa_for_cram]
+                            )  # index the reference fasta file
+                    if verbose:
+                        logger.warning("path_file_fa_for_cram")
+                str_mode_sam = "rc" if flag_is_cram else "rb"
+
+                """ define internal functions """
+                int_max_n_removed_elements = 10000  # maximum number of removed elements that can exist in a dictionary storing analyzed reads (avoid a 'memory leakeage')
+
+                def __Get_Genomic_Region__(int_pos, int_bp_for_bins=int_bp_for_bins):
+                    """get start and end coordinates (0-based) of the genomic region of the current position (0-based)"""
+                    index_region = int(int_pos / int_bp_for_bins)
+                    start = index_region * int_bp_for_bins  # 0-based
+                    end = start + int_bp_for_bins  # 0-based
+                    return start, end  # return 0-based coordinates
+
+                def __get_data_object(name_data):
+                    """get data object of the given 'name_data'"""
+                    if name_data in scidx:
+                        return scidx[name_data]
+                    else:
+
+                        def get_proxy_object():
+                            return scidx[f"l_managed_{name_data}"][
+                                _get_random_integer(
+                                    dict_num_manager_processes_for_each_data_object[
+                                        name_data
+                                    ]
+                                )
+                            ]  # randomly select and return the proxy object to distribute the workload
+
+                        return (
+                            get_proxy_object  # return a function to select proxy object
+                        )
+
+                def __data_object_subset(data_object, l_key: list):
+                    """# 2023-01-09 18:39:51
+                    perform subset operation on a dictionary-like data object
+
+                    l_key : list # list of key names to subset
+                    """
+                    if hasattr(data_object, "__call__"):  # for proxy object
+                        return data_object().subset(l_key)
+                    else:
+                        dict_subset = dict()
+                        for key in l_key:
+                            if key in data_object:
+                                dict_subset[key] = data_object[key]
+                        return dict_subset  # return a subset dictionary of a given data object
+
+                def __data_object_search_query(data_object, seqname, query):
+                    """# 2023-01-09 18:39:47
+                    perform subset operation on a dictionary-intervaltree-like data object
+                    """
+                    return (
+                        data_object().search_query(seqname, query)
+                        if hasattr(data_object, "__call__")
+                        else (
+                            data_object[seqname][query]
+                            if seqname in data_object
+                            else []
+                        )
+                    )
+
+                def __data_object_search_queries(data_object, seqname, queries):
+                    """# 2023-01-09 18:39:47
+                    perform subset operation on a dictionary-like data object
+                    """
+                    return (
+                        data_object().search_queries(seqname, queries)
+                        if hasattr(data_object, "__call__")
+                        else (
+                            list(data_object[seqname][query] for query in queries)
+                            if seqname in data_object
+                            else []
+                        )
+                    )
+
+                """
+                Define a generator for partition BAM file for multiprocessing while not crossing gene or other annotations (aware of gene boundaries)
+                """
+
+                def process_batch(pipe_receiver, pipe_sender):
+                    """
+                    # 2022-04-24 01:29:59
+                    Requires loading several data objects (using copy-on-write method)
+
+                    receives a bookmark file (either file directory of a tsv file or a dataframe)
+                    """
+                    str_uuid = bk.UUID()  # retrieve id
+
+                    """ retrieve the sam header lines and open a new bam file using the input bam file as a template """
+                    with pysam.AlignmentFile(
+                        path_file_bam_input,
+                        str_mode_sam,
+                        reference_filename=path_file_fa_for_cram,
+                    ) as samfile:
+                        """retrieve sam header with chromosom names without 'chr' prefix"""
+                        samfile_header = samfile.header
+                        dict_header = samfile_header.to_dict()
+                        """ remove 'chr' prefix from the header if it already exists  """
+                        for e in dict_header["SQ"]:
+                            e["SN"] = __chromosome_name_remove_chr__(e["SN"])
+                        samfile_header = pysam.AlignmentHeader.from_dict(dict_header)
+                        """ open a new sam file (output BAM file) """
+                        if not flag_skip_read_analysis_summary_output_bam_file:
+                            newsamfile = pysam.AlignmentFile(
+                                f"{path_folder_temp}{str_uuid}.analysis.{name_ref}.bam",
+                                "wb",
+                                header=samfile_header,
+                            )
+
+                    """ open tsv files """
+                    newfile_df_count = gzip.open(
+                        f"{path_folder_temp}{str_uuid}.count.gene_and_transcript.tsv.gz",
+                        "wb",
+                    )
+                    newfile_df_analysis_statistics = gzip.open(
+                        f"{path_folder_temp}{str_uuid}.analysis_statistics.tsv.gz", "wb"
+                    )  # for analyzing performance issues
+                    if not flag_skip_read_analysis_summary_output_tsv_file:
+                        newfile = gzip.open(
+                            f"{path_folder_temp}{str_uuid}.analysis.{name_ref}.tsv.gz",
+                            "wb",
+                        )
+
+                    if verbose:
+                        logger.info(f"[Started] ({str_uuid})")
+
+                    """ get data objects (either real data object with direct access or a proxy object for accessing data object in the manager process) """
+                    data_dict_it_exon_transcriptome = __get_data_object(
+                        "dict_it_exon_transcriptome"
+                    )
+                    data_dict_it_rpmk = __get_data_object("dict_it_rpmk")
+                    data_dict_it_splice_junc_transcriptome = __get_data_object(
+                        "dict_it_splice_junc_transcriptome"
+                    )
+                    data_dict_it_exon = __get_data_object("dict_it_exon")
+                    data_dict_it_splice_donor_and_acceptor = __get_data_object("dict_it_splice_donor_and_acceptor_genome")
+                    data_dict_it_reg = __get_data_object("dict_it_reg")
+                    data_dict_it_promoter = __get_data_object("dict_it_promoter")
+                    data_dict_fa_transcriptome = __get_data_object(
+                        "dict_fa_transcriptome"
+                    )
+                    data_dict_t_splice_junc_to_info_genome = __get_data_object(
+                        "dict_t_splice_junc_to_info_genome"
+                    )
+                    
+                    """
+                    Initiate workers for off-loading works for processing each batch
+                    """
+                    int_num_workers_for_bucket_processing = 3 # the number of workers for bucket processing
+                    workers_for_bucket_processing = bk.Offload_Works( int_num_workers_for_bucket_processing )  # 💛 adjustment of the number of workers might be needed.
+  
+                    int_max_bucket_deletion_count_before_reinitialize = 10000 # the max number of bucket deletion count before re-initializing the bucket container (python dictionary, when too many keys are deleted, lead to 'memory leak')
+                    int_max_num_records_in_a_batch_of_buckets = 200000 # initialize the total number of records in a batch of buckets
+                    int_max_num_batches_in_the_result_container_before_flushing = 2 # the max number of batches whose results can be stored in the container before flushing the result to the storage. if this number is too large, the process will consume too much memory 
+                    
+                    ns = { 'int_bucket_deletion_count' : 0 } # create a namespace for buckets # a counter counting the number of bucket deleted (for recreating the dictionary container to avoid 'memory leakage')
+                                      
+                    """
+                    functions for initializing reads
+                    """
+                    def __Initialize_Reads__():
+                        """initialize Reads object"""
+                        return {"data": dict(), "int_n_removed_elements": 0}
+
+                    def __Initialize_gene_and_isoform_data__(
+                        reads, refname_gene, refstart_gene, refend_gene, id_gene
+                    ):
+                        """# 2022-05-21 16:35:02
+                        initialized data for gene and isoform annotation
+
+                        refstart_gene, refend_gene : 0-based coordinates
+                        """
+                        dict_data = dict()
+                        dict_data["annotation_type"] = "gene_and_isoform"
+                        dict_data["id_anno"] = id_gene
+                        dict_data["refname_anno"] = refname_gene
+                        dict_data["refstart_anno"] = refstart_gene
+                        dict_data["refend_anno"] = refend_gene
+                        dict_data["wall_time"] = 0  # initialize wall_time
+                        # initialize an array for counting reads for each cell-barcode
+                        dict_data["l_read"] = []
+
+                        """ when using isoform assignment from minimap2 alignment """
+                        if not flag_use_isoform_assignment_from_10x_cellranger:
+                            # retrieve list of id_tx for the current id_gene
+                            dict_data["l_id_tx"] = (
+                                scidx["dict_id_gene_to_l_id_tx"][id_gene]
+                                if id_gene in scidx["dict_id_gene_to_l_id_tx"]
+                                else []
+                            )  # handle when no id_tx is available for the id_gene
+                            # retrieve fasta files of transcripts, and save as a fasta file
+                            # since creating a dictionary using the one-liner expression (for some reason) cause occasional deadlocks (why??) the multi-line version should be used
+                            dict_data["dict_fasta_tx"] = __data_object_subset(
+                                data_dict_fa_transcriptome, dict_data["l_id_tx"]
+                            )
+                            dict_data[
+                                "path_file_fasta_tx"
+                            ] = f"{path_folder_temp}{bk.UUID( )}.tx.fa.gz"
+                            bk.FASTA_Write(
+                                dict_data["path_file_fasta_tx"],
+                                dict_fasta=dict_data["dict_fasta_tx"],
+                            )  # save as a fasta file
+                            dict_data["am_tx"] = mappy.Aligner(
+                                fn_idx_in=dict_data["path_file_fasta_tx"], preset="sr"
+                            )  # load minimap aligner using the minimap2 index with the single-end short read alignment mode
+
+                        # load the initialized data
+                        reads["data"][id_gene] = dict_data
+
+                    def __Initialize_misc_anno_data__(
+                        reads,
+                        refname_anno,
+                        refstart_anno,
+                        refend_anno,
+                        id_anno,
+                        annotation_type="miscellaneous",
+                        str_mode_scarab_count="gex",
+                    ):
+                        """# 2022-04-16 21:17:19
+                        initialized data for miscellaneous annotation
+
+                        refstart_anno, refend_anno : 0-based coordinates
+
+                        'str_mode_scarab_count' : 'atac' or 'gex'
+                        """
+                        dict_data = dict()
+                        dict_data["id_anno"] = id_anno
+                        dict_data["mode_scarab_count"] = str_mode_scarab_count
+                        dict_data["annotation_type"] = annotation_type
+                        dict_data["refname_anno"] = refname_anno
+                        dict_data["refstart_anno"] = refstart_anno
+                        dict_data["refend_anno"] = refend_anno
+                        dict_data["wall_time"] = 0  # initialize wall_time
+                        # initialize an array for counting reads for each cell-barcode
+                        dict_data["l_read"] = []
+
+                        # load the initialized data
+                        reads["data"][id_anno] = dict_data
+                        
+                    """
+                    define functions for offloading works for multiprocessing
+                    """
+
+                    def _process_gene_and_isoform_data( id_gene : str, dict_data : dict ):
+                        """ # 2023-08-28 16:25:33 
+                        Flush data for gene and isoform
+                        assumes uniquely aligned reads
+                        requires the following columns:
+                        l_col_for_counting = [ 'qname', 'mapq', 'flag', 'str_l_seg', 'CB', 'UB', 'TX', 'RE', 'int_flag_classification', 'id_tx_assigned_by_minimap2', 'l_name_variant' ]
+                        
+                        id_anno # name of the annotation
+                        dict_data # dictionary data of the annotation
+                        """
+                        float_time_start = time.time()  # record the start time
+                        ''' initialize the output '''
+                        dict_output = {
+                            'bio_newfile_df_count' : BytesIO( ),
+                            'bio_newfile_df_analysis_statistics' : BytesIO( ),
+                        } # initialize the dictionary containing the outputs as binary stream objects
+
+                        """ retrieve 'name_gene' """
+                        (
+                            seqname_anno,
+                            source_anno,
+                            feature_anno,
+                            start_anno,
+                            end_anno,
+                            score_anno,
+                            strand_anno,
+                            frame_anno,
+                            attribute_anno,
+                            name_anno,
+                        ) = scidx["arr_data_df_gtf_gene"][
+                            scidx["dict_index_df_gtf_gene"][id_gene][0]
+                        ]  # retrieve name_gene # 1-based
+                        if isinstance(
+                            name_anno, float
+                        ):  # if 'name_gene' is not available, use id_gene as 'name_gene'
+                            name_anno = id_gene
+
+                        """ when using isoform assignment from minimap2 alignment """
+                        # remove temporary files
+                        if not flag_use_isoform_assignment_from_10x_cellranger:
+                            os.remove(dict_data["path_file_fasta_tx"])
+
+                        int_num_record = len(
+                            dict_data["l_read"]
+                        )  # retrieve the number of records for the current annotation
+                        df_read = pd.DataFrame(
+                            dict_data.pop("l_read"), columns=l_col_for_counting
+                        )  # compose a dataframe for the current annotation
+
+                        """ filter aligned reads """
+                        df_read = bk.PD_Binary_Flag_Select(
+                            df_read, "flag", 10, flag_select=False
+                        )  # remove PCR or optical duplicate
+                        df_read = bk.PD_Binary_Flag_Select(
+                            df_read, "flag", 8, flag_select=False
+                        )  # remove secondary alignments
+
+                        # remove reads aligned to introns
+                        if not flag_include_read_aligned_to_intron and len(df_read) > 0:
+                            df_read = (
+                                bk.PD_Select(df_read, RE="N", deselect=True)
+                                if flag_use_intronic_read_assignment_from_10x_cellranger
+                                else bk.PD_Binary_Flag_Select(
+                                    df_read,
+                                    "int_flag_classification",
+                                    2,
+                                    flag_select=False,
+                                )
+                            )  # remove intronic read based on read alignment classification from 10X cellrange or default classification (that of this program)
+
+                        if len(df_read) > 0:
+                            """assign id_tx to reads uniquely aligned to transcripts"""
+                            if flag_use_isoform_assignment_from_10x_cellranger:
+                                # assign id_tx to reads uniquely aligned to a single transcript (use isoform assignment of 10x cellranger)
+                                l_tx_assigned = []
+                                for e in df_read.TX.values:
+                                    if isinstance(e, float) or (
+                                        isinstance(e, str) and len(e) == 0
+                                    ):
+                                        l_tx_assigned.append(np.nan)
+                                    elif e.count(";") > 0:
+                                        l_tx_assigned.append(np.nan)
+                                    else:
+                                        l_tx_assigned.append(e.split(",", 1)[0])
+                                df_read["id_tx_assigned"] = l_tx_assigned
+                            else:
+                                df_read[
+                                    "id_tx_assigned"
+                                ] = df_read.id_tx_assigned_by_minimap2.replace(
+                                    "", np.nan
+                                )  # use np.nan to indicate a read has not been aligned uniquely to a single transcript
+
+                            """ count at gene-level """
+                            df = df_read[
+                                ["qname", "mapq", "flag", "CB", "UB", "id_tx_assigned"]
+                            ]
+                            # remove records without cell barcodes
+                            df.loc[:, ["CB", "UB"]] = df[["CB", "UB"]].replace(
+                                "", np.nan
+                            )
+                            df.dropna(subset=["CB", "UB"], inplace=True)
+
+                            # drop duplicates based on read name, and prioritize reads uniquely aligned to transcript sequences
+                            df.sort_values(["id_tx_assigned"], inplace=True)
+                            df.sort_values(
+                                ["mapq"], inplace=True, ascending=False
+                            )  # sort reads in the order of an increasing mapq scores (so that alignments with lower mapping scores are removed)
+                            df.drop_duplicates(
+                                subset=["qname"], keep="first", inplace=True
+                            )
+                            df.drop(columns=["qname", "mapq"], inplace=True)
+
+                            # initialize counting read for each cell
+                            df["read_count"] = 1
+
+                            def __Count_and_Write_gene_data__(
+                                df, feature, id_feature
+                            ):
+                                """count and write gene annotation count data to the given file handle 'newfile_df_count'"""
+                                if len(df) == 0:  # detect empty dataframe
+                                    return -1
+                                df_gene_count = df[["CB", "UB", "read_count"]]
+                                df_gene_count.drop_duplicates(
+                                    subset=["CB", "UB"], inplace=True
+                                )  # drop UMI duplicates
+                                df_gene_count.drop(columns=["UB"], inplace=True)
+                                df_gene_count = df_gene_count.groupby(
+                                    ["CB"]
+                                ).count()  # count UMI per cell
+                                df_gene_count.reset_index(drop=False, inplace=True)
+                                df_gene_count.rename(
+                                    columns={"CB": "barcode"}, inplace=True
+                                )
+                                df_gene_count["feature"] = feature  # name_gene
+                                df_gene_count["id_feature"] = id_feature  # id_gene
+
+                                # write a count data for the current annotation to a file
+                                df_gene_count = df_gene_count[
+                                    ["barcode", "feature", "id_feature", "read_count"]
+                                ]  # reorder columns
+                                df_gene_count.to_csv(
+                                    dict_output[ 'bio_newfile_df_count' ], sep="\t", header=None, index=False
+                                )
+
+                            """ count strand specific reads """
+                            flag_valid_strand_info = strand_anno in [
+                                "-",
+                                "+",
+                            ]  # retrieve a flag indicating whether the gene's strand information is valid
+                            if flag_valid_strand_info:
+                                flag_reverse_complemented_is_sense = (
+                                    strand_anno == "-"
+                                )  # retrieve a flag for selecting sense reads
+                                if (
+                                    flag_include_strand_specific_counts
+                                ):  # count reads aligned to each strand separately if 'flag_include_strand_specific_counts' is True # only counts strand specific counts if the strand information of the gene annotation is valid
+                                    df_sense = bk.PD_Binary_Flag_Select(
+                                        df,
+                                        "flag",
+                                        4,
+                                        flag_select=flag_reverse_complemented_is_sense,
+                                    )
+                                    __Count_and_Write_gene_data__(
+                                        df_sense,
+                                        f"{name_anno}|strand=sense",
+                                        f"{id_anno}|strand=sense",
+                                    )  # export count data for the reads aligned to sense direction
+                                    __Count_and_Write_gene_data__(
+                                        bk.PD_Binary_Flag_Select(
+                                            df,
+                                            "flag",
+                                            4,
+                                            flag_select=not flag_reverse_complemented_is_sense,
+                                        ),
+                                        f"{name_anno}|strand=antisense",
+                                        f"{id_anno}|strand=antisense",
+                                    )  # export count data for the reads aligned to anti-sense direction
+
+                                elif not flag_include_read_aligned_to_opposite_strand:
+                                    df_sense = bk.PD_Binary_Flag_Select(
+                                        df,
+                                        "flag",
+                                        4,
+                                        flag_select=flag_reverse_complemented_is_sense,
+                                    )  # include only the sense reads
+                            else:  # if valid strand information is not available, consider all reads as aligned to 'sense' direction
+                                df_sense = df
+                            if (
+                                not flag_include_read_aligned_to_opposite_strand
+                            ):  # if only sense reads are being counted, use 'df_sense' as 'df'
+                                df = df_sense
+
+                            __Count_and_Write_gene_data__(
+                                df, name_anno, id_anno
+                            )  # count reads # exclude reads aligned to antisense direction if 'flag_include_read_aligned_to_opposite_strand' is False
+                            
+                            """ write counts of reads not uniquely assigned to a single transcript """
+                            __Count_and_Write_gene_data__(
+                                df[ pd.isnull( df.id_tx_assigned ) ], f"{name_anno}|not_uniquely_assigned_to_tx", f"{id_anno}|not_uniquely_assigned_to_tx"
+                            )  # count reads # exclude reads aligned to antisense direction if 'flag_include_read_aligned_to_opposite_strand' is False
+
+                            """ count at transcript-level (currently counts reads aligned to both sense and antisense strands) """
+                            # count read for each cell
+                            df.dropna(
+                                subset=["id_tx_assigned"], inplace=True
+                            )  # retrieve reads uniquely aligned to a single transcript
+                            
+                            df_tx_count = df[
+                                ["CB", "UB", "id_tx_assigned", "read_count"]
+                            ]
+                            if len(df_tx_count) > 0:  # if a valid isoform count exists
+                                df_tx_count.drop_duplicates(
+                                    subset=["CB", "UB", "id_tx_assigned"], inplace=True
+                                )  # drop UMI duplicates
+                                df_tx_count = df_tx_count.groupby(
+                                    ["CB", "id_tx_assigned"]
+                                ).count()  # count UMI per unique transcript per cell
+                                df_tx_count.reset_index(drop=False, inplace=True)
+                                df_tx_count.drop(columns=["UB"], inplace=True)
+                                df_tx_count.rename(
+                                    columns={
+                                        "CB": "barcode",
+                                        "id_tx_assigned": "feature",
+                                    },
+                                    inplace=True,
+                                )
+                                df_tx_count["id_feature"] = df_tx_count.feature
+                                df_tx_count["feature"] = (
+                                    name_anno
+                                    + "|tx_name="
+                                    + df_tx_count.feature.apply(
+                                        MAP.Map(
+                                            scidx["dict_id_tx_to_name_tx"]
+                                        ).a2b_if_mapping_available_else_Map_a2a
+                                    )
+                                    + "|tx_id="
+                                    + df_tx_count.feature
+                                )
+
+                                # write a count data for the current annotation to a file
+                                df_tx_count = df_tx_count[
+                                    l_col_df_count
+                                ]  # reorder columns
+                                df_tx_count.to_csv(
+                                    dict_output[ 'bio_newfile_df_count' ], sep="\t", header=None, index=False
+                                )
+
+                            """ count gene/transcript counts for each detected variant """
+                            if (
+                                not flag_does_not_collect_variant_information
+                                and flag_output_variant_information_with_annotations
+                            ):
+                                """compose a dataframe for counting molecules with variants"""
+                                df = df_read[
+                                    [
+                                        "qname",
+                                        "str_l_seg",
+                                        "CB",
+                                        "UB",
+                                        "id_tx_assigned",
+                                        "l_name_variant",
+                                    ]
+                                ]
+                                # remove records without cell barcodes
+                                df.loc[:, ["CB", "UB"]] = df[["CB", "UB"]].replace(
+                                    "", np.nan
+                                )
+                                df.dropna(subset=["CB", "UB"], inplace=True)
+                                df.sort_values(
+                                    ["l_name_variant", "id_tx_assigned"],
+                                    ascending=False,
+                                    inplace=True,
+                                )  # prioritize reads with l_name_variant and id_tx_assigned
+                                df.drop_duplicates(
+                                    subset=["qname"], keep="first", inplace=True
+                                )  # retrieve best record for each unique read
+                                df.drop(columns=["qname"], inplace=True)
+
+                                """ count and filter mutations """
+                                str_id_var_concatenated = ";".join(
+                                    df.l_name_variant[
+                                        df.l_name_variant.apply(len) > 0
+                                    ].values
+                                )
+                                # retrieve a list of all 'id_var'
+                                l_id_var_all = str_id_var_concatenated.split(";")
+                                int_min_num_of_reads = (
+                                    1
+                                    if flag_filter_variant_using_predefined_set
+                                    else max(
+                                        int(
+                                            np.ceil(
+                                                len(l_id_var_all)
+                                                * float_min_prop_of_reads_for_filtering_genomic_variant
+                                            )
+                                        ),
+                                        int_min_num_of_reads_for_filtering_genomic_variant,
+                                    )
+                                )  # retrieve a threshold (maximum of the two thresholds). if 'flag_filter_variant_using_predefined_set' is True, use all available (already filtered) variants
+                                # retrieve list of id_mut (in the order of decreasing counts)
+                                l_id_var = (
+                                    bk.LIST_COUNT(
+                                        l_id_var_all,
+                                        duplicate_filter=int_min_num_of_reads,
+                                    ).index.values
+                                    if len(str_id_var_concatenated) > 0
+                                    else []
+                                )
+                                del l_id_var_all
+                                if (
+                                    len(l_id_var) > 0
+                                ):  # if a variant is detected for the current feature
+                                    """build an interval tree of detected variants"""
+                                    it_var = (
+                                        intervaltree.IntervalTree()
+                                    )  # interval tree for searching variants. values contains mutation, reference
+                                    for id_var in l_id_var:
+                                        refname, str_refpos, anno_mut = id_var.split(
+                                            ":", 2
+                                        )
+                                        refpos = (
+                                            int(str_refpos) - 1
+                                        )  # 1-based > 0-based coord
+                                        ref, alt = anno_mut.split(">")
+                                        len_ref, len_alt = len(ref), len(alt)
+                                        it_var[refpos : refpos + len_ref] = (
+                                            id_var,
+                                            refname + ":" + str_refpos,
+                                        )  # update interval tree for searching variant using intervals
+                                    """ retrieve a list of unique molecules for each variant information """
+                                    dict_unique_molecule_for_each_variant_counter = (
+                                        dict()
+                                    )
+                                    for (
+                                        str_l_seg,
+                                        CB,
+                                        UB,
+                                        id_tx_assigned,
+                                        l_name_variant,
+                                    ) in df[
+                                        [
+                                            "str_l_seg",
+                                            "CB",
+                                            "UB",
+                                            "id_tx_assigned",
+                                            "l_name_variant",
+                                        ]
+                                    ].values:
+                                        set_name_variant = (
+                                            set(l_name_variant.split(";"))
+                                            if len(l_name_variant) > 0
+                                            else set()
+                                        )  # retrieve set of variants detected in the current reads
+                                        """ collect intervals of variants overlapping with the current aligment """
+                                        set_overlapped_interval_var = set()
+                                        for e in str_l_seg.split(","):
+                                            refstart, refend = list(
+                                                map(int, e.split("-"))
+                                            )
+                                            set_overlapped_interval_var |= it_var[
+                                                refstart - 1 : refend
+                                            ]
+                                        for (
+                                            start,
+                                            end,
+                                            values,
+                                        ) in (
+                                            set_overlapped_interval_var
+                                        ):  # for each interval of a variant
+                                            id_var, id_allele_ref = values
+                                            flag_read_contains_id_allele_ref = (
+                                                id_var not in set_name_variant
+                                            )
+                                            id_allele = (
+                                                id_allele_ref
+                                                if flag_read_contains_id_allele_ref
+                                                else id_var
+                                            )  # retrieve allele of the current read based on the detected list of 'name_variants'
+
+                                            """ count at gene-level """
+                                            t = (
+                                                CB,
+                                                UB,
+                                                id_allele,
+                                                id_gene,
+                                                flag_read_contains_id_allele_ref,
+                                                id_allele_ref,
+                                            )
+                                            if (
+                                                t
+                                                not in dict_unique_molecule_for_each_variant_counter
+                                            ):
+                                                dict_unique_molecule_for_each_variant_counter[
+                                                    t
+                                                ] = 0
+                                            dict_unique_molecule_for_each_variant_counter[
+                                                t
+                                            ] += 1
+
+                                            """ count at transcript-level """
+                                            if isinstance(
+                                                id_tx_assigned, str
+                                            ):  # if valid id_tx_assigned exists
+                                                t = (
+                                                    CB,
+                                                    UB,
+                                                    id_allele,
+                                                    id_tx_assigned,
+                                                    flag_read_contains_id_allele_ref,
+                                                    id_allele_ref,
+                                                )
+                                                if (
+                                                    t
+                                                    not in dict_unique_molecule_for_each_variant_counter
+                                                ):
+                                                    dict_unique_molecule_for_each_variant_counter[
+                                                        t
+                                                    ] = 0
+                                                dict_unique_molecule_for_each_variant_counter[
+                                                    t
+                                                ] += 1
+
+                                    if (
+                                        len(
+                                            dict_unique_molecule_for_each_variant_counter
+                                        )
+                                        > 0
+                                    ):
+                                        """compose a count matrix of molecules containing genomic variants"""
+                                        df_var_count = pd.Series(
+                                            dict_unique_molecule_for_each_variant_counter
+                                        ).reset_index(drop=False)
+                                        df_var_count.columns = [
+                                            "barcode",
+                                            "read_count",
+                                            "id_var",
+                                            "id_feature",
+                                            "flag_read_contains_id_allele_ref",
+                                            "id_allele_ref",
+                                            "int_num_unique_molecule_duplicate_count",
+                                        ]  # UMI column will be transformed to the read_count column after the pd.groupby.count( ) operation
+                                        df_var_count.drop(
+                                            columns=[
+                                                "int_num_unique_molecule_duplicate_count"
+                                            ],
+                                            inplace=True,
+                                        )
+                                        df_var_count.sort_values(
+                                            "flag_read_contains_id_allele_ref",
+                                            inplace=True,
+                                        )  # put read that does not contains id_allele_ref at the front of the dataframe
+                                        df_var_count.drop_duplicates(
+                                            subset=[
+                                                "barcode",
+                                                "read_count",
+                                                "id_feature",
+                                                "id_allele_ref",
+                                            ],
+                                            keep="first",
+                                            inplace=True,
+                                        )  # drop invalid record that contains variants but simultaneously annotated as containing id_allele_ref due to the presence of multiple alleles at that position
+                                        df_var_count = df_var_count.groupby(
+                                            ["barcode", "id_var", "id_feature"]
+                                        ).count()
+                                        df_var_count.reset_index(
+                                            drop=False, inplace=True
+                                        )
+
+                                        """ retrieve id_feature > feature mapping """
+                                        l_id_tx = list(
+                                            id_tx
+                                            for id_tx in df.id_tx_assigned.dropna().unique()
+                                        )  # retrieve list of 'id_tx' in the dataframe for counting variants
+                                        dict_id_feature_to_feature = dict(
+                                            (
+                                                id_tx,
+                                                name_anno
+                                                + "|tx_name="
+                                                + (
+                                                    scidx["dict_id_tx_to_name_tx"][
+                                                        id_tx
+                                                    ]
+                                                    if id_tx
+                                                    in scidx["dict_id_tx_to_name_tx"]
+                                                    else id_tx
+                                                )
+                                                + "|tx_id="
+                                                + id_tx,
+                                            )
+                                            for id_tx in l_id_tx
+                                        )  # id_feature > feature mapping for transcripts
+                                        dict_id_feature_to_feature[
+                                            id_gene
+                                        ] = name_anno  # id_feature > feature mapping for the current gene
+                                        """ compose feature ('name_feature') """
+                                        df_var_count[
+                                            "feature"
+                                        ] = df_var_count.id_feature.apply(
+                                            MAP.Map(dict_id_feature_to_feature).a2b
+                                        )
+                                        df_var_count["feature"] = (
+                                            df_var_count.feature
+                                            + "|var_name="
+                                            + df_var_count.id_var
+                                        )  # add 'id_var' as 'var_name' to the feature (name of feature)
+                                        df_var_count[
+                                            "id_feature"
+                                        ] = (
+                                            df_var_count.feature
+                                        )  # for variant counts, use feature (name) as id_feature
+
+                                        # write a count data for the current annotation to an output file
+                                        df_var_count = df_var_count[
+                                            l_col_df_count
+                                        ]  # reorder columns
+                                        df_var_count.to_csv(
+                                            dict_output[ 'bio_newfile_df_count' ],
+                                            sep="\t",
+                                            header=None,
+                                            index=False,
+                                        )
+                                        del df_var_count
+                                    else:
+                                        """debug"""
+                                        logger.info( f"{id_anno =}, {name_anno =}, {l_id_var =}" )
+                                        df.to_csv(
+                                            f"{path_folder_temp}for_debug.gene.{bk.UUID( )}.tsv.gz",
+                                            sep="\t",
+                                            index=False,
+                                        )
+                                    del (
+                                        it_var,
+                                        dict_unique_molecule_for_each_variant_counter,
+                                    )
+                                del str_id_var_concatenated, l_id_var
+                            # release memory
+                            del df_read, df, df_tx_count
+                            if (
+                                not flag_include_read_aligned_to_opposite_strand
+                                or flag_include_strand_specific_counts
+                            ):
+                                del df_sense
+                        # update the wall time
+                        dict_data["wall_time"] += time.time() - float_time_start
+                        # write analysis statistics
+                        dict_output[ 'bio_newfile_df_analysis_statistics' ].write(
+                            (
+                                "\t".join(
+                                    list(
+                                        map(
+                                            str,
+                                            [
+                                                str_uuid,
+                                                id_gene,
+                                                dict_data["wall_time"],
+                                                int_num_record,
+                                            ],
+                                        )
+                                    )
+                                )
+                                + "\n"
+                            ).encode()
+                        )  # 0-based -> 1-based
+                        # release memory # remove data of the reads aligned to the annotation (from the memory)
+                        del dict_data
+                        return dict_output
+                    
+                    def _process_misc_anno_data( id_anno : str, dict_data : dict ):
+                        """# 2023-01-07 23:12:08
+                        flush data for miscellaneous annotation
+                        assumes uniquely aligned reads
+                        required the following columns defined in the 'l_col_for_counting' (which changes depending on the scarab count modes)
+                        
+                        id_anno # name of the annotation
+                        dict_data # dictionary data of the annotation
+                        """
+                        float_time_start = time.time()  # record the start time
+                        ''' initialize the output '''
+                        dict_output = {
+                            'bio_newfile_df_count' : BytesIO( ),
+                            'bio_newfile_df_analysis_statistics' : BytesIO( ),
+                        } # initialize the dictionary containing the outputs as binary stream objects
+
+                        int_num_record = len(
+                            dict_data["l_read"]
+                        )  # retrieve the number of records for the current annotation
+                        df_read = pd.DataFrame(
+                            dict_data.pop("l_read"), columns=l_col_for_counting
+                        )  # compose a dataframe for the current annotation
+
+                        """ filter aligned reads """
+                        df_read = bk.PD_Binary_Flag_Select(
+                            df_read, "flag", 10, flag_select=False
+                        )  # remove PCR or optical duplicate
+                        df_read = bk.PD_Binary_Flag_Select(
+                            df_read, "flag", 8, flag_select=False
+                        )  # remove secondary alignments
+
+                        """ retrieve annotation-type specific settings """
+                        flag_variant = dict_data["annotation_type"] == "variant"
+
+                        if len(df_read) > 0:
+                            """
+                            Export counts of reads aligned to the annotation
+                            """
+                            if (
+                                not flag_variant
+                            ):  # for 'variant' annotation type, exporting counts of all reads with all variants will be skipped
+                                """retain unique reads"""
+                                df = df_read[
+                                    ["qname", "flag"]
+                                    + l_col_for_identifying_unique_molecules
+                                ]
+                                # remove records without cell barcodes
+                                df.loc[:, l_col_for_identifying_unique_molecules] = df[
+                                    l_col_for_identifying_unique_molecules
+                                ].replace("", np.nan)
+                                df.dropna(
+                                    subset=l_col_for_identifying_unique_molecules,
+                                    inplace=True,
+                                )
+
+                                # drop duplicates simply based on read name
+                                df.drop_duplicates(
+                                    subset=["qname"], keep="first", inplace=True
+                                )
+                                df.drop(columns=["qname"], inplace=True)
+
+                                # initialize counting read for each cell
+                                df["read_count"] = 1
+
+                                """ if the annotation_type is 'gene' retrieve 'name_gene' from 'id_gene', and use 'name_gene' for flushing data """
+                                name_anno = np.nan
+                                if dict_data["annotation_type"] == "gene":
+                                    (
+                                        seqname_anno,
+                                        source_anno,
+                                        feature_anno,
+                                        start_anno,
+                                        end_anno,
+                                        score_anno,
+                                        strand_anno,
+                                        frame_anno,
+                                        attribute_anno,
+                                        name_anno,
+                                    ) = scidx["arr_data_df_gtf_gene"][
+                                        scidx["dict_index_df_gtf_gene"][id_anno][0]
+                                    ]  # retrieve name_gene # 1-based
+                                if isinstance(
+                                    name_anno, float
+                                ):  # if 'name_anno' is not available, use id_anno as 'name_anno'
+                                    name_anno = id_anno
+
+                                def __Count_and_Write_misc_anno_data__(
+                                    df,
+                                    id_anno,
+                                    name_anno,
+                                ):
+                                    """count and write misc anno data to the given file handle 'newfile_df_count'"""
+                                    if len(df) == 0:  # detect empty dataframe
+                                        return -1
+                                    df_count = df[
+                                        l_col_for_identifying_unique_molecules
+                                        + ["read_count"]
+                                    ]  # compose 'df_count'
+                                    df_count.drop_duplicates(
+                                        subset=l_col_for_identifying_unique_molecules,
+                                        inplace=True,
+                                    )  # drop UMI duplicates
+                                    df_count.drop(
+                                        columns=l_col_for_identifying_unique_molecules[
+                                            1:
+                                        ],
+                                        inplace=True,
+                                    )
+                                    df_count = df_count.groupby(
+                                        ["CB"]
+                                    ).count()  # count UMI per cell
+                                    df_count.reset_index(drop=False, inplace=True)
+                                    df_count.rename(
+                                        columns={"CB": "barcode"}, inplace=True
+                                    )
+                                    df_count["id_feature"] = id_anno
+                                    df_count["feature"] = name_anno
+
+                                    # write a count data for the current annotation to a file
+                                    df_count = df_count[
+                                        [
+                                            "barcode",
+                                            "feature",
+                                            "id_feature",
+                                            "read_count",
+                                        ]
+                                    ]  # reorder columns
+                                    df_count.to_csv(
+                                        dict_output[ 'bio_newfile_df_count' ],
+                                        sep="\t",
+                                        header=None,
+                                        index=False,
+                                    )
+
+                                __Count_and_Write_misc_anno_data__(
+                                    df,
+                                    id_anno,
+                                    name_anno,
+                                )  # count reads
+                                """ count strand specific reads """
+                                if (
+                                    flag_include_strand_specific_counts
+                                ):  # count reads aligned to each strand separately if 'flag_include_strand_specific_counts' is True # for variant annotation type, strand-specific count will not be included
+                                    __Count_and_Write_misc_anno_data__(
+                                        bk.PD_Binary_Flag_Select(
+                                            df, "flag", 4, flag_select=False
+                                        ),
+                                        f"{id_anno}|strand=+",
+                                        f"{id_anno}|strand=+",
+                                    )  # select non-reverse complemented reads for + strand reads
+                                    __Count_and_Write_misc_anno_data__(
+                                        bk.PD_Binary_Flag_Select(
+                                            df, "flag", 4, flag_select=True
+                                        ),
+                                        f"{id_anno}|strand=-",
+                                        f"{id_anno}|strand=-",
+                                    )  # select reverse complemented reads for - strand reads
+
+                            """ count counts for each detected variant for the current miscellaneous annotation """
+                            if not flag_does_not_collect_variant_information and (
+                                flag_output_variant_information_with_annotations
+                                or flag_variant
+                            ):  # export variant information for 'variant' annotation type
+                                """compose a dataframe for counting molecules with variants"""
+                                df = df_read[
+                                    ["qname", "str_l_seg", "l_name_variant"]
+                                    + l_col_for_identifying_unique_molecules
+                                ]
+                                # remove records without cell barcodes
+                                df.loc[:, l_col_for_identifying_unique_molecules] = df[
+                                    l_col_for_identifying_unique_molecules
+                                ].replace("", np.nan)
+                                df.dropna(
+                                    subset=l_col_for_identifying_unique_molecules,
+                                    inplace=True,
+                                )
+                                df.sort_values(
+                                    "l_name_variant", ascending=False, inplace=True
+                                )  # prioritize reads with l_name_variant and id_tx_assigned
+                                df.drop_duplicates(
+                                    subset=["qname"], keep="first", inplace=True
+                                )  # retrieve best record for each unique read
+                                df.drop(columns=["qname"], inplace=True)
+                                """ count and filter mutations """
+                                str_id_var_concatenated = ";".join(
+                                    df.l_name_variant[
+                                        df.l_name_variant.apply(len) > 0
+                                    ].values
+                                )
+                                l_id_var_all = str_id_var_concatenated.split(
+                                    ";"
+                                )  # retrieve a list of all 'id_var'
+                                int_min_num_of_reads = (
+                                    1
+                                    if flag_filter_variant_using_predefined_set
+                                    else max(
+                                        int(
+                                            np.ceil(
+                                                len(l_id_var_all)
+                                                * float_min_prop_of_reads_for_filtering_genomic_variant
+                                            )
+                                        ),
+                                        int_min_num_of_reads_for_filtering_genomic_variant,
+                                    )
+                                )  # retrieve a threshold (maximum of the two thresholds). if 'flag_filter_variant_using_predefined_set' is True, use all available (already filtered) variants
+                                # retrieve list of id_mut (in the order of decreasing counts)
+                                l_id_var = (
+                                    bk.LIST_COUNT(
+                                        l_id_var_all,
+                                        duplicate_filter=int_min_num_of_reads,
+                                    ).index.values
+                                    if len(str_id_var_concatenated) > 0
+                                    else []
+                                )
+                                if flag_variant:
+                                    pos_name = id_anno.split("variant|pos=", 1)[
+                                        1
+                                    ]  # retrieve the name of the genomic position of the current 'variant' annotation type feature
+                                    l_id_var = list(
+                                        e
+                                        for e in l_id_var
+                                        if pos_name == e.rsplit(":", 1)[0]
+                                    )  # exclude variants that are outside of the genomic position of the current 'variant' annotation type feature
+                                del l_id_var_all
+                                if (
+                                    len(l_id_var) > 0
+                                ):  # if a variant is detected for the current feature
+                                    """build an interval tree of detected variants"""
+                                    it_var = (
+                                        intervaltree.IntervalTree()
+                                    )  # interval tree for searching variants. values contains mutation, reference
+                                    for id_var in l_id_var:
+                                        refname, str_refpos, anno_mut = id_var.split(
+                                            ":", 2
+                                        )
+                                        refpos = (
+                                            int(str_refpos) - 1
+                                        )  # 1-based > 0-based coord
+                                        ref, alt = anno_mut.split(">")
+                                        len_ref, len_alt = len(ref), len(alt)
+                                        it_var[refpos : refpos + len_ref] = (
+                                            id_var,
+                                            refname + ":" + str_refpos,
+                                        )  # update interval tree for searching variant using intervals
+                                    """ retrieve a list of unique molecules for each variant information """
+                                    dict_unique_molecule_for_each_variant_counter = (
+                                        dict()
+                                    )
+                                    for arr in df[
+                                        ["str_l_seg", "l_name_variant"]
+                                        + l_col_for_identifying_unique_molecules
+                                    ].values:
+                                        (
+                                            str_l_seg,
+                                            l_name_variant,
+                                            CB,
+                                            t_unique_identifier_for_a_cell,
+                                        ) = (arr[0], arr[1], arr[2], tuple(arr[3:]))
+                                        set_name_variant = (
+                                            set(l_name_variant.split(";"))
+                                            if len(l_name_variant) > 0
+                                            else set()
+                                        )  # retrieve set of variants detected in the current reads
+                                        """ collect intervals of variants overlapping with the current aligment """
+                                        set_overlapped_interval_var = set()
+                                        for e in str_l_seg.split(","):
+                                            refstart, refend = list(
+                                                map(int, e.split("-"))
+                                            )
+                                            set_overlapped_interval_var |= it_var[
+                                                refstart - 1 : refend
+                                            ]
+                                        """ iterate each overlapped interval of a variant """
+                                        for (
+                                            start,
+                                            end,
+                                            values,
+                                        ) in set_overlapped_interval_var:
+                                            id_var, id_allele_ref = values
+                                            flag_read_contains_id_allele_ref = (
+                                                id_var not in set_name_variant
+                                            )
+                                            id_allele = (
+                                                id_allele_ref
+                                                if flag_read_contains_id_allele_ref
+                                                else id_var
+                                            )  # retrieve allele of the current read based on the detected list of 'name_variants'
+
+                                            """ count at annotation-level """
+                                            t = (
+                                                CB,
+                                                t_unique_identifier_for_a_cell,
+                                                id_allele,
+                                                flag_read_contains_id_allele_ref,
+                                                id_allele_ref,
+                                            )  # this tuple represent a unique molecule with a specific variant.
+                                            if (
+                                                t
+                                                not in dict_unique_molecule_for_each_variant_counter
+                                            ):
+                                                dict_unique_molecule_for_each_variant_counter[
+                                                    t
+                                                ] = 0
+                                            dict_unique_molecule_for_each_variant_counter[
+                                                t
+                                            ] += 1
+
+                                    if (
+                                        len(
+                                            dict_unique_molecule_for_each_variant_counter
+                                        )
+                                        > 0
+                                    ):
+                                        """compose a count matrix of molecules containing genomic variants"""
+                                        df_var_count = pd.Series(
+                                            dict_unique_molecule_for_each_variant_counter
+                                        ).reset_index(drop=False)
+                                        df_var_count.columns = [
+                                            "barcode",
+                                            "read_count",
+                                            "id_var",
+                                            "flag_read_contains_id_allele_ref",
+                                            "id_allele_ref",
+                                            "int_num_unique_molecule_duplicate_count",
+                                        ]  # UMI column will be transformed to the read_count column after the pd.groupby.count( ) operation. Therefore, column name was changed.
+                                        df_var_count.drop(
+                                            columns=[
+                                                "int_num_unique_molecule_duplicate_count"
+                                            ],
+                                            inplace=True,
+                                        )
+                                        df_var_count.sort_values(
+                                            "flag_read_contains_id_allele_ref",
+                                            inplace=True,
+                                        )  # put read that does not contains id_allele_ref at the front of the dataframe
+                                        df_var_count.drop_duplicates(
+                                            subset=[
+                                                "barcode",
+                                                "read_count",
+                                                "id_allele_ref",
+                                            ],
+                                            keep="first",
+                                            inplace=True,
+                                        )  # drop invalid record that contains variants but simultaneously annotated as containing id_allele_ref due to the presence of multiple alleles at that position (this happens due to index hopping or cell-barcode hopping. Considering the allele frequency of the variant is lower than that of the reference allele) # UMI column will be transformed to the read_count column after the pd.groupby.count( ) operation. Therefore, column name was changed.
+                                        df_var_count = df_var_count.groupby(
+                                            ["barcode", "id_var"]
+                                        ).count()
+                                        df_var_count.reset_index(
+                                            drop=False, inplace=True
+                                        )
+
+                                        """ compose feature ('name_feature') """
+                                        df_var_count["feature"] = (
+                                            id_anno + "|var_name=" + df_var_count.id_var
+                                        )  # add 'id_var' as 'var_name' to the feature (name of feature)
+                                        df_var_count[
+                                            "id_feature"
+                                        ] = (
+                                            df_var_count.feature
+                                        )  # for variant counts, use feature (name) as id_feature
+
+                                        # write a count data for the current annotation to an output file
+                                        df_var_count = df_var_count[
+                                            l_col_df_count
+                                        ]  # reorder columns
+                                        df_var_count.to_csv(
+                                            dict_output[ "bio_newfile_df_count" ],
+                                            sep="\t",
+                                            header=None,
+                                            index=False,
+                                        )
+                                        del df_var_count
+                                    else:
+                                        """debug"""
+                                        logger.info(f"{id_anno =}, {l_id_var = }")
+                                        df.to_csv(
+                                            f"{path_folder_temp}for_debug.misc.{bk.UUID( )}.tsv.gz",
+                                            sep="\t",
+                                            index=False,
+                                        )
+                                    del (
+                                        it_var,
+                                        dict_unique_molecule_for_each_variant_counter,
+                                    )
+                                del str_id_var_concatenated, l_id_var
+                            # release memory
+                            del df_read, df
+                        # update the wall time
+                        dict_data["wall_time"] += time.time() - float_time_start
+                        # write analysis statistics
+                        dict_output[ "bio_newfile_df_analysis_statistics" ].write(
+                            (
+                                "\t".join(
+                                    list(
+                                        map(
+                                            str,
+                                            [
+                                                str_uuid,
+                                                id_anno,
+                                                dict_data["wall_time"],
+                                                int_num_record,
+                                            ],
+                                        )
+                                    )
+                                )
+                                + "\n"
+                            ).encode()
+                        )  # 0-based -> 1-based
+                        # release memory # remove data of the reads aligned to the annotation (from the memory)
+                        del dict_data
+                        return dict_output # return the result
+
+                    def _process_buckets( l_id_anno : List[ str ], l_dict_data : List[ dict ] ) :
+                        """ # 2023-08-28 23:34:17 
+                        process data in a bucket, and return the output
+                        """
+                        l_dict_output = list( ) # initialize 'l_dict_output'
+                        for id_anno, dict_data in zip( l_id_anno, l_dict_data ) : # iterate each bucket
+                            dict_output = ( _process_gene_and_isoform_data if ( dict_data["annotation_type"] == "gene_and_isoform" ) else _process_misc_anno_data )( id_anno, dict_data ) # process the data in the the bucket and retrieve the output
+                            l_dict_output.append( dict_output ) # collect the result
+                        return l_dict_output # return the collected result
+                    
+                    def _post_process_buckets( l_dict_output : List[ dict ] ) :
+                        """ # 2023-08-12 16:11:02 
+                        perform post-processing of the bucket analysis result
+                        (1) write the result of the processed bucket and (2) update the summary metrics using the analysis result of the bucket.
+                        """
+                        for dict_output in l_dict_output : # for each output
+                            # export the output
+                            for b, f in zip( 
+                                [ dict_output[ 'bio_newfile_df_count' ], dict_output[ 'bio_newfile_df_analysis_statistics' ], ],
+                                [ newfile_df_count, newfile_df_analysis_statistics, ]
+                            ) :
+                                b.seek( 0 ) # rewind the tape
+                                shutil.copyfileobj( b, f, length = 131072 ) # write the buffer to the file # 2 ** 17 = 131072
+
+                    def _write_results_from_offloaded_works( flag_wait_all : bool = False ) :
+                        """ # 2023-08-28 23:20:22 
+                        flag_wait_all : bool = False # if True, wait until all processes completed their works, if False, write results currently contained in the workers object.
+                        """
+                        for res in ( workers_for_bucket_processing.wait_all if flag_wait_all else workers_for_bucket_processing.collect_results )( flag_return_results = True ).values( ) : # 'flag_wait_all' is True, wait until all processes completed their works. # wait for all submitted works to be completed, and retrieve results for each work
+                            _post_process_buckets( res ) # post-processing of the output
+                    
+                    def _initialize_a_batch_of_buckets( ) :
+                        """ # 2023-08-28 23:15:05 
+                        """
+                        ns[ 'l_dict_data' ] = [ ] # a data container for bulk-processing
+                        ns[ 'l_id_anno' ] = [ ] # a data container for bulk-processing
+                        ns[ 'int_total_num_records_in_a_batch_of_buckets' ] = 0 # initialize the total number of records in a batch of buckets
+                    _initialize_a_batch_of_buckets( ) # initialize the bucket
+
+                    def _flush_the_current_batch_of_buckets( ) :
+                        """ # 2023-08-27 18:11:36 
+                        flush the current batch of buckets
+                        
+                        flag_wait_all : bool = False # if True, wait until all processes completed their works, if False, write results currently contained in the workers object.
+                        """
+                        if not workers_for_bucket_processing.is_worker_available : # if all workers are working, wait for a while until all workers are idle 
+                            _write_results_from_offloaded_works( flag_wait_all = False ) # flush results from offloaded computations, without waiting all works to be completed 
+                            _write_results_from_offloaded_works( flag_wait_all = True ) # flush results from offloaded computations, waiting all works to be completed 
+                        elif workers_for_bucket_processing.int_num_completed_results >= int_max_num_batches_in_the_result_container_before_flushing : # if the result container became too large, empty the container
+                            _write_results_from_offloaded_works( flag_wait_all = False ) # flush results from offloaded computations, without waiting all works to be completed 
+                        workers_for_bucket_processing.submit_work( _process_buckets, args = ( ns[ 'l_id_anno' ], ns[ 'l_dict_data' ] ) ) # submit the work for offloading (append the list of pysam objects as the data associated with the work) # flush the current batch of the buckets
+                        _initialize_a_batch_of_buckets( ) # initialize the next batch of the buckets
+                        
+                    def _empty_bucket( id_anno : str ):
+                        """ # 2023-08-28 23:25:20 
+                        empty bucket for the 'id_anno' for processing reads assigned to the 'id_anno'
+                        """
+                        ''' empty the bucket '''
+                        dict_data = reads["data"].pop(id_anno) # retrieve data
+                        reads[ "int_n_removed_elements" ] += 1  # update the number of elements deleted
+                        
+                        ''' append the bucket to the batch of buckets that are currently being collected '''
+                        ns[ 'l_id_anno' ].append( id_anno )
+                        ns[ 'l_dict_data' ].append( dict_data )
+                        ns[ 'int_total_num_records_in_a_batch_of_buckets' ] += len( dict_data["l_read"] ) # update the number of reads in a batch
+                        if ns[ 'int_total_num_records_in_a_batch_of_buckets' ] > int_max_num_records_in_a_batch_of_buckets : # if the number of records in the batch of buckets exceed the limit, flush the current batch
+                            _flush_the_current_batch_of_buckets( ) # flush the current batch of the buckets
+                            
+                        """ recreate dictionary to avoid 'memory dictionary' if the number of 'pop' operations exceeds certain threshold """
+                        if int_max_n_removed_elements < reads["int_n_removed_elements"]:
+                            d = reads["data"]
+                            reads["data"] = dict((e, d[e]) for e in d)
+                            reads[
+                                "int_n_removed_elements"
+                            ] = 0  # reset the number of pop operations
+                            
+                    '''
+                    iterate a portion of BAM file
+                    '''
+                    while True:
+                        ins = pipe_receiver.recv()
+                        if ins is None:
+                            break
+                        name_contig = ins  # parse input
+                        # initialize the output
+                        int_n_sam_record_count = 0
+                        if verbose:
+                            logger.info( f"processing of '{name_contig}' started." )
+                        reads = __Initialize_Reads__()  # initialize an object that contains a dictionary to collect information about the analyzed reads for each gene, repeatmasker, regulatory element, and genomic region (bin) annotations to which the reads were assigned.
+                        with pysam.AlignmentFile(
+                            path_file_bam_input,
+                            str_mode_sam,
+                            reference_filename=path_file_fa_for_cram,
+                        ) as samfile:
+                            for r in samfile.fetch( contig = name_contig ) :
+                                """filter alignments based on mapq, flag, and position (ignore reads outside start/end sites, which often occurs due to samtools's algorithm)"""
+                                (
+                                    refstart,
+                                    refend,
+                                    qname,
+                                    refname,
+                                    seq,
+                                    flag,
+                                    cigartuples,
+                                ) = (
+                                    r.reference_start,
+                                    r.reference_end,
+                                    r.qname,
+                                    r.reference_name,
+                                    r.seq,
+                                    r.flag,
+                                    r.cigartuples,
+                                )  # 0-based coordinates
+                                if flag_is_5prime:
+                                    if flag_is_paired_end:
+                                        raise NotImplementedError(
+                                            "5prime-paired-end currently not supported."
+                                        )
+                                    else:
+                                        flag ^= (
+                                            1 << 4
+                                        )  # flip the read's direction if the technology is 5prime and single-end
+                                int_mapq = r.mapq  # retrieve mapping quality
+
+                                """ filter aligned records using mapping quality (this filter out reads with invalid cigar string, too) """
+                                if (
+                                    r.mapq < int_min_mapq_unique_mapped
+                                ):  # skip read whose mapq is below 'int_min_mapq_unique_mapped'
+                                    continue
+
+                                """ filter aligned records using flags """
+                                # ignore records with flag indicating secondary alignment
+                                if (
+                                    flag_ignore_record_with_flag_secondary_alignment
+                                    and (r.flag & (1 << 8))
+                                ):
+                                    continue
+                                # ignore records with flag indicating the alignment is optical pcr duplicates
+                                if (
+                                    flag_ignore_record_with_flag_optical_or_pcr_duplicate
+                                    and (r.flag & (1 << 10))
+                                ):
+                                    continue
+
+                                """ assign 'int_pos_of_read_determining_feature_assignment' """
+                                int_pos_of_read_determining_feature_assignment = (
+                                    (refend - 1 if (flag & 1 << 4) else refstart)
+                                    if flag_is_mode_scarab_count_atac
+                                    else int((refstart + refend) / 2)
+                                )  # the middle position will be used to identify genomic region that represent the current read most accurately
+
+                                """ initialize read analysis """
+                                int_n_sam_record_count += 1 # increase the counter
+                                refname = __chromosome_name_remove_chr__(
+                                    refname
+                                )  # remove 'chr' prefix from the reference name
+                                # retrieve length of sequence
+                                len_seq = (
+                                    -1 if seq is None else len(seq)
+                                )  # if seq is not included in the record, write -1 as the length of the sequence
+                                # retrieve a dictionary of SAM tags
+                                dict_tags = dict(r.tags)
+
+                                # initialize the dictionary of sam tags
+                                for key in [
+                                    str_name_bam_tag_cb_corrected,
+                                    str_name_bam_tag_cb_uncorrected,
+                                    str_name_bam_tag_umi_corrected,
+                                    str_name_bam_tag_umi_uncorrected,
+                                    "TX",
+                                    "AN",
+                                    "GX",
+                                    "GN",
+                                    "MM",
+                                    "RE",
+                                    "xf",
+                                ]:
+                                    if key not in dict_tags:
+                                        dict_tags[key] = ""
+
+                                """ "Flush" count data for the annotations that are no longer overlaps with the current genomic position (thus no reads overlapping with the genes will be encountered from this point, since the alingment is sorted by refstart position) """
+                                """
+                                'Flush' data
+                                """
+                                for id_anno in list(reads["data"]):
+                                    dict_data = reads["data"][
+                                        id_anno
+                                    ]  # retrieve data
+                                    if (
+                                        dict_data["refname_anno"] != refname
+                                        or dict_data["refend_anno"] < refstart
+                                    ):  # flush data for annotation in the previous contigs, annotation that has been 'expired' during the iteration of refstart-sorted BAM file
+                                        _empty_bucket( id_anno, )
+
+                                """
+                                Overall Structure of Scarab short-read
+
+                                reads are classified, and 'reads' object initialized for each feature
+                                at the end of the analysis of the read, the data of the read is appended to all the features of the 'reads' object, which will be converted to as a count matrix once each feature is flushed.
+
+                                """
+                                """ initialize """
+                                int_flag_classification = (
+                                    0  # initialize binary classification flag
+                                )
+                                (
+                                    id_rpmk,
+                                    int_max_num_base_pairs_overlap_with_rpmk,
+                                    id_gene,
+                                    id_promoter,
+                                    int_num_base_pairs_overlap_with_exons_of_the_assigned_gene_id,
+                                    int_base_gene_exon_count,
+                                    int_base_filtered_rpmk_count,
+                                    int_base_unfiltered_rpmk_count,
+                                    int_base_reg_count,
+                                    id_tx_assigned_by_minimap2,
+                                    id_reg,
+                                    id_bin_genome,
+                                ) = ("", "", "", "", "", "", "", "", "", "", "", "")
+                                res_overlapped_exons = None  # initialize variables
+                                l_id_anno_exon_and_splice_junc = (
+                                    []
+                                )  # a list that will contain valie id_anno_exon and id_anno_splice_junc of the current read if the counting behavior has been enabled.
+                                start_gene, end_gene = None, None
+                                l_start_end_read = [refstart, refend]
+
+                                """ retrieve mapped segments """
+                                (
+                                    l_seg,
+                                    int_total_aligned_length,
+                                ) = SAM.Retrive_List_of_Mapped_Segments(
+                                    cigartuples, pos_start=refstart
+                                )  # 0-based coordinates
+                                str_l_seg = ",".join(
+                                    list(
+                                        str(t_seg[0] + 1) + "-" + str(t_seg[1])
+                                        for t_seg in l_seg
+                                    )
+                                )  # retrieve string representation of mapped segments # (0-based > 1-based coordinates)
+
+                                """ for ATAC-seq analysis only consider the cut site (more specifically, the base next to the cut site that is included in the read) """
+                                if (
+                                    flag_is_mode_scarab_count_atac
+                                ):  # use the region containing the cutsite for 'l_start_end_read' and 'l_seg'
+                                    l_start_end_read = [
+                                        int_pos_of_read_determining_feature_assignment,
+                                        int_pos_of_read_determining_feature_assignment
+                                        + 1,
+                                    ]
+                                    l_seg = [l_start_end_read]
+                                    int_total_aligned_length = 1
+
+                                """
+                                check overlap with promoter regions (ATAC mode specific)
+                                """
+                                if (
+                                    flag_is_mode_scarab_count_atac
+                                ):  # specific to ATAC-seq data
+                                    float_time_start = (
+                                        time.time()
+                                    )  # record the start time
+                                    # ignore reads if it does not overlap repeatmasker annotation
+                                    set_t_interval_overlap_promoter = set(
+                                        tuple(e)
+                                        for e in __data_object_search_query(
+                                            data_dict_it_promoter,
+                                            refname,
+                                            int_pos_of_read_determining_feature_assignment,
+                                        )
+                                    )  # retrieve set of promoter annotations overlapped with the current alignment
+                                    if (
+                                        len(set_t_interval_overlap_promoter) > 0
+                                    ):  # when current read overlaps with a promoter region
+                                        int_flag_classification ^= int_flag_class_overlap_with_promoter  # update read classification info.
+
+                                        # identify promoter region whose TSS is closest to the current read's 'int_pos_of_read_determining_feature_assignment'
+                                        (
+                                            l_interval_promoter,
+                                            int_max_num_base_pairs_overlap_with_promoter,
+                                        ) = bk.DICTIONARY_Find_keys_with_min_value(
+                                            dict(
+                                                (
+                                                    e,
+                                                    e[1]
+                                                    - int_pos_of_read_determining_feature_assignment
+                                                    if e[2][1] == "+"
+                                                    else int_pos_of_read_determining_feature_assignment
+                                                    - e[0]
+                                                    + 1,
+                                                )
+                                                for e in set_t_interval_overlap_promoter
+                                            )
+                                        )  # (1) retrieve the distance from the TSS to the 'int_pos_of_read_determining_feature_assignment' for each promter region overlapped with the current 'int_pos_of_read_determining_feature_assignment', and (2) select the promoter whose TSS is closest to the 'int_pos_of_read_determining_feature_assignment'
+                                        if len(l_interval_promoter) == 1:
+                                            (
+                                                start_promoter,
+                                                end_promoter,
+                                                arr,
+                                            ) = l_interval_promoter[
+                                                0
+                                            ]  # retrieve information about the assigned region
+                                            (
+                                                id_gene_promoter,
+                                                strand_promoter,
+                                            ) = arr  # retrieve information about the assigned promoter
+                                            id_promoter = f"promoter|gene_id={id_gene_promoter}|pos={refname}:{start_promoter + 1}-{end_promoter}"  # 0>1 based coordinates # compose id_promoter
+
+                                            """ initialize data for the new promoter annotation encountered """
+                                            if (
+                                                id_promoter not in reads["data"]
+                                            ):  # if a annotation is newly encountered
+                                                __Initialize_misc_anno_data__(
+                                                    reads,
+                                                    refname,
+                                                    start_promoter,
+                                                    end_promoter,
+                                                    id_promoter,
+                                                    "promoter",
+                                                    str_mode_scarab_count,
+                                                )
+
+                                            """ increament the time passed to process the read to the total wall time for the gene """
+                                            reads["data"][id_promoter][
+                                                "wall_time"
+                                            ] += (time.time() - float_time_start)
+                                        else:
+                                            int_flag_classification ^= int_flag_class_ambiguous_assignment_to_promoter  # update read classification info.
+
+                                """ assign gene to the current read (GEX and ATAC data shares the same algorithm for gene_id assignment) """
+                                if flag_use_gene_assignment_from_10x_cellranger_for_the_current_bam_file:
+                                    """use gene assignment from 10x cellranger"""
+                                    if len(dict_tags["GX"]) > 0:
+                                        int_flag_classification ^= int_flag_class_overlap_with_gene_body  # set 'gene_body' flag
+                                        if (
+                                            ";" in dict_tags["GX"]
+                                            or dict_tags["GX"]
+                                            not in scidx["dict_index_df_gtf_gene"]
+                                        ):
+                                            """when 10x cellranger assigned multiple genes or the 10x cellranger-assigned gene_id does not exist in the given gtf gene annotations"""
+                                            int_flag_classification ^= int_flag_class_ambiguous_assignment_to_gene
+                                        else:
+                                            """for valid id_gene assignment"""
+                                            id_gene = dict_tags["GX"]
+                                else:
+                                    """identify overlapping gene annotations"""
+                                    if refname in scidx["dict_it_gene"]:
+                                        set_t_interval_overlap_gene = set(
+                                            tuple(e)
+                                            for e in scidx["dict_it_gene"][refname][
+                                                int_pos_of_read_determining_feature_assignment
+                                            ]
+                                        )  # retrieve set of gene annotations overlapped with the current alignment, based on the middle position of the alignment
+                                        if (
+                                            len(set_t_interval_overlap_gene) > 0
+                                        ):  # flag indicating whether gene is overlapped with the current read
+                                            int_flag_classification ^= int_flag_class_overlap_with_gene_body  # set 'gene_body' flag
+                                            if (
+                                                len(set_t_interval_overlap_gene)
+                                                == 1
+                                            ):
+                                                """assign gene_id if read overlaps with a single gene body"""
+                                                id_gene = list(
+                                                    set_t_interval_overlap_gene
+                                                )[0][2]
+                                            else:
+                                                """assign gene_id if read overlaps with gene bodies of more then two genes by searching overlapping exons directly"""
+                                                """ retrieve a list of 'id_gene' classifed as overlapping with the current read ('the middle position' of the aligned read) to filter exons that does not belong to the classified genes """
+                                                set_id_gene_overlapped = set(
+                                                    t[2]
+                                                    for t in set_t_interval_overlap_gene
+                                                )
+                                                """ count the number of overlapped base pairs with exons of each gene overlaps with the current read """
+                                                dict_id_gene_to_int_num_base_pairs_overlap_with_exons = (
+                                                    dict()
+                                                )
+
+                                                res_overlapped_exons = __data_object_search_queries(
+                                                    data_dict_it_exon,
+                                                    refname,
+                                                    list(
+                                                        slice(start_seg, end_seg)
+                                                        for start_seg, end_seg in l_seg
+                                                    ),
+                                                )  # for each segment of the current read, identify overlapped exons
+                                                for i_seg in range(
+                                                    len(l_seg)
+                                                ):  # for each segment
+                                                    start_seg, end_seg = l_seg[
+                                                        i_seg
+                                                    ]  # retrieve positions of the segment
+                                                    res_overlapped_exons_of_a_seg = res_overlapped_exons[
+                                                        i_seg
+                                                    ]  # retrieve exons overlapped with each segment
+                                                    for (
+                                                        start_exon,
+                                                        end_exon,
+                                                        id_gene_of_the_current_exon,
+                                                    ) in res_overlapped_exons_of_a_seg:  # for each overlapped exon
+                                                        """ignore overlaps with exons of the gene whose gene body does not overlaps with 'int_pos_of_read_determining_feature_assignment' of the aligned read"""
+                                                        if (
+                                                            id_gene_of_the_current_exon
+                                                            not in set_id_gene_overlapped
+                                                        ):
+                                                            continue
+                                                        """ for each exon overlapping with the current segment, add the number of base pairs of overlap to the gene_id to which the current exon belongs to """
+                                                        if (
+                                                            id_gene_of_the_current_exon
+                                                            not in dict_id_gene_to_int_num_base_pairs_overlap_with_exons
+                                                        ):
+                                                            dict_id_gene_to_int_num_base_pairs_overlap_with_exons[
+                                                                id_gene_of_the_current_exon
+                                                            ] = 0  # initialize base count for the gene_id
+                                                        dict_id_gene_to_int_num_base_pairs_overlap_with_exons[
+                                                            id_gene_of_the_current_exon
+                                                        ] += bk.INTERVAL_Overlap(
+                                                            [start_exon, end_exon],
+                                                            [start_seg, end_seg],
+                                                            flag_0_based_coordinate_system=True,
+                                                        )  # add the number of base pairs of overlap to the gene_id to which the current exon belongs to
+                                                """ (GEX mode specific) if the strand to which read was aligned is different from gene annotation's strand, filter out the gene_id from the possible list of gene_ids that can be assigned to the current read. if strand specific sequencing information is not available, does not filter possible list of genes using the information """
+                                                if (
+                                                    not ( flag_is_mode_scarab_count_atac or flag_no_strand_specificity )
+                                                ):
+                                                    strand_read = (
+                                                        "-"
+                                                        if flag & (1 << 4)
+                                                        else "+"
+                                                    )  # retrieve 'strand' from which the current read was aligned
+                                                    for (
+                                                        id_gene_overlapped_with_read
+                                                    ) in list(
+                                                        dict_id_gene_to_int_num_base_pairs_overlap_with_exons
+                                                    ):
+                                                        (
+                                                            seqname_anno,
+                                                            source_anno,
+                                                            feature_anno,
+                                                            start_anno,
+                                                            end_anno,
+                                                            score_anno,
+                                                            strand_anno,
+                                                            frame_anno,
+                                                            attribute_anno,
+                                                            name_anno,
+                                                        ) = scidx[
+                                                            "arr_data_df_gtf_gene"
+                                                        ][
+                                                            scidx[
+                                                                "dict_index_df_gtf_gene"
+                                                            ][
+                                                                id_gene_overlapped_with_read
+                                                            ][
+                                                                0
+                                                            ]
+                                                        ]  # retrieve information about the gene_id # 1-based
+                                                        if (
+                                                            strand_anno
+                                                            != strand_read
+                                                        ):
+                                                            dict_id_gene_to_int_num_base_pairs_overlap_with_exons.pop(
+                                                                id_gene_overlapped_with_read
+                                                            )
+                                                """ assign gene_id containing exons with the largest number of overlapped base pairs with the current read """
+                                                (
+                                                    l_id_gene_assigned,
+                                                    int_num_base_pairs_overlap_with_exons,
+                                                ) = bk.DICTIONARY_Find_keys_with_max_value(
+                                                    dict_id_gene_to_int_num_base_pairs_overlap_with_exons
+                                                )  # retrieve the gene_id containing the maximum number of base pairs overlapping with the read
+
+                                                if len(l_id_gene_assigned) == 1:
+                                                    """for valid id_gene assignment"""
+                                                    int_num_base_pairs_overlap_with_exons_of_the_assigned_gene_id = int_num_base_pairs_overlap_with_exons  # update the metric
+                                                    id_gene = l_id_gene_assigned[0]
+                                                else:
+                                                    """when no valid id_gene assignment is available"""
+                                                    int_flag_classification ^= int_flag_class_ambiguous_assignment_to_gene
+
+                                """
+                                When the current read was assigned to a single gene unambiguously
+                                """
+                                if (
+                                    int_flag_classification
+                                    & int_flag_class_overlap_with_gene_body
+                                    and not (
+                                        int_flag_classification
+                                        & int_flag_class_ambiguous_assignment_to_gene
+                                    )
+                                    and len(id_gene) != 0
+                                ):  # when a single valid gene_id was assigned to the read
+                                    float_time_start = (
+                                        time.time()
+                                    )  # record the start time
+                                    # identify transcript
+                                    (
+                                        seqname_gene,
+                                        source_gene,
+                                        feature_gene,
+                                        start_gene,
+                                        end_gene,
+                                        score_gene,
+                                        strand_gene,
+                                        frame_gene,
+                                        attribute_gene,
+                                        name_gene,
+                                    ) = scidx["arr_data_df_gtf_gene"][
+                                        scidx["dict_index_df_gtf_gene"][id_gene][0]
+                                    ]  # retrieve start and end positions and other data of the gene_id # 1-based
+                                    start_gene -= 1  # 1-based > 0-based coordinates
+
+                                    """ initialize data for the new gene annotation encountered """
+                                    if (
+                                        id_gene not in reads["data"]
+                                    ):  # if a gene newly encountered
+                                        if (
+                                            flag_is_mode_scarab_count_atac
+                                        ):  # when processing ATAC data, ignore isoform information, and initialize data as 'miscellaneous annotation'
+                                            __Initialize_misc_anno_data__(
+                                                reads,
+                                                refname,
+                                                start_gene,
+                                                end_gene,
+                                                id_gene,
+                                                "gene",
+                                                str_mode_scarab_count,
+                                            )
+                                        else:
+                                            """initialize gene and isoform data"""
+                                            __Initialize_gene_and_isoform_data__(
+                                                reads,
+                                                refname,
+                                                start_gene,
+                                                end_gene,
+                                                id_gene,
+                                            )
+                                    """ (GEX mode specific) """
+                                    if (
+                                        not flag_is_mode_scarab_count_atac
+                                    ):  # analyze transcript information, including isoform assignment
+                                        """
+                                        if 'flag_use_isoform_assignment_from_10x_cellranger' is True, the splice junciton counting and exon counting will not be performed because the transcript annotations used in cellranger and Scarab might be different.
+                                        """
+                                        """ align current read to known transcript sequences from given fasta sequences and assign id_tx to the read (if isoform assignment from 10x cellranger is not used) """
+                                        if (
+                                            not flag_use_isoform_assignment_from_10x_cellranger
+                                            and seq is not None
+                                        ):
+                                            for hit in list(
+                                                reads["data"][id_gene]["am_tx"].map(
+                                                    seq
+                                                )
+                                            ):  # align the current read to the transcript sequences # exhaust the iterator to avoid the potential memory leakage issue from minimap2 mappy
+                                                if (
+                                                    hit.mapq
+                                                    >= int_min_mapq_minimap2_tx_assignment
+                                                ):  # if mapping quality of the current hit exceed that of the minimum mapq set by the setting, use the id_tx to which the current read was aligned
+                                                    id_tx_assigned_by_minimap2 = (
+                                                        hit.ctg
+                                                    )
+                                                    if (
+                                                        not flag_skip_exon_and_splice_junc_counting
+                                                    ):  # if exon and splice_junction counting behavior is enabled
+                                                        (
+                                                            start_in_transcript,
+                                                            end_in_transcript,
+                                                        ) = (hit.r_st, hit.r_en)
+                                                        # mark that this feature was assigned using minimap2 re-alignment
+                                                        """ retrieve exons of the current transcript overlapped with the current read - using minimap2 realignment result """
+                                                        for (
+                                                            e
+                                                        ) in __data_object_search_query(
+                                                            data_dict_it_exon_transcriptome,
+                                                            id_tx_assigned_by_minimap2,
+                                                            slice(
+                                                                start_in_transcript,
+                                                                end_in_transcript,
+                                                            ),
+                                                        ):
+                                                            l_id_anno_exon_and_splice_junc.append(
+                                                                id_gene
+                                                                + "|tx_name="
+                                                                + scidx[
+                                                                    "dict_id_tx_to_name_tx"
+                                                                ][
+                                                                    id_tx_assigned_by_minimap2
+                                                                ]
+                                                                + "|tx_id="
+                                                                + id_tx_assigned_by_minimap2
+                                                                + "|exon_id="
+                                                                + "{}:{}-{}.{}".format(
+                                                                    *e[2]
+                                                                )
+                                                                + "|realigned"
+                                                            )
+                                                        """ retrieve splice junctions of the current transcript overlapped with the current read - using minimap2 realignment result """
+                                                        for (
+                                                            e
+                                                        ) in __data_object_search_query(
+                                                            data_dict_it_splice_junc_transcriptome,
+                                                            id_tx_assigned_by_minimap2,
+                                                            slice(
+                                                                start_in_transcript,
+                                                                end_in_transcript,
+                                                            ),
+                                                        ):  # single exon genes lack splice junction annotations
+                                                            l_id_anno_exon_and_splice_junc.append(
+                                                                id_gene
+                                                                + "|tx_name="
+                                                                + scidx[
+                                                                    "dict_id_tx_to_name_tx"
+                                                                ][
+                                                                    id_tx_assigned_by_minimap2
+                                                                ]
+                                                                + "|tx_id="
+                                                                + id_tx_assigned_by_minimap2
+                                                                + "|sj_id="
+                                                                + "{}:{}-{}.{}".format(
+                                                                    *e[2]
+                                                                )
+                                                                + "|realigned"
+                                                            )
+                                                    break  # stop at the first transcript to which the read is uniquely aligned
+
+                                        """ calculate proportion of non-exonic features (=intronic) in the reads and classify reads """
+                                        # count bases overlapping exonic features
+                                        int_base_gene_exon_count = 0
+                                        pos_seg_end_previous_seg = (
+                                            -1
+                                        )  # initialize the end position of the previous segment (0-based coordinates)
+
+                                        ''' for better performance, search for all segments at once '''
+                                        if not (
+                                            flag_use_isoform_assignment_from_10x_cellranger
+                                            or flag_skip_exon_and_splice_junc_counting
+                                        ):  # if exon and splice_junction counting behavior is enabled
+                                            l_queries = list( slice(start_seg, end_seg) for start_seg, end_seg in l_seg ) # compose range queries
+                                            if res_overlapped_exons is None:
+                                                res_overlapped_exons = __data_object_search_queries(
+                                                    data_dict_it_exon,
+                                                    refname,
+                                                    l_queries,
+                                                )  # for each segment of the current read, identify overlapped exons
+
+                                            res_overlapped_splice_donor_and_acceptor = __data_object_search_queries(
+                                                data_dict_it_splice_donor_and_acceptor,
+                                                refname,
+                                                l_queries,
+                                            )  # for each segment of the current read, identify overlapped splice donor and acceptors
+                                        l_t_splice_junc_genome = (
+                                            []
+                                        )  # collect the list of splice junctions
+
+                                        for i_seg in range(
+                                            len(l_seg)
+                                        ):  # for each segment
+                                            pos_seg_start, pos_seg_end = l_seg[
+                                                i_seg
+                                            ]  # retrieve positions of the segment
+                                            # count the number of exonic bases in the aligned segments
+                                            ba_seg_mask_gene_exon = scidx[
+                                                "dict_seqname_to_mask_gtf_exon"
+                                            ][refname][pos_seg_start:pos_seg_end]
+                                            int_base_gene_exon_count += (
+                                                ba_seg_mask_gene_exon.count()
+                                            )
+
+                                            if not (
+                                                flag_use_isoform_assignment_from_10x_cellranger
+                                                or flag_skip_exon_and_splice_junc_counting
+                                            ):  # if exon and splice_junction counting behavior is enabled
+                                                """retrieve exons of the current gene overlapped with the current read - using initial genomic alignment result"""
+                                                l_interval = list(
+                                                    e
+                                                    for e in res_overlapped_exons[
+                                                        i_seg
+                                                    ]
+                                                    if e[2] == id_gene
+                                                )  # retrieve exons of the currently assigned 'id_gene' that were overlapped with the current segment
+                                                if (
+                                                    len(l_interval) == 1
+                                                ):  # when counting exon based on genome alignment, assign id_anno_exon only when a unique exon can be assigned to a segment
+                                                    e = l_interval[
+                                                        0
+                                                    ]  # retrieve the interval of the assigned exon
+                                                    l_id_anno_exon_and_splice_junc.append(
+                                                        id_gene
+                                                        + "|exon_id="
+                                                        + f"{refname}:{e[ 0 ] + 1}-{e[ 1 ]}.{strand_gene}"
+                                                    )  # 1>0-based coordinates
+
+                                                """[Intron Retention Counting] retrieve splice donor and acceptor sites of the current gene overlapped with the current read - using initial genomic alignment result"""
+                                                if not flag_skip_intron_retention_counting : # if intron retention events are counted
+                                                    for e in res_overlapped_splice_donor_and_acceptor[ i_seg ] : # retrieve splice_donor_and_acceptors that were overlapped with the current segment
+                                                        if e[2][0] != id_gene : # splice_donor_and_acceptors belonging to the currently assigned 'id_gene' will be analyzed
+                                                            continue
+                                                        if ( ( e[ 0 ] + int_min_length_intron_for_detecting_intron_retention_event < pos_seg_end ) if e[2][1] == 'L' else ( e[ 0 ] + int_min_length_intron_for_detecting_intron_retention_event >= pos_seg_start ) ) : # if splice donor and acceptor is located at the left exon (and thus intron is located at the right side), check whether sufficient length of intron is available on the right side to detect intron retention events.
+                                                            l_id_anno_exon_and_splice_junc.append( id_gene + "|intron_retention@splice_donor_and_acceptor_id=" + f"{refname}:{e[ 0 ] + 1}.{e[2][1]}.{strand_gene}" )  # 1>0-based coordinates # assign an annotation
+
+                                                """ retrieve splice junctions of the current transcript overlapped with the current read - using initial genomic alignment result """
+                                                if (
+                                                    pos_seg_end_previous_seg != -1
+                                                ):  # when previous segment exists, check whether the splicing junction exists # skip when this segment is the first segment
+                                                    l_t_splice_junc_genome.append(
+                                                        (
+                                                            refname,
+                                                            pos_seg_end_previous_seg,
+                                                            pos_seg_start,
+                                                        )
+                                                    )  # collect splice junctions of the read
+
+                                                    flag_skip_intron_retention_counting
+                                                pos_seg_end_previous_seg = pos_seg_end  # update the end of segment end coordinates for the next splicing events
+
+                                        if not (
+                                            flag_use_isoform_assignment_from_10x_cellranger
+                                            or flag_skip_exon_and_splice_junc_counting
+                                        ):  # if exon and splice_junction counting behavior is enabled
+                                            dict_t_splice_junc_to_info_genome_subset = __data_object_subset(
+                                                data_dict_t_splice_junc_to_info_genome,
+                                                l_t_splice_junc_genome,
+                                            )  # retrieve data of the collected splice junctions
+                                            for (
+                                                t_splice_junc_genome
+                                            ) in dict_t_splice_junc_to_info_genome_subset:  # for each valid splice junction
+                                                if (
+                                                    len(
+                                                        list(
+                                                            1
+                                                            for id_tx, strand in dict_t_splice_junc_to_info_genome_subset[
+                                                                t_splice_junc_genome
+                                                            ]
+                                                            if scidx[
+                                                                "dict_id_tx_to_id_gene"
+                                                            ][id_tx]
+                                                            == id_gene
+                                                        )
+                                                    )
+                                                    > 0
+                                                ):  # if the splice junction belongs to the current gene, assign the read to the 'splice_junc' feature type.
+                                                    l_id_anno_exon_and_splice_junc.append(
+                                                        id_gene
+                                                        + "|sj_id="
+                                                        + f"{refname}:{t_splice_junc_genome[ 1 ] + 1}-{t_splice_junc_genome[ 2 ]}.{strand_gene}"
+                                                    )  # 0>1-based coordinates
+
+                                        # add classification label based on the proportion of exons in the read
+                                        # defualt: 'spanning_both_intron_and_exon'
+                                        float_prop_exon = (
+                                            int_base_gene_exon_count
+                                            / int_total_aligned_length
+                                        )  # calculate the proportion of exons contained in the read
+                                        if float_prop_exon == 0:
+                                            int_flag_classification ^= int_flag_class_completely_intronic  # set 'completely intronic' flag
+                                        elif float_prop_exon < 0.90:
+                                            pass  # classify 'spanning_both_intron_and_exon'
+                                        else:
+                                            int_flag_classification ^= int_flag_class_mostly_exonic  # set 'mostly exonic' flag
+
+                                    """ increament the time passed to process the read to the total wall time for the gene """
+                                    reads["data"][id_gene]["wall_time"] += (
+                                        time.time() - float_time_start
+                                    )
+
+                                """
+                                check overlap with repeatmasker annotations 
+                                """
+                                if (
+                                    not (
+                                        int_flag_classification
+                                        & int_flag_class_overlap_with_gene_body
+                                    )
+                                    or int_flag_classification
+                                    & int_flag_class_completely_intronic
+                                ):  # when read is not overlapped with a gene (intergenic) or completely intronic, search overlaps with repeatmasker annotations # for atac data, all reads assigned to genes will be skipped from this analysis
+                                    float_time_start = (
+                                        time.time()
+                                    )  # record the start time
+                                    # ignore reads if it does not overlap repeatmasker annotation
+                                    set_t_interval_overlap_rpmk = set(
+                                        tuple(e)
+                                        for e in __data_object_search_query(
+                                            data_dict_it_rpmk,
+                                            refname,
+                                            int_pos_of_read_determining_feature_assignment,
+                                        )
+                                    )  # retrieve set of gene annotations overlapped with the current alignment
+                                    if len(set_t_interval_overlap_rpmk) > 0:
+                                        int_flag_classification ^= int_flag_class_overlap_with_filtered_rpmk_anno  # update read classification info.
+                                        # identify the name of repeatmasker annotation with the largest overlap with the current read
+                                        (
+                                            l_interval_rpmk,
+                                            int_max_num_base_pairs_overlap_with_rpmk,
+                                        ) = bk.DICTIONARY_Find_keys_with_max_value(
+                                            dict(
+                                                (
+                                                    e,
+                                                    bk.INTERVAL_Overlap(
+                                                        [e[0], e[1]],
+                                                        l_start_end_read,
+                                                        flag_0_based_coordinate_system=True,
+                                                    ),
+                                                )
+                                                for e in set_t_interval_overlap_rpmk
+                                            )
+                                        )  # retrieve the proportion of overlap with the given feature
+                                        if len(l_interval_rpmk) == 1:
+                                            (
+                                                start_rpmk,
+                                                end_rpmk,
+                                                id_rpmk,
+                                            ) = l_interval_rpmk[
+                                                0
+                                            ]  # retrieve information about the assigned annotation
+
+                                            """ initialize data for the new rpmk annotation encountered """
+                                            if (
+                                                id_rpmk not in reads["data"]
+                                            ):  # if a annotation is newly encountered
+                                                __Initialize_misc_anno_data__(
+                                                    reads,
+                                                    refname,
+                                                    start_rpmk,
+                                                    end_rpmk,
+                                                    id_rpmk,
+                                                    "rpmk",
+                                                    str_mode_scarab_count,
+                                                )
+
+                                            """ (GEX mode specific) calculate proportion of filtered repeatmasker features of the read """
+                                            if not flag_is_mode_scarab_count_atac:
+                                                # count bases overlapping repeatmasker features
+                                                int_base_filtered_rpmk_count = 0
+                                                for (
+                                                    pos_seg_start,
+                                                    pos_seg_end,
+                                                ) in l_seg:
+                                                    ba_seg_mask = scidx[
+                                                        "dict_seqname_to_mask_gtf_rpmk_filtered"
+                                                    ][refname][
+                                                        pos_seg_start:pos_seg_end
+                                                    ]
+                                                    int_base_filtered_rpmk_count += (
+                                                        ba_seg_mask.count()
+                                                    )
+
+                                                # add classification label based on the proportion of filtered repeatmasker annotations in the read
+                                                float_prop_filtered_rpmk = (
+                                                    int_base_filtered_rpmk_count
+                                                    / int_total_aligned_length
+                                                )  # calculate the proportion of exons contained in the read
+                                                if float_prop_filtered_rpmk == 1:
+                                                    int_flag_classification ^= int_flag_class_complete_overlap_with_filtered_rpmk_anno
+
+                                            """ increament the time passed to process the read to the total wall time for the gene """
+                                            reads["data"][id_rpmk]["wall_time"] += (
+                                                time.time() - float_time_start
+                                            )
+                                        else:
+                                            int_flag_classification ^= int_flag_class_ambiguous_assignment_to_filtered_rpmk_anno
+
+                                """
+                                check overlap with regulatory elements
+                                """
+                                if (
+                                    not (
+                                        int_flag_classification
+                                        & int_flag_class_overlap_with_gene_body
+                                    )
+                                    or int_flag_classification
+                                    & int_flag_class_completely_intronic
+                                ):  # when read is not overlapped with a gene body or is completely intronic, search overlaps with regulatory annotations
+                                    float_time_start = (
+                                        time.time()
+                                    )  # record the start time
+                                    # ignore reads if it does not overlap regulatory element annotation
+                                    """ calculate proportion of unfiltered repeatmasker elements of the read """
+                                    # count bases overlapping regulatory element features
+                                    int_base_unfiltered_rpmk_count = 0
+                                    for pos_seg_start, pos_seg_end in l_seg:
+                                        ba_seg_mask = scidx[
+                                            "dict_seqname_to_mask_gtf_rpmk_unfiltered"
+                                        ][refname][pos_seg_start:pos_seg_end]
+                                        int_base_unfiltered_rpmk_count += (
+                                            ba_seg_mask.count()
+                                        )
+
+                                    # calculate the proportion of unfiltered repeatmasker annotations in the read
+                                    float_prop_unfiltered_rpmk = (
+                                        int_base_unfiltered_rpmk_count
+                                        / int_total_aligned_length
+                                    )
+
+                                    set_t_interval_overlap_reg = set(
+                                        tuple(e)
+                                        for e in __data_object_search_query(
+                                            data_dict_it_reg,
+                                            refname,
+                                            int_pos_of_read_determining_feature_assignment,
+                                        )
+                                    )  # retrieve set of gene annotations overlapped with the current alignment
+                                    """ if the read overlaps with regulatory element and not overlapped with unfiltered repeatmasker counts """
+                                    if len(set_t_interval_overlap_reg) > 0:
+                                        int_flag_classification ^= int_flag_class_overlap_with_reg  # update read classification info.
+                                        if (
+                                            len(id_rpmk) > 0
+                                        ):  # if the read has been already overlapped with id_rpmk, update the read classification info.
+                                            int_flag_classification ^= int_flag_class_overlap_with_reg_and_rpmk  # update read classification info.
+                                        if (
+                                            float_prop_unfiltered_rpmk
+                                            <= float_max_prop_unfiltered_rpmk
+                                        ):
+                                            int_flag_classification ^= int_flag_class_overlap_with_reg_not_overlap_with_unfiltered_rpmk_anno  # update read classification info.
+                                            # identify the name of repeatmasker annotation with the largest overlap with the current read
+                                            (
+                                                l_interval_reg,
+                                                int_max_num_base_pairs_overlap_with_reg,
+                                            ) = bk.DICTIONARY_Find_keys_with_max_value(
+                                                dict(
+                                                    (
+                                                        e,
+                                                        bk.INTERVAL_Overlap(
+                                                            [e[0], e[1]],
+                                                            l_start_end_read,
+                                                            flag_0_based_coordinate_system=True,
+                                                        ),
+                                                    )
+                                                    for e in set_t_interval_overlap_reg
+                                                )
+                                            )  # retrieve the proportion of overlap with the given feature
+                                            if len(l_interval_reg) == 1:
+                                                (
+                                                    start_reg,
+                                                    end_reg,
+                                                    id_reg,
+                                                ) = l_interval_reg[
+                                                    0
+                                                ]  # retrieve information about the assigned annotation
+
+                                                """ initialize data for the new regulatory element annotation encountered """
+                                                if (
+                                                    id_reg not in reads["data"]
+                                                ):  # if a annotation is newly encountered
+                                                    __Initialize_misc_anno_data__(
+                                                        reads,
+                                                        refname,
+                                                        start_reg,
+                                                        end_reg,
+                                                        id_reg,
+                                                        "regulatory_region",
+                                                        str_mode_scarab_count,
+                                                    )
+
+                                                """ (GEX mode specific) calculate proportion of regulatory element of the read """
+                                                if (
+                                                    not flag_is_mode_scarab_count_atac
+                                                ):
+                                                    # count bases overlapping regulatory element features
+                                                    int_base_reg_count = 0
+                                                    for (
+                                                        pos_seg_start,
+                                                        pos_seg_end,
+                                                    ) in l_seg:
+                                                        ba_seg_mask = scidx[
+                                                            "dict_seqname_to_mask_gtf_reg"
+                                                        ][refname][
+                                                            pos_seg_start:pos_seg_end
+                                                        ]
+                                                        int_base_reg_count += (
+                                                            ba_seg_mask.count()
+                                                        )
+
+                                                    # add classification label based on the proportion of unfiltered repeatmasker annotations in the read
+                                                    float_prop_reg = (
+                                                        int_base_reg_count
+                                                        / int_total_aligned_length
+                                                    )  # calculate the proportion of exons contained in the read
+                                                    if float_prop_reg == 1:
+                                                        int_flag_classification ^= int_flag_class_complete_overlap_with_reg_not_overlap_with_unfiltered_rpmk_anno
+
+                                                """ increament the time passed to process the read to the total wall time for the gene """
+                                                reads["data"][id_reg][
+                                                    "wall_time"
+                                                ] += (
+                                                    time.time() - float_time_start
+                                                )
+                                            else:
+                                                int_flag_classification ^= int_flag_class_ambiguous_assignment_to_reg
+
+                                """
+                                Add data extracted from reads to each appropriate annotation
+                                """
+                                str_umi_corrected, str_umi_uncorrected = (
+                                    dict_tags[str_name_bam_tag_umi_corrected],
+                                    dict_tags[str_name_bam_tag_umi_uncorrected],
+                                )
+                                """ collect variant information """
+                                l_id_anno_variant = (
+                                    []
+                                )  # a list of id_anno of the variant annotation type
+                                if (
+                                    flag_does_not_collect_variant_information
+                                    or refname not in scidx["dict_fa_genome"]
+                                ):  # does not retrieve variants if reference sequence is not available
+                                    str_l_var = ""
+                                else:
+                                    l_var_name = SAM.Call_Variant(
+                                        r,
+                                        scidx["dict_fa_genome"],
+                                        function_for_processing_reference_name=__chromosome_name_remove_chr__,
+                                    )
+                                    if (
+                                        flag_filter_variant_using_predefined_set
+                                    ):  # filter variants using predefined set
+                                        l_var_name = list(
+                                            e
+                                            for e in l_var_name
+                                            if e in set_var_name_valid
+                                        )
+                                    str_l_var = ";".join(
+                                        l_var_name
+                                    )  # compose 'str_l_var'
+
+                                    """
+                                    'variant' feature type
+                                    """
+                                    if (
+                                        flag_filter_variant_using_predefined_set
+                                        and refname
+                                        in dict_it_pos_variant_predefined_set
+                                    ):  # when filtering variants using predefined set, add 'variant' feature type
+                                        # collect overlapped positions of the predefined set of variants
+                                        set_overlapped_pos = set()
+                                        for st, en in l_seg:
+                                            set_overlapped_pos |= (
+                                                dict_it_pos_variant_predefined_set[
+                                                    refname
+                                                ][st:en]
+                                            )
+                                        for (
+                                            start,
+                                            end,
+                                            values,
+                                        ) in (
+                                            set_overlapped_pos
+                                        ):  # for each overlapped position of predefined set of variants
+                                            id_anno = f"variant|pos={refname}:{start + 1}"  # compose 'id_anno' of the reference position
+                                            l_id_anno_variant.append(
+                                                id_anno
+                                            )  # collect 'id_anno'
+                                            if (
+                                                id_anno not in reads["data"]
+                                            ):  # initialize the 'variant' feature
+                                                __Initialize_misc_anno_data__(
+                                                    reads,
+                                                    refname,
+                                                    start,
+                                                    end,
+                                                    id_anno,
+                                                    "variant",
+                                                    str_mode_scarab_count,
+                                                )  # for variant annotation, start and end position of the annotation will be set as the reference position of the variant
+
+                                """ 
+                                structure of 'l_data' : 
+                                front) existing annotation from the input BAM file
+                                rear) new annotations added by the current program
+                                """
+                                if flag_is_mode_scarab_count_atac:
+                                    l_data = [
+                                        qname,
+                                        int_mapq,
+                                        refname,
+                                        flag,
+                                        refstart + 1,
+                                        refend,
+                                        str_l_seg,
+                                        dict_tags[str_name_bam_tag_cb_corrected],
+                                        dict_tags[str_name_bam_tag_cb_uncorrected],
+                                        int_flag_classification,
+                                        id_rpmk,
+                                        id_gene,
+                                        id_reg,
+                                        id_promoter,
+                                        str_l_var,
+                                    ]  # refstart in 1-based coordinate
+                                else:
+                                    l_data = [
+                                        qname,
+                                        int_mapq,
+                                        refname,
+                                        flag,
+                                        refstart + 1,
+                                        refend,
+                                        str_l_seg,
+                                        dict_tags[str_name_bam_tag_cb_corrected],
+                                        dict_tags[str_name_bam_tag_cb_uncorrected],
+                                        str_umi_corrected
+                                        if len(str_umi_corrected) > 0
+                                        else str_umi_uncorrected,
+                                        str_umi_uncorrected,
+                                        dict_tags["TX"],
+                                        dict_tags["AN"],
+                                        dict_tags["GX"],
+                                        dict_tags["GN"],
+                                        dict_tags["MM"],
+                                        dict_tags["RE"],
+                                        dict_tags["xf"],
+                                        int_flag_classification,
+                                        id_rpmk,
+                                        int_max_num_base_pairs_overlap_with_rpmk,
+                                        id_gene,
+                                        int_num_base_pairs_overlap_with_exons_of_the_assigned_gene_id,
+                                        int_base_gene_exon_count,
+                                        int_base_filtered_rpmk_count,
+                                        id_reg,
+                                        int_base_unfiltered_rpmk_count,
+                                        int_base_reg_count,
+                                        id_tx_assigned_by_minimap2,
+                                        str_l_var,
+                                    ]  # refstart in 1-based coordinate # use 'str_umi_uncorrected' if 'str_umi_corrected' does not exist
+                                l_data_for_counting = list(
+                                    l_data[index_col]
+                                    for index_col in l_index_col_for_counting
+                                )  # retrieve partial data for counting
+
+                                """ initialize feature data object for exon and splice junctions """
+                                for (
+                                    id_anno
+                                ) in (
+                                    l_id_anno_exon_and_splice_junc
+                                ):  # for ATAC data, 'l_id_anno_exon_and_splice_junc' should be empty
+                                    if (
+                                        id_anno not in reads["data"]
+                                    ):  # if the exon or splice_juc anno has not been initialized, initialize the feature
+                                        __Initialize_misc_anno_data__(
+                                            reads,
+                                            refname,
+                                            start_gene,
+                                            end_gene,
+                                            id_anno,
+                                            "exon_and_splice_junc",
+                                            str_mode_scarab_count,
+                                        )  # for exon and splice_junc annotation, start and end position of the annotation will be set as that of the gene to which read has been assigned to.
+                                l_id_anno_valid = list(
+                                    id_anno
+                                    for id_anno in [
+                                        id_gene,
+                                        id_rpmk,
+                                        id_reg,
+                                        id_promoter,
+                                    ]
+                                    + l_id_anno_exon_and_splice_junc
+                                    + l_id_anno_variant
+                                    if len(id_anno) > 0
+                                )  # retrieve a list of valid 'id_anno'
+
+                                """ append data to each feature """
+                                for id_anno in l_id_anno_valid:
+                                    if len(id_anno) > 0:  # if 'id_anno' is valid
+                                        reads["data"][id_anno]["l_read"].append(
+                                            l_data_for_counting
+                                        )
+
+                                """
+                                - A Wildcard - 
+                                Catch-All (binning for each genomic region)
+                                """
+                                if (
+                                    not flag_turn_off_catching_all_reads_by_binning
+                                    and (
+                                        len(l_id_anno_valid) == 0
+                                        or not flag_exclude_reads_assigned_to_features_and_count_every_read_in_bam_during_binning
+                                    )
+                                ):  # if conditions is met # if 'flag_exclude_reads_assigned_to_features_and_count_every_read_in_bam_during_binning' is False, collect the read in a genomic bin regardless of whether the read has been assigned to existing features.
+                                    """retrieve genomie region (bin)"""
+                                    (
+                                        start_bin_genome,
+                                        end_bin_genome,
+                                    ) = __Get_Genomic_Region__(
+                                        int_pos_of_read_determining_feature_assignment
+                                    )  # retrieve 0-based coordinates of the current genomic region (bin)
+                                    id_bin_genome = f"genomic_region|pos={refname}:{start_bin_genome + 1}-{end_bin_genome}"  # 0>1 based coordinates
+
+                                    """ initialize data for the current genomic region encountered """
+                                    if (
+                                        id_bin_genome not in reads["data"]
+                                    ):  # if a annotation is newly encountered
+                                        __Initialize_misc_anno_data__(
+                                            reads,
+                                            refname,
+                                            start_bin_genome,
+                                            end_bin_genome,
+                                            id_bin_genome,
+                                        )
+                                    reads["data"][id_bin_genome]["l_read"].append(
+                                        l_data_for_counting
+                                    )
+
+                                """ write the analysis result to the output BAM file """
+                                if (
+                                    not flag_skip_read_analysis_summary_output_bam_file
+                                ):
+                                    """
+                                    write annotated record as a tublar or SAM record
+                                    """
+                                    """
+                                    SAM record structure:
+                                    (index : Field )
+                                    0      : QNAME
+                                    1      : FLAG
+                                    2      : RNAME
+                                    3      : POS
+                                    4      : MAPQ
+                                    5      : CIGAR
+                                    6      : RNEXT
+                                    7      : PNEXT
+                                    8      : TLEN
+                                    9      : SEQ
+                                    10     : QUAL
+                                    """
+                                    """ retrieve sam record as a string """
+                                    l_sam = r.tostring().split("\t")
+                                    """ remove chr prefix from the chromosome names (if present) """
+                                    l_sam[2] = __chromosome_name_remove_chr__(
+                                        l_sam[2]
+                                    )
+                                    l_sam[6] = __chromosome_name_remove_chr__(
+                                        l_sam[6]
+                                    )
+                                    """ delete sequence and quality scores if 'flag_does_not_delete_sequence_and_sequence_qual' is False """
+                                    if (
+                                        not flag_does_not_delete_sequence_and_sequence_qual
+                                    ):
+                                        l_sam[9] = "*"
+                                        l_sam[10] = "*"
+
+                                    for name_col, data in zip(
+                                        l_name_col_newanno,
+                                        l_data[-len(l_name_col_newanno) :],
+                                    ):
+                                        (
+                                            name_tag,
+                                            str_type,
+                                        ) = dict_name_col_newanno_to_sam_tag_name[
+                                            name_col
+                                        ]
+                                        # retrieve string representation of data
+                                        str_data = (
+                                            str(int(data))
+                                            if str_type == "i"
+                                            and isinstance(data, int)
+                                            else data
+                                        )
+                                        # only add tag if data contains a valid value
+                                        if len(str_data) > 0:
+                                            l_sam.append(
+                                                name_tag
+                                                + ":"
+                                                + str_type
+                                                + ":"
+                                                + str_data
+                                            )  # add a tag value
+                                    newsamfile.write(
+                                        pysam.AlignedSegment.fromstring(
+                                            "\t".join(l_sam), samfile_header
+                                        )
+                                    )  # write a record to the output bam file
+
+                                """ write the analysis result to the output TSV file """
+                                if (
+                                    not flag_skip_read_analysis_summary_output_tsv_file
+                                ):
+                                    newfile.write(
+                                        (
+                                            "\t".join(list(map(str, l_data))) + "\n"
+                                        ).encode()
+                                    )  # write a record to the output tabular text file
+
+                        """ Flush all remaining data once all iteration has been completed """
+                        """
+                        'Flush' all remaining data
+                        """
+                        for id_anno in list(reads["data"]):
+                            _empty_bucket( id_anno, ) # flush the data
+                        _flush_the_current_batch_of_buckets( ) # flush the last batch of the buckets
+                        _write_results_from_offloaded_works( flag_wait_all = True ) # wait for all works to be completed, and flush results from offloaded computations
+                            
+                        pipe_sender.send(
+                            int_n_sam_record_count
+                        )  # report the number of processed sam records
+
+                    if not flag_skip_read_analysis_summary_output_bam_file:
+                        newsamfile.close()
+                    if not flag_skip_read_analysis_summary_output_tsv_file:
+                        newfile.close()
+                    newfile_df_count.close()
+                    newfile_df_analysis_statistics.close()
+                    pipe_sender.send( 'completed' ) # report the worker has completed all works
+                    if verbose:
+                        logger.info(f"[Completed] ({str_uuid})")
+
+                ns = dict()  # define a namespace
+                ns[
+                    "int_num_read_currently_processed"
+                ] = 0  # initialize total number of reads processed by the algorithm
+
+                def post_process_batch(res):
+                    # parse received result
+                    int_n_sam_record_count = res
+                    ns["int_num_read_currently_processed"] += int_n_sam_record_count
+                    logger.info(
+                        f"[{path_file_bam_input}] total {ns[ 'int_num_read_currently_processed' ]} number of reads has been processed."
+                    )  # report
+
+                """
+                Analyze a Barcoded BAM file
+                """
+                if verbose:
+                    logger.info(
+                        f"[{path_file_bam_input}] the analysis pipeline will be run with {n_threads} number of threads"
+                    )
+                bk.Multiprocessing_Batch_Generator_and_Workers(
+                    gen_batch=iter( SAM.Get_contig_names_from_bam_header( path_file_bam_input ) ), # analyze the pre-processed BAM file for each chromosome
+                    process_batch=process_batch,
+                    post_process_batch=post_process_batch,
+                    int_num_threads=n_threads
+                    + 2,  # one thread for generating batch, another thread for post-processing of the batch
+                )
+
+                """ 
+                Export Gene, Transcript, and Misc. Annotation Read Count Matrix 
+                """
+
+                def export_count_matrix():  # off-loading a single-core work
+                    logger.info(
+                        f"[{path_file_bam_input}] Exporting count matrix started."
+                    )
+                    # combine results into a single output file (initial read analysis)
+                    if not flag_skip_read_analysis_summary_output_tsv_file:
+                        if str_mode_scarab_count == "atac":
+                            l_col = [
+                                "qname",
+                                "mapq",
+                                "refname",
+                                "flag",
+                                "refstart",
+                                "refend",
+                                "str_l_seg",
+                                "CB",
+                                "CR",
+                                "int_flag_classification",
+                                "id_rpmk",
+                                "id_gene",
+                                "id_reg",
+                                "l_name_variant",
+                            ]
+                        else:
+                            l_col = [
+                                "qname",
+                                "mapq",
+                                "refname",
+                                "flag",
+                                "refstart",
+                                "refend",
+                                "str_l_seg",
+                                "CB",
+                                "CR",
+                                "UB",
+                                "UR",
+                                "TX",
+                                "AN",
+                                "GX",
+                                "GN",
+                                "MM",
+                                "RE",
+                                "xf",
+                                "int_flag_classification",
+                                "id_rpmk",
+                                "int_max_num_base_pairs_overlap_with_rpmk",
+                                "id_gene",
+                                "int_num_base_pairs_overlap_with_exons_of_the_assigned_gene_id",
+                                "int_base_gene_exon_count",
+                                "int_base_filtered_rpmk_count",
+                                "id_reg",
+                                "int_base_unfiltered_rpmk_count",
+                                "int_base_reg_count",
+                                "id_tx_assigned_by_minimap2",
+                                "l_name_variant",
+                            ]
+                        l_col = [
+                            "qname",
+                            "mapq",
+                            "refname",
+                            "flag",
+                            "refstart",
+                            "refend",
+                            "str_l_seg",
+                            "CB",
+                            "CR",
+                            "UB",
+                            "UR",
+                            "TX",
+                            "AN",
+                            "GX",
+                            "GN",
+                            "MM",
+                            "RE",
+                            "xf",
+                            "int_flag_classification",
+                            "id_rpmk",
+                            "int_max_num_base_pairs_overlap_with_rpmk",
+                            "id_gene",
+                            "int_num_base_pairs_overlap_with_exons_of_the_assigned_gene_id",
+                            "int_base_gene_exon_count",
+                            "int_base_filtered_rpmk_count",
+                            "id_reg",
+                            "int_base_unfiltered_rpmk_count",
+                            "int_base_reg_count",
+                            "id_tx_assigned_by_minimap2",
+                            "l_name_variant",
+                        ]
+                        bk.OS_FILE_Combine_Files_in_order(
+                            glob.glob(f"{path_folder_temp}*.analysis.*.tsv.gz"),
+                            f"{path_folder_output}analysis.tsv.gz",
+                            header="\t".join(l_col) + "\n",
+                            delete_input_files=True,
+                            overwrite_existing_file=True,
+                        )
+                    l_col_df_count = ["barcode", "feature", "id_feature", "read_count"]
+                    bk.OS_FILE_Combine_Files_in_order(
+                        glob.glob(
+                            f"{path_folder_temp}*.count.gene_and_transcript.tsv.gz"
+                        ),
+                        f"{path_folder_output}df_count.gene_and_transcript.tsv.gz",
+                        header="\t".join(l_col_df_count) + "\n",
+                        delete_input_files=True,
+                        overwrite_existing_file=True,
+                    )
+                    l_col_df_stat = ["str_uuid", "id_anno", "wall_time", "int_n_reads"]
+                    bk.OS_FILE_Combine_Files_in_order(
+                        glob.glob(f"{path_folder_temp}*.analysis_statistics.tsv.gz"),
+                        f"{path_folder_output}analysis_statistics.tsv.gz",
+                        header="\t".join(l_col_df_stat) + "\n",
+                        delete_input_files=True,
+                        overwrite_existing_file=True,
+                    )
+
+                    # export_count_matrix
+                    Convert_df_count_to_MTX_10X(
+                        path_file_df_count=f"{path_folder_output}df_count.gene_and_transcript.tsv.gz",
+                        path_folder_mtx_10x_output=f"{path_folder_output}raw_feature_bc_matrix/",
+                        path_folder_mtx_10x_filtered_output=f"{path_folder_output}filtered_feature_bc_matrix/",
+                        chunksize=1000000,
+                        int_min_count_features_for_filtering_barcodes=int_min_count_features_for_filtering_barcodes,
+                    )  # export count matrix as a 10X MTX object
+                    # write a flag indicating the count matrix is exported
+                    os.mknod(f"{path_folder_output}count_matrix.export_completed.txt")
+                    release_lock()  # release the lock
+                    logger.info(
+                        f"[{path_file_bam_input}] Count matrix in 10X MTX format was exported."
+                    )
+
+                workers.submit_work(export_count_matrix)
+
+                """ 
+                Export BAM Output
+                """
+                # combine the output bam files
+                if not flag_skip_read_analysis_summary_output_bam_file:
+                    def output_bam_file():  # off-loading a single-core work
+                        logger.info(
+                            f"[{path_file_bam_input}] Combining BAM Output started."
+                        )
+                        l_path_file_bam_to_be_merged = glob.glob(
+                            f"{path_folder_temp}/*.analysis.*.bam"
+                        )
+                        pysam.merge(
+                            f"{path_folder_output}analysis.bam",
+                            *l_path_file_bam_to_be_merged,
+                            "--threads",
+                            str(n_threads),
+                        )
+                        for path_file_bam in l_path_file_bam_to_be_merged:
+                            os.remove(path_file_bam)
+                        # index the output bam file
+                        bk.OS_Run(
+                            ["samtools", "index", f"{path_folder_output}analysis.bam"]
+                        )
+                        os.mknod(f"{path_folder_output}bam_output.export_completed.txt")
+                        release_lock()  # release the lock
+                        logger.info(
+                            f"[{path_file_bam_input}] BAM Output has been completed."
+                        )
+
+                    workers.submit_work(output_bam_file)
+
+            """ for multiome sample, rename feature names (adding '|mode=atac' suffix at the end of feature name) and combine count matrices """
+            if str_mode_scarab_count_for_the_current_sample == "multiome":
+
+                def combine_count_matrices_for_multiome():  # off-loading a single-core work
+                    path_folder_mtx_gex = f"{path_folder_output_for_the_current_sample}gex/filtered_feature_bc_matrix/"
+                    path_folder_mtx_atac = f"{path_folder_output_for_the_current_sample}atac/filtered_feature_bc_matrix/"
+                    path_folder_mtx_multiome = f"{path_folder_output_for_the_current_sample}filtered_feature_bc_matrix/"
+
+                    """ if an multiome count matrix folder already exists, check whether the output is complete """
+                    if os.path.exists(path_folder_mtx_multiome):
+                        """check whether the pipeline has been completed"""
+                        if os.path.exists(
+                            f"{path_folder_mtx_multiome}matrix.mtx.gz"
+                        ) and (
+                            not os.path.exists(f"{path_folder_mtx_multiome}matrix.mtx")
+                        ):
+                            logger.warning(
+                                f"[Output Matrix Already Exists] the output folder {path_folder_mtx_multiome} contains a valid count matrix file, skipping"
+                            )
+                            return  # skip if the pipeline has been completed for the output folder
+                        else:
+                            """if required output files does not exist or the an intermediate file exists, remove the entire output folder, and rerun the process"""
+                            logger.warning(
+                                f"[Output Matrix Already Exists] the output folder {path_folder_mtx_multiome} does not contain a valid count matrix file. The output folder will be deleted and the pipeline will be continued from there."
+                            )
+                            shutil.rmtree(path_folder_mtx_multiome)
+
+                    # add suffix to the ATAC output to distinguish them from GEX outputs
+                    SC.MTX_10X_Feature_add_prefix_or_suffix(
+                        f"{path_folder_mtx_atac}features.tsv.gz",
+                        id_feature_suffix="|mode=atac",
+                        name_feature_suffix="|mode=atac",
+                    )
+                    # combine matrices
+                    SC.MTX_10X_Combine(
+                        path_folder_mtx_multiome,
+                        path_folder_mtx_gex,
+                        path_folder_mtx_atac,
+                    )
+                    os.mknod(
+                        f"{path_folder_output_for_the_current_sample}count_matrix.export_completed.txt"
+                    )
+                    release_lock()  # release the lock
+                    logger.info( f'[Combined Count Matrix] A combined count matrix (GEX + ATAC) for "{l_path_file_bam_input_for_the_current_sample}" was exported.' )
+
+                workers.submit_work(combine_count_matrices_for_multiome)
+
+            release_lock()  # release the lock
+
+        # wait all the single-core works offloaded to the workers to be completed.
+        workers.wait_all()
+        logger.info(
+            f"[Pipeline Completion] Forked Pipeline (id={str_uuid_pipeline}) Completed."
+        )
+
+    for _ in range(
+        int_num_samples_analyzed_concurrently
+    ):  # run 'int_num_samples_analyzed_concurrently' number of pipelines
+        pipelines.submit_work(run_pipeline)
+
+    # wait all pipelines to be completed
+    pipelines.wait_all()
+    logger.info(f"[Scarab-Count Start] Program Completed.")
+    return scidx  # return the loaded index object
 
 def ourotools(str_mode=None, **dict_args):
     """
