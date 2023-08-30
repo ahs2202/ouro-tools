@@ -87,7 +87,7 @@ logger = logging.getLogger("ouro-count")
 # define version
 _version_ = "0.0.1"
 _scelephant_version_ = _version_
-_last_modified_time_ = "2023-08-24 14:40:43 "
+_last_modified_time_ = "2023-08-30 23:52:10"
 
 str_release_note = [
     """
@@ -97,18 +97,54 @@ str_release_note = [
     
     # 2023-08-24 14:40:47 
     draft version of 'LongExtractBarcodeFromBAM' and 'LongCreateReferenceSizeDistribution' function completed.
+    
+    # 2023-08-30 23:51:34 
+    draft version of 'LongExportNormalizedCountMatrix' function was completed. chromosome-level multiprocessing is used, and size-distribution-normalized count matrix can be exported for multiple size ranges of interest, along with the raw count matrix.
 
     ##### Future implementations #####
 
     """
 ]
+"""
+  
+  .oooooo.   ooooo     ooo ooooooooo.     .oooooo.           ooooooooooooo   .oooooo.     .oooooo.   ooooo         .oooooo..o 
+ d8P'  `Y8b  `888'     `8' `888   `Y88.  d8P'  `Y8b          8'   888   `8  d8P'  `Y8b   d8P'  `Y8b  `888'        d8P'    `Y8 
+888      888  888       8   888   .d88' 888      888              888      888      888 888      888  888         Y88bo.      
+888      888  888       8   888ooo88P'  888      888              888      888      888 888      888  888          `"Y8888o.  
+888      888  888       8   888`88b.    888      888 8888888      888      888      888 888      888  888              `"Y88b 
+`88b    d88'  `88.    .8'   888  `88b.  `88b    d88'              888      `88b    d88' `88b    d88'  888       o oo     .d8P 
+ `Y8bood8P'     `YbodP'    o888o  o888o  `Y8bood8P'              o888o      `Y8bood8P'   `Y8bood8P'  o888ooooood8 8""88888P'  
+ 
+ 
+ _______  __   __  ______    _______         _______  _______  _______  ___      _______ 
+|       ||  | |  ||    _ |  |       |       |       ||       ||       ||   |    |       |
+|   _   ||  | |  ||   | ||  |   _   | ____  |_     _||   _   ||   _   ||   |    |  _____|
+|  | |  ||  |_|  ||   |_||_ |  | |  ||____|   |   |  |  | |  ||  | |  ||   |    | |_____ 
+|  |_|  ||       ||    __  ||  |_|  |         |   |  |  |_|  ||  |_|  ||   |___ |_____  |
+|       ||       ||   |  | ||       |         |   |  |       ||       ||       | _____| |
+|_______||_______||___|  |_||_______|         |___|  |_______||_______||_______||_______|
 
-str_description = """
+
  ______     __  __     ______     ______     ______   ______     ______     __         ______    
 /\  __ \   /\ \/\ \   /\  == \   /\  __ \   /\__  _\ /\  __ \   /\  __ \   /\ \       /\  ___\   
 \ \ \/\ \  \ \ \_\ \  \ \  __<   \ \ \/\ \  \/_/\ \/ \ \ \/\ \  \ \ \/\ \  \ \ \____  \ \___  \  
  \ \_____\  \ \_____\  \ \_\ \_\  \ \_____\    \ \_\  \ \_____\  \ \_____\  \ \_____\  \/\_____\ 
-  \/_____/   \/_____/   \/_/ /_/   \/_____/     \/_/   \/_____/   \/_____/   \/_____/   \/_____/ 
+  \/_____/   \/_____/   \/_/ /_/   \/_____/     \/_/   \/_____/   \/_____/   \/_____/   \/_____/  
+
+
+"""
+
+
+str_description = """
+
+ _______  __   __  ______    _______         _______  _______  _______  ___      _______ 
+|       ||  | |  ||    _ |  |       |       |       ||       ||       ||   |    |       |
+|   _   ||  | |  ||   | ||  |   _   | ____  |_     _||   _   ||   _   ||   |    |  _____|
+|  | |  ||  |_|  ||   |_||_ |  | |  ||____|   |   |  |  | |  ||  | |  ||   |    | |_____ 
+|  |_|  ||       ||    __  ||  |_|  |         |   |  |  |_|  ||  |_|  ||   |___ |_____  |
+|       ||       ||   |  | ||       |         |   |  |       ||       ||       | _____| |
+|_______||_______||___|  |_||_______|         |___|  |_______||_______||_______||_______|
+
                                                                                                  
 A comprehensive toolkit for quality control and analysis of single-cell long-read RNA-seq data
 """
@@ -4583,7 +4619,7 @@ def LongCreateReferenceSizeDistribution(
     """
     logger.info(str_description)
     logger.info(
-        "Ouro-Tools LongReadFilterNSplit, a preprocessing pipeline for filtering undesired reads and spliting chimeric reads FASTQ files"
+        "Ouro-Tools LongCreateReferenceSizeDistribution, a pipeline for refining and combining size distributions of multiple samples calculated using 'LongExtractBarcodeFromBAM' to create a reference size distribution, and finding optimal correction ratios for correction for count normalization for each sample."
     )
     logger.info(f"Started.")
 
@@ -4872,6 +4908,9 @@ def LongExportNormalizedCountMatrix(
     path_file_fa_transcriptome: Union[str, None] = None,
     l_path_file_bam_input: Union[list, None] = None,
     l_path_folder_output: [list[str], None] = None,
+    path_folder_reference_distribution : Union[ str, None ] = None, # a folder containing the reference distribution, the output of the 'LongCreateReferenceSizeDistribution'
+    l_name_distribution : Union[ List[ str ], str, None ] = None, # the name of each sample that was used to build the reference distribution. the distribution of each sample and pre-calculated correction ratios will be retrieved from the data stored in the reference distribution folder using the given names.
+    l_str_l_t_distribution_range_of_interest : Union[ List[ str ], str, None ] = None, # define a range of distribution of interest for exporting normalized count matrix
     n_threads: int = 16,
     float_memory_in_GiB: float = 50,
     int_num_sam_records_for_each_chunk: int = 300000,
@@ -4982,6 +5021,10 @@ def LongExportNormalizedCountMatrix(
         'dict_fa_transcriptome' : 2,
     }
     flag_no_strand_specificity : bool = False, # flag indicating whether to ignore strand information of the reads in the input BAM files.
+    path_folder_reference_distribution : Union[ str, None ] = None, # a folder containing the reference distribution, the output of the 'LongCreateReferenceSizeDistribution'
+    l_name_distribution : Union[ List[ str ], str, None ] = None, # the name of each sample that was used to build the reference distribution. the distribution of each sample and pre-calculated correction ratios will be retrieved from the data stored in the reference distribution folder using the given names.
+    l_str_l_t_distribution_range_of_interest : Union[ List[ str ], str, None ] = None, # define a range of distribution of interest for exporting normalized count matrix. a list of string for setting the size distrubution ranges of interest for exporting normalized count matrix. if 'raw' is given, no size-based normalization will be performed, and raw counts of all molecules will be exported. example arguments are the followings: 'raw,50-5000,1000-3500' for exporting raw count and size-normalized count matrices for molecules of 50-5000bp and 1000-3500bp (total three output matrices). if only one argument is given, the argument will be applied to all samples.
+    
     # the number of manager processes to use for each data object that will be shared across the forked processes. If 0 is given, no manager process will be used. Instead, the object will be directly accessed in the forked process, incurring memory bloating.
     # generally, it is better to use more number of manager processes for data object that are more frequently accessed. If increasing the number of manager processes does not improve performance, considering not using the manager process and accessing the object directly.
     # the expected size of bloated memory per process for each data object is given below.
@@ -5027,7 +5070,6 @@ def LongExportNormalizedCountMatrix(
             formatter_class=argparse.RawTextHelpFormatter,
         )
         parser.add_argument("count")
-
         arg_grp_general = parser.add_argument_group("General")
         arg_grp_general.add_argument(
             "-b",
@@ -5428,6 +5470,24 @@ def LongExportNormalizedCountMatrix(
             action="store_true",
         )
         
+        # setting for exporting size-based normalized count matrix
+        arg_grp_size_norm = parser.add_argument_group("Count Normalization Using the Reference Distribution")
+        arg_grp_size_norm.add_argument(
+            "--path_folder_reference_distribution",
+            help="path_folder_reference_distribution. a folder containing the reference distribution, the output of the 'LongCreateReferenceSizeDistribution'",
+        )
+        arg_grp_size_norm.add_argument(
+            "--l_name_distribution",
+            help="the name of each sample that was used to build the reference distribution. the distribution of each sample and pre-calculated correction ratios will be retrieved from the data stored in the reference distribution folder using the given names.",
+            default=None,
+            nargs="*",
+        )
+        arg_grp_size_norm.add_argument(
+            "--l_str_l_t_distribution_range_of_interest",
+            help="a list of string for setting the size distrubution ranges of interest for exporting normalized count matrix. if 'raw' is given, no size-based normalization will be performed, and raw counts of all molecules will be exported. example arguments are the followings: 'raw,50-5000,1000-3500' for exporting raw count and size-normalized count matrices for molecules of 50-5000bp and 1000-3500bp (total three output matrices). if only one argument is given, the argument will be applied to all samples.",
+            default=["raw"],
+            nargs="*",
+        )
         args = parser.parse_args()
 
         flag_skip_exon_and_splice_junc_counting = (
@@ -5535,6 +5595,10 @@ def LongExportNormalizedCountMatrix(
         flag_skip_intron_retention_counting = args.flag_skip_intron_retention_counting
         flag_no_strand_specificity = args.flag_no_strand_specificity
         int_min_length_intron_for_detecting_intron_retention_event = args.int_min_length_intron_for_detecting_intron_retention_event
+        
+        path_folder_reference_distribution = args.path_folder_reference_distribution
+        l_name_distribution = args.l_name_distribution
+        l_str_l_t_distribution_range_of_interest = args.l_str_l_t_distribution_range_of_interest
 
     """
     Start of the Scarab-Count Program
@@ -5665,7 +5729,27 @@ def LongExportNormalizedCountMatrix(
         path_file_gff_regulatory_element = os.path.abspath(
             path_file_gff_regulatory_element
         )
+        
+    ''' pre-process input arguments '''
+    l_l_t_distribution_range_of_interest = None # initialize 'l_l_t_distribution_range_of_interest'
+    def _t_distribution_range_of_interest_to_str( t_distribution_range_of_interest ) :
+        ''' # 2023-08-29 23:58:21 
+        function for converting 't_distribution_range_of_interest' to a string
+        '''
+        return 'raw' if t_distribution_range_of_interest is None else '-'.join( list( map( str, t_distribution_range_of_interest ) ) )
+    if l_str_l_t_distribution_range_of_interest is not None : # if 'l_l_t_distribution_range_of_interest' has been given
+        # pre-process 'l_str_l_t_distribution_range_of_interest' - fill missing values
+        if isinstance( l_str_l_t_distribution_range_of_interest, str ) : # if a string was given, wrap the string in a list
+            l_str_l_t_distribution_range_of_interest = [ l_str_l_t_distribution_range_of_interest ]
+        if len( l_str_l_t_distribution_range_of_interest ) == 1 and len( l_path_folder_output ) > 1 : # if 'l_str_l_t_distribution_range_of_interest' only contain a single entry and more than one sample has been given, use the string for all the samples
+            l_str_l_t_distribution_range_of_interest *= len( l_path_folder_output )
 
+        # parse 'l_str_l_t_distribution_range_of_interest'
+        def _process_str_distribution_range_of_interest( e ) :
+            e = e.strip( )
+            return None if e.lower( ) in { 'raw', 'raw_count', 'rawcount' } else tuple( map( int, e.split( '-' ) ) )
+        l_l_t_distribution_range_of_interest = list( list( set( _process_str_distribution_range_of_interest( e ) for e in set( e.strip( ).split( ',' ) ) ) ) for e in l_str_l_t_distribution_range_of_interest ) # parse each 'str_l_t_distribution_range_of_interest'
+    
     """ 
     Fixed Settings
     """
@@ -5690,6 +5774,22 @@ def LongExportNormalizedCountMatrix(
     # process arguments
     set_seqname_to_skip = set(l_seqname_to_skip)
 
+    """
+    read reference distribution
+    """
+    dict_name_sample_to_arr_ratio_to_ref = None # initialize 'dict_name_sample_to_arr_ratio_to_ref'
+    if path_folder_reference_distribution is not None : # if 'path_folder_reference_distribution' has been given
+        path_folder_reference_distribution = os.path.abspath( os.path.realpath( path_folder_reference_distribution ) ) + '/' # preprocess the path
+        dict_output = bk.PICKLE_Read( f"{path_folder_reference_distribution}dict_output.pickle" ) # read reference distribution data
+        dict_name_sample_to_arr_ratio_to_ref = dict( ( name_sample, arr_ratio_to_ref ) for name_sample, arr_ratio_to_ref in zip( dict_ref_dist[ 'setting' ][ 'l_name_file_distributions' ], dict_ref_dist[ 'l_arr_ratio_to_ref' ] ) ) # map name_sample to correction ratio data
+        del dict_output
+        
+    # check whether reference distribution is used for normalization (check all the required arguments were given)
+    flag_size_distribution_based_normalization_is_applied = not ( dict_name_sample_to_arr_ratio_to_ref is None or l_l_t_distribution_range_of_interest is None or l_name_distribution is None or len( l_name_distribution ) == 0 ) # retrieve a flag indicating whether size-distribution-based normalization will be applied
+    if not flag_size_distribution_based_normalization_is_applied : # if size distribution normalization is not applied, put some dummy values into the list
+        l_l_t_distribution_range_of_interest = [ [ None ] ] * len( l_path_folder_output ) # [ None ] representing exporting count matrix without size-distribution-based normalization
+        l_name_distribution = [ None ] * len( l_path_folder_output )
+    
     """
     Preprocess gene, isoform, and miscellaneous annotations
     """
@@ -5803,15 +5903,14 @@ def LongExportNormalizedCountMatrix(
         """
         Run scarab count for each sample
         """
-        l_path_file_bam_input_reversed = deepcopy(
-            l_path_file_bam_input[::-1]
-        )  # reverse the input BAM file paths so that pop operation yield the element located at the front
-        for (
-            str_mode_scarab_count_for_the_current_sample,
-            path_folder_output_for_the_current_sample,
-        ) in zip(
-            l_str_mode_scarab_count, l_path_folder_output
-        ):  # retrieve scarab count operating mode and an output folder for the current sample
+        def _reverse_list( l ) :
+            ''' # 2023-08-29 22:49:13 
+            copy and reverse the list
+            '''
+            return deepcopy( l[::-1] )
+        l_path_file_bam_input_reversed = _reverse_list( l_path_file_bam_input ) # reverse the input BAM file paths so that pop operation yield the element located at the front
+        l_l_t_distribution_range_of_interest_reversed = _reverse_list( l_l_t_distribution_range_of_interest )
+        for str_mode_scarab_count_for_the_current_sample, path_folder_output_for_the_current_sample, name_distribution in zip( l_str_mode_scarab_count, l_path_folder_output, l_name_distribution ) :  # retrieve scarab count operating mode and an output folder for the current sample
             """settings for each scarab count operating mode"""
             if (
                 str_mode_scarab_count_for_the_current_sample == "multiome"
@@ -5832,6 +5931,14 @@ def LongExportNormalizedCountMatrix(
                     int_min_mapq_unique_mapped_for_gex_data,
                     int_min_mapq_unique_mapped_for_atac_data,
                 ]
+                l_l_t_distribution_range_of_interest_for_the_current_sample = [
+                    l_l_t_distribution_range_of_interest_reversed.pop(),
+                    l_l_t_distribution_range_of_interest_reversed.pop(),
+                ]
+                raise NotImplementedError( 'atac distribution not implemented.' )
+                l_arr_ratio_to_ref_for_the_current_sample = [
+                    None, None
+                ]
             elif (
                 str_mode_scarab_count_for_the_current_sample[:4] == "atac"
             ):  # ATAC run mode
@@ -5847,6 +5954,10 @@ def LongExportNormalizedCountMatrix(
                 l_int_min_mapq_unique_mapped_for_the_current_sample = [
                     int_min_mapq_unique_mapped_for_atac_data
                 ]
+                l_l_t_distribution_range_of_interest_for_the_current_sample = [
+                    l_l_t_distribution_range_of_interest_reversed.pop(),
+                ]
+                l_arr_ratio_to_ref_for_the_current_sample = [ dict_name_sample_to_arr_ratio_to_ref[ name_distribution ], ] if flag_size_distribution_based_normalization_is_applied else [ None, ]
             elif (
                 str_mode_scarab_count_for_the_current_sample[:3] == "gex"
             ):  # GEX run mode
@@ -5862,6 +5973,10 @@ def LongExportNormalizedCountMatrix(
                 l_int_min_mapq_unique_mapped_for_the_current_sample = [
                     int_min_mapq_unique_mapped_for_gex_data
                 ]
+                l_l_t_distribution_range_of_interest_for_the_current_sample = [
+                    l_l_t_distribution_range_of_interest_reversed.pop(),
+                ]
+                l_arr_ratio_to_ref_for_the_current_sample = [ dict_name_sample_to_arr_ratio_to_ref[ name_distribution ], ] if flag_size_distribution_based_normalization_is_applied else [ None, ]
 
             """
             define a function to release a lock
@@ -5962,11 +6077,15 @@ def LongExportNormalizedCountMatrix(
                 str_mode_scarab_count,
                 path_folder_output,
                 int_min_mapq_unique_mapped,
+                arr_ratio_to_ref,
+                l_t_distribution_range_of_interest,
             ) in zip(
                 l_path_file_bam_input_for_the_current_sample,
                 l_str_mode_scarab_count_for_the_current_sample,
                 l_path_folder_output_for_the_current_sample,
                 l_int_min_mapq_unique_mapped_for_the_current_sample,
+                l_arr_ratio_to_ref_for_the_current_sample,
+                l_l_t_distribution_range_of_interest_for_the_current_sample,
             ):
                 # define folders and directories
                 path_file_bam_input = os.path.abspath(path_file_bam_input)
@@ -6104,6 +6223,9 @@ def LongExportNormalizedCountMatrix(
                     "l_seqname_to_skip": l_seqname_to_skip,
                     "flag_skip_read_analysis_summary_output_bam_file": flag_skip_read_analysis_summary_output_bam_file,
                     "flag_skip_read_analysis_summary_output_tsv_file": flag_skip_read_analysis_summary_output_tsv_file,
+                    'path_folder_reference_distribution' : path_folder_reference_distribution,
+                    'l_name_distribution' : l_name_distribution,
+                    'l_str_l_t_distribution_range_of_interest' : l_str_l_t_distribution_range_of_interest,
                     # internal
                     "path_folder_temp": path_folder_temp,
                     "path_folder_graph": path_folder_graph,
@@ -6175,7 +6297,7 @@ def LongExportNormalizedCountMatrix(
                 """ define internal parameters according to the scarab count modes """
                 flag_use_gene_assignment_from_10x_cellranger_for_the_current_bam_file = flag_use_gene_assignment_from_10x_cellranger  # retrieve 'flag_use_gene_assignment_from_10x_cellranger_for_the_current_bam_file'
                 # for a header line for annotated count matrix
-                l_col_df_count = ["barcode", "feature", "id_feature", "read_count"]
+                l_col_df_count = ["barcode", "feature", "id_feature", "read_count"] # define 'l_col_df_count'
                 if flag_is_mode_scarab_count_atac:
                     """data columns"""
                     # a list of names of columns for defining unique molecules assigned to a single feature for ATAC reads (following 10X cellranger ATAC > v1.2)
@@ -6202,6 +6324,7 @@ def LongExportNormalizedCountMatrix(
                         "id_reg",
                         "id_promoter",
                         "l_name_variant",
+                        'int_total_aligned_length',
                     ]
                     # a list of names of columns for collecting information about the current alignment just for counting (only essential information to reduce memory footprint)
                     l_col_for_counting = [
@@ -6214,6 +6337,7 @@ def LongExportNormalizedCountMatrix(
                         "refend",
                         "int_flag_classification",
                         "l_name_variant",
+                        'int_total_aligned_length',
                     ]
                     # a list of names of columns that will be added as BAM tags to the output BAM file # should be a contiguous subset of 'l_col'
                     l_name_col_newanno = l_col[-5:]
@@ -6222,7 +6346,7 @@ def LongExportNormalizedCountMatrix(
                         False  # no gene assignment for ATAC data
                     )
                 else:
-                    # a list of names of columns for defining unique molecules assigned to a single feature for ATAC reads (following 10X cellranger  > v1.2)
+                    # a list of names of columns for defining unique molecules assigned to a single feature for GEX reads (following 10X cellranger  > v1.2)
                     l_col_for_identifying_unique_molecules = [
                         "CB",
                         "UB",
@@ -6260,6 +6384,7 @@ def LongExportNormalizedCountMatrix(
                         "int_base_reg_count",
                         "id_tx_assigned_by_minimap2",
                         "l_name_variant",
+                        'int_total_aligned_length',
                     ]
                     # a list of names of columns for collecting information about the current alignment just for counting (only essential information to reduce memory footprint)
                     l_col_for_counting = [
@@ -6274,6 +6399,7 @@ def LongExportNormalizedCountMatrix(
                         "int_flag_classification",
                         "id_tx_assigned_by_minimap2",
                         "l_name_variant",
+                        'int_total_aligned_length',
                     ]
                     # a list of names of columns that will be added as BAM tags to the output BAM file # should be a contiguous subset of 'l_col'
                     l_name_col_newanno = l_col[-12:]
@@ -6433,9 +6559,8 @@ def LongExportNormalizedCountMatrix(
                     )
 
                 """
-                Define a generator for partition BAM file for multiprocessing while not crossing gene or other annotations (aware of gene boundaries)
+                Define a function for processing a part of a BAM file
                 """
-
                 def process_batch(pipe_receiver, pipe_sender):
                     """
                     # 2022-04-24 01:29:59
@@ -6467,18 +6592,14 @@ def LongExportNormalizedCountMatrix(
                             )
 
                     """ open tsv files """
-                    newfile_df_count = gzip.open(
-                        f"{path_folder_temp}{str_uuid}.count.gene_and_transcript.tsv.gz",
-                        "wb",
-                    )
+                    ''' open count matrix output files for each distribution of interest '''
+                    dict_t_distribution_range_of_interest_to_newfile_df_count = dict( ( t_distribution_range_of_interest, gzip.open( f"{path_folder_temp}{str_uuid}.count.size_distribution__{_t_distribution_range_of_interest_to_str( t_distribution_range_of_interest )}.tsv.gz", "wb", ) ) for t_distribution_range_of_interest in l_t_distribution_range_of_interest )
+                    # open other tsv output files
                     newfile_df_analysis_statistics = gzip.open(
                         f"{path_folder_temp}{str_uuid}.analysis_statistics.tsv.gz", "wb"
                     )  # for analyzing performance issues
                     if not flag_skip_read_analysis_summary_output_tsv_file:
-                        newfile = gzip.open(
-                            f"{path_folder_temp}{str_uuid}.analysis.{name_ref}.tsv.gz",
-                            "wb",
-                        )
+                        newfile = gzip.open( f"{path_folder_temp}{str_uuid}.analysis.{name_ref}.tsv.gz", "wb", )
 
                     if verbose:
                         logger.info(f"[Started] ({str_uuid})")
@@ -6599,23 +6720,70 @@ def LongExportNormalizedCountMatrix(
                     """
                     define functions for offloading works for multiprocessing
                     """
-
-                    def _process_gene_and_isoform_data( id_gene : str, dict_data : dict ):
+                    def _initialize_dict_output( ) :
+                        ''' # 2023-08-30 11:49:23 
+                        initialize dict_output for processing buckets (a container of output from a child process that will be collected by this process)
+                        '''
+                        dict_output = {
+                            'dict_t_distribution_range_of_interest_to_bio_newfile_df_count' : dict( ( e, BytesIO( ) ) for e in l_t_distribution_range_of_interest ),
+                            'bio_newfile_df_analysis_statistics' : BytesIO( ),
+                        } # initialize the dictionary containing the outputs as binary stream objects                        
+                        return dict_output
+                                        
+                    def _apply_size_distribution_correction_and_export_count_matrix( df, t_distribution_range_of_interest : Union[ None, tuple ] = None, l_col_for_dropping_duplicates : Union[ List[ str ], None ] = l_col_for_identifying_unique_molecules, l_col_for_groupby_operation : Union[ List[ str ], None ] = [ 'CB' ], dict_rename_columns : Union[ dict, None ] = {"CB": "barcode"}, func_set_id_feature = None, func_set_feature = None, inplace : bool = False ) : 
+                        ''' # 2023-08-30 20:09:49 
+                        apply size distribution correction in a dataframe with [ "read_count", "int_total_aligned_length" ] columns, and compose a count matrix
+                        '''
+                        flag_size_distribution_correction_is_applied = t_distribution_range_of_interest is not None
+                    
+                        if not inplace : # copy dataframe
+                            df = deepcopy( df )
+                            
+                        ''' filter molecules using 't_distribution_range_of_interest' '''
+                        if flag_size_distribution_correction_is_applied :
+                            arr_len = df[ 'int_total_aligned_length' ].values # retrieve length values
+                            df = df[ ( arr_len >= t_distribution_range_of_interest[ 0 ] ) & ( arr_len <= t_distribution_range_of_interest[ 1 ] ) ] # filter out molecules outside the given distribution range
+                            df.sort_values( "int_total_aligned_length", inplace = True, ascending = False ) # put longer read to the front (for 'drop duplicated molecule' step)
+                        
+                        ''' drop duplicated molecule '''
+                        df.drop_duplicates( subset = l_col_for_dropping_duplicates, keep="first", inplace=True, ) # remove duplicated molecules, keeping the molecules in the front (longer reads)
+                        
+                        ''' apply size-distribution correction '''
+                        if flag_size_distribution_correction_is_applied :
+                            arr_read_count = df[ "read_count" ].values.astype( float ) # retrieve "read_count" values # convert to the float datatype
+                            for i, int_len in enumerate( df[ "int_total_aligned_length" ].values ) : # apply size-distribution correction
+                                arr_read_count[ i ] *= arr_ratio_to_ref[ int_len ]
+                            df[ "read_count" ] = arr_read_count
+                        
+                        ''' dropping columns that are not required for groupby operations '''
+                        set_col_to_retain = set( l_col_for_groupby_operation + [ 'read_count' ] ) # set of columns to retain
+                        df.drop( columns = list( col for col in df.columns.values if col not in set_col_to_retain ), inplace = True )
+                        
+                        ''' perform groupby operation   '''
+                        df = getattr( df.groupby( l_col_for_groupby_operation ), 'sum' if flag_size_distribution_correction_is_applied else 'count' )( ) # calculate sum of weights for 'normalized counts', and calculate counts for 'raw counts'
+                        df.reset_index(drop=False, inplace=True) # reset index after groupby operation
+                            
+                        ''' compose count matrix '''
+                        if dict_rename_columns is not None : # rename columns
+                            df.rename( columns = dict_rename_columns, inplace=True )
+                        df[ 'id_feature' ] = func_set_id_feature if isinstance( func_set_id_feature, str ) else func_set_id_feature( df ) # set 'id_feature'
+                        df[ 'feature' ] = func_set_feature if isinstance( func_set_feature, str ) else func_set_feature( df ) # set 'feature'
+                        df = df[ l_col_df_count ]  # reorder columns
+                        return df # return the resulting dataframe containing count data
+                        
+                    def _process_gene_and_isoform_data( id_anno : str, dict_data : dict ):
                         """ # 2023-08-28 16:25:33 
                         Flush data for gene and isoform
                         assumes uniquely aligned reads
                         requires the following columns:
-                        l_col_for_counting = [ 'qname', 'mapq', 'flag', 'str_l_seg', 'CB', 'UB', 'TX', 'RE', 'int_flag_classification', 'id_tx_assigned_by_minimap2', 'l_name_variant' ]
+                        l_col_for_counting = [ 'qname', 'mapq', 'flag', 'str_l_seg', 'CB', 'UB', 'TX', 'RE', 'int_flag_classification', 'id_tx_assigned_by_minimap2', 'l_name_variant', 'int_total_aligned_length' ]
                         
                         id_anno # name of the annotation
                         dict_data # dictionary data of the annotation
                         """
                         float_time_start = time.time()  # record the start time
                         ''' initialize the output '''
-                        dict_output = {
-                            'bio_newfile_df_count' : BytesIO( ),
-                            'bio_newfile_df_analysis_statistics' : BytesIO( ),
-                        } # initialize the dictionary containing the outputs as binary stream objects
+                        dict_output = _initialize_dict_output( )
 
                         """ retrieve 'name_gene' """
                         (
@@ -6630,12 +6798,12 @@ def LongExportNormalizedCountMatrix(
                             attribute_anno,
                             name_anno,
                         ) = scidx["arr_data_df_gtf_gene"][
-                            scidx["dict_index_df_gtf_gene"][id_gene][0]
+                            scidx["dict_index_df_gtf_gene"][id_anno][0]
                         ]  # retrieve name_gene # 1-based
                         if isinstance(
                             name_anno, float
                         ):  # if 'name_gene' is not available, use id_gene as 'name_gene'
-                            name_anno = id_gene
+                            name_anno = id_anno
 
                         """ when using isoform assignment from minimap2 alignment """
                         # remove temporary files
@@ -6694,13 +6862,13 @@ def LongExportNormalizedCountMatrix(
 
                             """ count at gene-level """
                             df = df_read[
-                                ["qname", "mapq", "flag", "CB", "UB", "id_tx_assigned"]
+                                ["qname", "mapq", "flag", "CB", "UB", "id_tx_assigned", "int_total_aligned_length"]
                             ]
                             # remove records without cell barcodes
-                            df.loc[:, ["CB", "UB"]] = df[["CB", "UB"]].replace(
+                            df.loc[:, l_col_for_identifying_unique_molecules] = df[l_col_for_identifying_unique_molecules].replace(
                                 "", np.nan
                             )
-                            df.dropna(subset=["CB", "UB"], inplace=True)
+                            df.dropna(subset=l_col_for_identifying_unique_molecules, inplace=True)
 
                             # drop duplicates based on read name, and prioritize reads uniquely aligned to transcript sequences
                             df.sort_values(["id_tx_assigned"], inplace=True)
@@ -6721,28 +6889,18 @@ def LongExportNormalizedCountMatrix(
                                 """count and write gene annotation count data to the given file handle 'newfile_df_count'"""
                                 if len(df) == 0:  # detect empty dataframe
                                     return -1
-                                df_gene_count = df[["CB", "UB", "read_count"]]
-                                df_gene_count.drop_duplicates(
-                                    subset=["CB", "UB"], inplace=True
-                                )  # drop UMI duplicates
-                                df_gene_count.drop(columns=["UB"], inplace=True)
-                                df_gene_count = df_gene_count.groupby(
-                                    ["CB"]
-                                ).count()  # count UMI per cell
-                                df_gene_count.reset_index(drop=False, inplace=True)
-                                df_gene_count.rename(
-                                    columns={"CB": "barcode"}, inplace=True
-                                )
-                                df_gene_count["feature"] = feature  # name_gene
-                                df_gene_count["id_feature"] = id_feature  # id_gene
-
-                                # write a count data for the current annotation to a file
-                                df_gene_count = df_gene_count[
-                                    ["barcode", "feature", "id_feature", "read_count"]
-                                ]  # reorder columns
-                                df_gene_count.to_csv(
-                                    dict_output[ 'bio_newfile_df_count' ], sep="\t", header=None, index=False
-                                )
+                                df_count = df[ l_col_for_identifying_unique_molecules + [ "read_count", "int_total_aligned_length" ] ] # subset the data
+                                ''' create normalized count matrix '''
+                                for t_distribution_range_of_interest in l_t_distribution_range_of_interest : # for each 't_distribution_range_of_interest', compose output
+                                    _apply_size_distribution_correction_and_export_count_matrix( 
+                                        df_count, 
+                                        t_distribution_range_of_interest = t_distribution_range_of_interest, 
+                                        l_col_for_dropping_duplicates = l_col_for_identifying_unique_molecules, 
+                                        l_col_for_groupby_operation = [ 'CB' ], 
+                                        dict_rename_columns = {"CB": "barcode"}, 
+                                        func_set_id_feature = id_feature, 
+                                        func_set_feature = feature
+                                    ).to_csv( dict_output[ 'dict_t_distribution_range_of_interest_to_bio_newfile_df_count' ][ t_distribution_range_of_interest ], sep="\t", header=None, index=False )
 
                             """ count strand specific reads """
                             flag_valid_strand_info = strand_anno in [
@@ -6803,49 +6961,29 @@ def LongExportNormalizedCountMatrix(
 
                             """ count at transcript-level (currently counts reads aligned to both sense and antisense strands) """
                             # count read for each cell
-                            df.dropna(
-                                subset=["id_tx_assigned"], inplace=True
-                            )  # retrieve reads uniquely aligned to a single transcript
+                            df.dropna( subset=["id_tx_assigned"], inplace=True )  # retrieve reads uniquely aligned to a single transcript
                             
                             df_tx_count = df[
-                                ["CB", "UB", "id_tx_assigned", "read_count"]
+                                ["CB", "UB", "id_tx_assigned", "read_count", "int_total_aligned_length"]
                             ]
                             if len(df_tx_count) > 0:  # if a valid isoform count exists
-                                df_tx_count.drop_duplicates(
-                                    subset=["CB", "UB", "id_tx_assigned"], inplace=True
-                                )  # drop UMI duplicates
-                                df_tx_count = df_tx_count.groupby(
-                                    ["CB", "id_tx_assigned"]
-                                ).count()  # count UMI per unique transcript per cell
-                                df_tx_count.reset_index(drop=False, inplace=True)
-                                df_tx_count.drop(columns=["UB"], inplace=True)
-                                df_tx_count.rename(
-                                    columns={
-                                        "CB": "barcode",
-                                        "id_tx_assigned": "feature",
-                                    },
-                                    inplace=True,
-                                )
-                                df_tx_count["id_feature"] = df_tx_count.feature
-                                df_tx_count["feature"] = (
-                                    name_anno
-                                    + "|tx_name="
-                                    + df_tx_count.feature.apply(
-                                        MAP.Map(
-                                            scidx["dict_id_tx_to_name_tx"]
-                                        ).a2b_if_mapping_available_else_Map_a2a
-                                    )
-                                    + "|tx_id="
-                                    + df_tx_count.feature
-                                )
-
-                                # write a count data for the current annotation to a file
-                                df_tx_count = df_tx_count[
-                                    l_col_df_count
-                                ]  # reorder columns
-                                df_tx_count.to_csv(
-                                    dict_output[ 'bio_newfile_df_count' ], sep="\t", header=None, index=False
-                                )
+                                ''' functions for mapping identifiers '''
+                                def _tx__func_set_id_feature( df ) :
+                                    return df["id_tx_assigned"].values
+                                mapping = MAP.Map( scidx["dict_id_tx_to_name_tx"] ).a2b_if_mapping_available_else_Map_a2a # retrieve mapping
+                                def _tx__func_set_feature( df ) :
+                                    return name_anno + "|tx_name=" + df["id_tx_assigned"].apply( mapping ) + "|tx_id=" + df["id_tx_assigned"]
+                                ''' create normalized count matrix '''
+                                for t_distribution_range_of_interest in l_t_distribution_range_of_interest : # for each 't_distribution_range_of_interest', compose output
+                                    _apply_size_distribution_correction_and_export_count_matrix( 
+                                        df_tx_count, 
+                                        t_distribution_range_of_interest = None, 
+                                        l_col_for_dropping_duplicates = l_col_for_identifying_unique_molecules + [ 'id_tx_assigned' ], 
+                                        l_col_for_groupby_operation = [ "CB", "id_tx_assigned" ], 
+                                        dict_rename_columns = {"CB": "barcode"}, 
+                                        func_set_id_feature = _tx__func_set_id_feature, 
+                                        func_set_feature = _tx__func_set_feature
+                                    ).to_csv( dict_output[ 'dict_t_distribution_range_of_interest_to_bio_newfile_df_count' ][ t_distribution_range_of_interest ], sep="\t", header=None, index=False )
 
                             """ count gene/transcript counts for each detected variant """
                             if (
@@ -6864,10 +7002,10 @@ def LongExportNormalizedCountMatrix(
                                     ]
                                 ]
                                 # remove records without cell barcodes
-                                df.loc[:, ["CB", "UB"]] = df[["CB", "UB"]].replace(
+                                df.loc[:, l_col_for_identifying_unique_molecules] = df[l_col_for_identifying_unique_molecules].replace(
                                     "", np.nan
                                 )
-                                df.dropna(subset=["CB", "UB"], inplace=True)
+                                df.dropna(subset=l_col_for_identifying_unique_molecules, inplace=True)
                                 df.sort_values(
                                     ["l_name_variant", "id_tx_assigned"],
                                     ascending=False,
@@ -6930,7 +7068,7 @@ def LongExportNormalizedCountMatrix(
                                             refname + ":" + str_refpos,
                                         )  # update interval tree for searching variant using intervals
                                     """ retrieve a list of unique molecules for each variant information """
-                                    dict_unique_molecule_for_each_variant_counter = (
+                                    dict_unique_molecule_to_max_molecule_size = (
                                         dict()
                                     )
                                     for (
@@ -6939,6 +7077,7 @@ def LongExportNormalizedCountMatrix(
                                         UB,
                                         id_tx_assigned,
                                         l_name_variant,
+                                        int_total_aligned_length,
                                     ) in df[
                                         [
                                             "str_l_seg",
@@ -6946,6 +7085,7 @@ def LongExportNormalizedCountMatrix(
                                             "UB",
                                             "id_tx_assigned",
                                             "l_name_variant",
+                                            "int_total_aligned_length"
                                         ]
                                     ].values:
                                         set_name_variant = (
@@ -6984,25 +7124,17 @@ def LongExportNormalizedCountMatrix(
                                                 CB,
                                                 UB,
                                                 id_allele,
-                                                id_gene,
+                                                id_anno,
                                                 flag_read_contains_id_allele_ref,
                                                 id_allele_ref,
                                             )
-                                            if (
-                                                t
-                                                not in dict_unique_molecule_for_each_variant_counter
-                                            ):
-                                                dict_unique_molecule_for_each_variant_counter[
-                                                    t
-                                                ] = 0
-                                            dict_unique_molecule_for_each_variant_counter[
-                                                t
-                                            ] += 1
+                                            if t not in dict_unique_molecule_to_max_molecule_size :
+                                                dict_unique_molecule_to_max_molecule_size[ t ] = int_total_aligned_length
+                                            elif int_total_aligned_length > dict_unique_molecule_to_max_molecule_size[ t ] : 
+                                                dict_unique_molecule_to_max_molecule_size[ t ] = int_total_aligned_length
 
                                             """ count at transcript-level """
-                                            if isinstance(
-                                                id_tx_assigned, str
-                                            ):  # if valid id_tx_assigned exists
+                                            if isinstance( id_tx_assigned, str ):  # if valid id_tx_assigned exists
                                                 t = (
                                                     CB,
                                                     UB,
@@ -7011,116 +7143,52 @@ def LongExportNormalizedCountMatrix(
                                                     flag_read_contains_id_allele_ref,
                                                     id_allele_ref,
                                                 )
-                                                if (
-                                                    t
-                                                    not in dict_unique_molecule_for_each_variant_counter
-                                                ):
-                                                    dict_unique_molecule_for_each_variant_counter[
-                                                        t
-                                                    ] = 0
-                                                dict_unique_molecule_for_each_variant_counter[
-                                                    t
-                                                ] += 1
+                                                if t not in dict_unique_molecule_to_max_molecule_size :
+                                                    dict_unique_molecule_to_max_molecule_size[ t ] = int_total_aligned_length
+                                                elif int_total_aligned_length > dict_unique_molecule_to_max_molecule_size[ t ] : 
+                                                    dict_unique_molecule_to_max_molecule_size[ t ] = int_total_aligned_length
 
-                                    if (
-                                        len(
-                                            dict_unique_molecule_for_each_variant_counter
-                                        )
-                                        > 0
-                                    ):
+                                    if ( len( dict_unique_molecule_to_max_molecule_size ) > 0 ):
                                         """compose a count matrix of molecules containing genomic variants"""
+                                        ''' prepare df_var_count '''
                                         df_var_count = pd.Series(
-                                            dict_unique_molecule_for_each_variant_counter
+                                            dict_unique_molecule_to_max_molecule_size
                                         ).reset_index(drop=False)
                                         df_var_count.columns = [
                                             "barcode",
-                                            "read_count",
+                                            "str_umi",
                                             "id_var",
                                             "id_feature",
                                             "flag_read_contains_id_allele_ref",
                                             "id_allele_ref",
-                                            "int_num_unique_molecule_duplicate_count",
-                                        ]  # UMI column will be transformed to the read_count column after the pd.groupby.count( ) operation
-                                        df_var_count.drop(
-                                            columns=[
-                                                "int_num_unique_molecule_duplicate_count"
-                                            ],
-                                            inplace=True,
-                                        )
-                                        df_var_count.sort_values(
-                                            "flag_read_contains_id_allele_ref",
-                                            inplace=True,
-                                        )  # put read that does not contains id_allele_ref at the front of the dataframe
-                                        df_var_count.drop_duplicates(
-                                            subset=[
-                                                "barcode",
-                                                "read_count",
-                                                "id_feature",
-                                                "id_allele_ref",
-                                            ],
-                                            keep="first",
-                                            inplace=True,
-                                        )  # drop invalid record that contains variants but simultaneously annotated as containing id_allele_ref due to the presence of multiple alleles at that position
-                                        df_var_count = df_var_count.groupby(
-                                            ["barcode", "id_var", "id_feature"]
-                                        ).count()
-                                        df_var_count.reset_index(
-                                            drop=False, inplace=True
-                                        )
+                                            "int_total_aligned_length",
+                                        ]
+                                        df_var_count[ 'read_count' ] = 1 # initialize 'read_count' column
+                                        df_var_count.sort_values( "flag_read_contains_id_allele_ref", inplace=True, )  # put read that does not contains id_allele_ref at the front of the dataframe # for some cases, molecules with same barcode and umi has different alleles, due to PCR chimera formation and sequencing errors. assuming variants are more rare, variants are prioritized over reference alleles to increase the sensitivity. 
+                                        
+                                        ''' function for annotating the count matrix '''
+                                        """ retrieve id_feature > feature mapping (for both gene and transcripts) """
+                                        l_id_tx = list( id_tx for id_tx in df.id_tx_assigned.dropna().unique() )  # retrieve list of 'id_tx' in the dataframe for counting variants
+                                        dict_id_feature_to_feature = dict( ( id_tx, name_anno + "|tx_name=" + ( scidx["dict_id_tx_to_name_tx"][ id_tx ] if id_tx in scidx["dict_id_tx_to_name_tx"] else id_tx ) + "|tx_id=" + id_tx, ) for id_tx in l_id_tx )  # id_feature > feature mapping for transcripts
+                                        dict_id_feature_to_feature[ id_anno ] = name_anno  # id_feature > feature mapping for the current gene
+                                        mapping = MAP.Map(dict_id_feature_to_feature).a2b
+                                        def _g_tx_var__func_set_id_feature( df ) :
+                                            """ compose feature ('id_feature') """
+                                            return df.id_feature.apply( mapping ) + "|var_name=" + df.id_var # add 'id_var' as 'var_name' to the feature (name of feature)
+                                        def _g_tx_var__func_set_feature( df ) :
+                                            return df[ 'id_feature' ]
 
-                                        """ retrieve id_feature > feature mapping """
-                                        l_id_tx = list(
-                                            id_tx
-                                            for id_tx in df.id_tx_assigned.dropna().unique()
-                                        )  # retrieve list of 'id_tx' in the dataframe for counting variants
-                                        dict_id_feature_to_feature = dict(
-                                            (
-                                                id_tx,
-                                                name_anno
-                                                + "|tx_name="
-                                                + (
-                                                    scidx["dict_id_tx_to_name_tx"][
-                                                        id_tx
-                                                    ]
-                                                    if id_tx
-                                                    in scidx["dict_id_tx_to_name_tx"]
-                                                    else id_tx
-                                                )
-                                                + "|tx_id="
-                                                + id_tx,
-                                            )
-                                            for id_tx in l_id_tx
-                                        )  # id_feature > feature mapping for transcripts
-                                        dict_id_feature_to_feature[
-                                            id_gene
-                                        ] = name_anno  # id_feature > feature mapping for the current gene
-                                        """ compose feature ('name_feature') """
-                                        df_var_count[
-                                            "feature"
-                                        ] = df_var_count.id_feature.apply(
-                                            MAP.Map(dict_id_feature_to_feature).a2b
-                                        )
-                                        df_var_count["feature"] = (
-                                            df_var_count.feature
-                                            + "|var_name="
-                                            + df_var_count.id_var
-                                        )  # add 'id_var' as 'var_name' to the feature (name of feature)
-                                        df_var_count[
-                                            "id_feature"
-                                        ] = (
-                                            df_var_count.feature
-                                        )  # for variant counts, use feature (name) as id_feature
-
-                                        # write a count data for the current annotation to an output file
-                                        df_var_count = df_var_count[
-                                            l_col_df_count
-                                        ]  # reorder columns
-                                        df_var_count.to_csv(
-                                            dict_output[ 'bio_newfile_df_count' ],
-                                            sep="\t",
-                                            header=None,
-                                            index=False,
-                                        )
+                                        ''' create normalized count matrix '''
+                                        for t_distribution_range_of_interest in l_t_distribution_range_of_interest : # for each 't_distribution_range_of_interest', compose output
+                                            _apply_size_distribution_correction_and_export_count_matrix( 
+                                                df, 
+                                                t_distribution_range_of_interest = None, 
+                                                l_col_for_dropping_duplicates = [ "barcode", "str_umi", "id_feature", "id_allele_ref", ], # dropping duplicates for each reference allele for each transcript or the current gene
+                                                l_col_for_groupby_operation = ["barcode", "id_var", "id_feature"], # groupby operations for each transcript or the current gene
+                                                dict_rename_columns = None, 
+                                                func_set_id_feature = _g_tx_var__func_set_id_feature, 
+                                                func_set_feature = _g_tx_var__func_set_feature
+                                            ).to_csv( dict_output[ 'dict_t_distribution_range_of_interest_to_bio_newfile_df_count' ][ t_distribution_range_of_interest ], sep="\t", header=None, index=False )
                                         del df_var_count
                                     else:
                                         """debug"""
@@ -7132,7 +7200,7 @@ def LongExportNormalizedCountMatrix(
                                         )
                                     del (
                                         it_var,
-                                        dict_unique_molecule_for_each_variant_counter,
+                                        dict_unique_molecule_to_max_molecule_size,
                                     )
                                 del str_id_var_concatenated, l_id_var
                             # release memory
@@ -7153,7 +7221,7 @@ def LongExportNormalizedCountMatrix(
                                             str,
                                             [
                                                 str_uuid,
-                                                id_gene,
+                                                id_anno,
                                                 dict_data["wall_time"],
                                                 int_num_record,
                                             ],
@@ -7178,10 +7246,7 @@ def LongExportNormalizedCountMatrix(
                         """
                         float_time_start = time.time()  # record the start time
                         ''' initialize the output '''
-                        dict_output = {
-                            'bio_newfile_df_count' : BytesIO( ),
-                            'bio_newfile_df_analysis_statistics' : BytesIO( ),
-                        } # initialize the dictionary containing the outputs as binary stream objects
+                        dict_output = _initialize_dict_output( )
 
                         int_num_record = len(
                             dict_data["l_read"]
@@ -7210,7 +7275,7 @@ def LongExportNormalizedCountMatrix(
                             ):  # for 'variant' annotation type, exporting counts of all reads with all variants will be skipped
                                 """retain unique reads"""
                                 df = df_read[
-                                    ["qname", "flag"]
+                                    ["qname", "flag", 'int_total_aligned_length']
                                     + l_col_for_identifying_unique_molecules
                                 ]
                                 # remove records without cell barcodes
@@ -7253,53 +7318,22 @@ def LongExportNormalizedCountMatrix(
                                 ):  # if 'name_anno' is not available, use id_anno as 'name_anno'
                                     name_anno = id_anno
 
-                                def __Count_and_Write_misc_anno_data__(
-                                    df,
-                                    id_anno,
-                                    name_anno,
-                                ):
+                                def __Count_and_Write_misc_anno_data__( df, id_anno, name_anno, ):
                                     """count and write misc anno data to the given file handle 'newfile_df_count'"""
                                     if len(df) == 0:  # detect empty dataframe
                                         return -1
-                                    df_count = df[
-                                        l_col_for_identifying_unique_molecules
-                                        + ["read_count"]
-                                    ]  # compose 'df_count'
-                                    df_count.drop_duplicates(
-                                        subset=l_col_for_identifying_unique_molecules,
-                                        inplace=True,
-                                    )  # drop UMI duplicates
-                                    df_count.drop(
-                                        columns=l_col_for_identifying_unique_molecules[
-                                            1:
-                                        ],
-                                        inplace=True,
-                                    )
-                                    df_count = df_count.groupby(
-                                        ["CB"]
-                                    ).count()  # count UMI per cell
-                                    df_count.reset_index(drop=False, inplace=True)
-                                    df_count.rename(
-                                        columns={"CB": "barcode"}, inplace=True
-                                    )
-                                    df_count["id_feature"] = id_anno
-                                    df_count["feature"] = name_anno
-
-                                    # write a count data for the current annotation to a file
-                                    df_count = df_count[
-                                        [
-                                            "barcode",
-                                            "feature",
-                                            "id_feature",
-                                            "read_count",
-                                        ]
-                                    ]  # reorder columns
-                                    df_count.to_csv(
-                                        dict_output[ 'bio_newfile_df_count' ],
-                                        sep="\t",
-                                        header=None,
-                                        index=False,
-                                    )
+                                    df_count = df[ l_col_for_identifying_unique_molecules + [ "read_count", "int_total_aligned_length" ] ] # subset the data
+                                    ''' create normalized count matrix '''
+                                    for t_distribution_range_of_interest in l_t_distribution_range_of_interest : # for each 't_distribution_range_of_interest', compose output
+                                        _apply_size_distribution_correction_and_export_count_matrix( 
+                                            df_count, 
+                                            t_distribution_range_of_interest = t_distribution_range_of_interest, 
+                                            l_col_for_dropping_duplicates = l_col_for_identifying_unique_molecules, 
+                                            l_col_for_groupby_operation = [ 'CB' ], 
+                                            dict_rename_columns = {"CB": "barcode"}, 
+                                            func_set_id_feature = id_anno, 
+                                            func_set_feature = name_anno
+                                        ).to_csv( dict_output[ 'dict_t_distribution_range_of_interest_to_bio_newfile_df_count' ][ t_distribution_range_of_interest ], sep="\t", header=None, index=False )
 
                                 __Count_and_Write_misc_anno_data__(
                                     df,
@@ -7412,19 +7446,20 @@ def LongExportNormalizedCountMatrix(
                                             refname + ":" + str_refpos,
                                         )  # update interval tree for searching variant using intervals
                                     """ retrieve a list of unique molecules for each variant information """
-                                    dict_unique_molecule_for_each_variant_counter = (
+                                    dict_unique_molecule_to_max_molecule_size = (
                                         dict()
                                     )
                                     for arr in df[
-                                        ["str_l_seg", "l_name_variant"]
+                                        ["str_l_seg", "l_name_variant", "int_total_aligned_length" ]
                                         + l_col_for_identifying_unique_molecules
                                     ].values:
                                         (
                                             str_l_seg,
                                             l_name_variant,
+                                            int_total_aligned_length,
                                             CB,
                                             t_unique_identifier_for_a_cell,
-                                        ) = (arr[0], arr[1], arr[2], tuple(arr[3:]))
+                                        ) = (arr[0], arr[1], arr[2], arr[3], tuple(arr[4:]))
                                         set_name_variant = (
                                             set(l_name_variant.split(";"))
                                             if len(l_name_variant) > 0
@@ -7463,81 +7498,45 @@ def LongExportNormalizedCountMatrix(
                                                 flag_read_contains_id_allele_ref,
                                                 id_allele_ref,
                                             )  # this tuple represent a unique molecule with a specific variant.
-                                            if (
-                                                t
-                                                not in dict_unique_molecule_for_each_variant_counter
-                                            ):
-                                                dict_unique_molecule_for_each_variant_counter[
-                                                    t
-                                                ] = 0
-                                            dict_unique_molecule_for_each_variant_counter[
-                                                t
-                                            ] += 1
-
-                                    if (
-                                        len(
-                                            dict_unique_molecule_for_each_variant_counter
-                                        )
-                                        > 0
-                                    ):
+                                            if t not in dict_unique_molecule_to_max_molecule_size :
+                                                dict_unique_molecule_to_max_molecule_size[ t ] = int_total_aligned_length
+                                            elif int_total_aligned_length > dict_unique_molecule_to_max_molecule_size[ t ] : 
+                                                dict_unique_molecule_to_max_molecule_size[ t ] = int_total_aligned_length
+                                                
+                                    if len( dict_unique_molecule_to_max_molecule_size ) > 0 :
                                         """compose a count matrix of molecules containing genomic variants"""
+                                        ''' prepare df_var_count '''
                                         df_var_count = pd.Series(
-                                            dict_unique_molecule_for_each_variant_counter
+                                            dict_unique_molecule_to_max_molecule_size
                                         ).reset_index(drop=False)
                                         df_var_count.columns = [
                                             "barcode",
-                                            "read_count",
+                                            "t_unique_identifier_for_a_cell",
                                             "id_var",
                                             "flag_read_contains_id_allele_ref",
                                             "id_allele_ref",
-                                            "int_num_unique_molecule_duplicate_count",
-                                        ]  # UMI column will be transformed to the read_count column after the pd.groupby.count( ) operation. Therefore, column name was changed.
-                                        df_var_count.drop(
-                                            columns=[
-                                                "int_num_unique_molecule_duplicate_count"
-                                            ],
-                                            inplace=True,
-                                        )
-                                        df_var_count.sort_values(
-                                            "flag_read_contains_id_allele_ref",
-                                            inplace=True,
-                                        )  # put read that does not contains id_allele_ref at the front of the dataframe
-                                        df_var_count.drop_duplicates(
-                                            subset=[
-                                                "barcode",
-                                                "read_count",
-                                                "id_allele_ref",
-                                            ],
-                                            keep="first",
-                                            inplace=True,
-                                        )  # drop invalid record that contains variants but simultaneously annotated as containing id_allele_ref due to the presence of multiple alleles at that position (this happens due to index hopping or cell-barcode hopping. Considering the allele frequency of the variant is lower than that of the reference allele) # UMI column will be transformed to the read_count column after the pd.groupby.count( ) operation. Therefore, column name was changed.
-                                        df_var_count = df_var_count.groupby(
-                                            ["barcode", "id_var"]
-                                        ).count()
-                                        df_var_count.reset_index(
-                                            drop=False, inplace=True
-                                        )
+                                            "int_total_aligned_length",
+                                        ] 
+                                        df_var_count[ 'read_count' ] = 1 # initialize 'read_count' column
+                                        df_var_count.sort_values( "flag_read_contains_id_allele_ref", inplace=True, )  # put read that does not contains id_allele_ref at the front of the dataframe # for some cases, molecules with same barcode and umi has different alleles, due to PCR chimera formation and sequencing errors. assuming variants are more rare, variants are prioritized over reference alleles to increase the sensitivity. 
 
-                                        """ compose feature ('name_feature') """
-                                        df_var_count["feature"] = (
-                                            id_anno + "|var_name=" + df_var_count.id_var
-                                        )  # add 'id_var' as 'var_name' to the feature (name of feature)
-                                        df_var_count[
-                                            "id_feature"
-                                        ] = (
-                                            df_var_count.feature
-                                        )  # for variant counts, use feature (name) as id_feature
+                                        ''' function for annotating the count matrix '''
+                                        def _misc_var__func_set_id_feature( df ) :
+                                            return id_anno + "|var_name=" + df.id_var # add 'id_var' as 'var_name' to the feature (name of feature)
+                                        def _misc_var__func_set_feature( df ) :
+                                            return df[ 'id_feature' ]
 
-                                        # write a count data for the current annotation to an output file
-                                        df_var_count = df_var_count[
-                                            l_col_df_count
-                                        ]  # reorder columns
-                                        df_var_count.to_csv(
-                                            dict_output[ "bio_newfile_df_count" ],
-                                            sep="\t",
-                                            header=None,
-                                            index=False,
-                                        )
+                                        ''' create normalized count matrix '''
+                                        for t_distribution_range_of_interest in l_t_distribution_range_of_interest : # for each 't_distribution_range_of_interest', compose output
+                                            _apply_size_distribution_correction_and_export_count_matrix( 
+                                                df_var_count, 
+                                                t_distribution_range_of_interest = None, 
+                                                l_col_for_dropping_duplicates = [ "barcode", "t_unique_identifier_for_a_cell", "id_allele_ref", ], # dropping duplicates for each reference allele
+                                                l_col_for_groupby_operation = [ "barcode", "id_var" ], # groupby for each variant detected
+                                                dict_rename_columns = None, 
+                                                func_set_id_feature = _misc_var__func_set_id_feature, 
+                                                func_set_feature = _misc_var__func_set_feature
+                                            ).to_csv( dict_output[ 'dict_t_distribution_range_of_interest_to_bio_newfile_df_count' ][ t_distribution_range_of_interest ], sep="\t", header=None, index=False )
                                         del df_var_count
                                     else:
                                         """debug"""
@@ -7549,7 +7548,7 @@ def LongExportNormalizedCountMatrix(
                                         )
                                     del (
                                         it_var,
-                                        dict_unique_molecule_for_each_variant_counter,
+                                        dict_unique_molecule_to_max_molecule_size,
                                     )
                                 del str_id_var_concatenated, l_id_var
                             # release memory
@@ -7589,19 +7588,21 @@ def LongExportNormalizedCountMatrix(
                             l_dict_output.append( dict_output ) # collect the result
                         return l_dict_output # return the collected result
                     
+                    l_newfile = list( dict_t_distribution_range_of_interest_to_newfile_df_count[ e ] for e in l_t_distribution_range_of_interest ) + [ newfile_df_analysis_statistics ] # compose a linear list of file handles for output TSV files
                     def _post_process_buckets( l_dict_output : List[ dict ] ) :
-                        """ # 2023-08-12 16:11:02 
+                        """ # 2023-08-30 12:22:32 
                         perform post-processing of the bucket analysis result
                         (1) write the result of the processed bucket and (2) update the summary metrics using the analysis result of the bucket.
                         """
                         for dict_output in l_dict_output : # for each output
+                            dict_output_count = dict_output[ 'dict_t_distribution_range_of_interest_to_bio_newfile_df_count' ]
                             # export the output
                             for b, f in zip( 
-                                [ dict_output[ 'bio_newfile_df_count' ], dict_output[ 'bio_newfile_df_analysis_statistics' ], ],
-                                [ newfile_df_count, newfile_df_analysis_statistics, ]
-                            ) :
+                                list( dict_output_count[ e ] for e in l_t_distribution_range_of_interest ) + [ dict_output[ 'bio_newfile_df_analysis_statistics' ], ],
+                                l_newfile,
+                            ) : # map the list of output file handle and bytes streams in 'dict_output'
                                 b.seek( 0 ) # rewind the tape
-                                shutil.copyfileobj( b, f, length = 131072 ) # write the buffer to the file # 2 ** 17 = 131072
+                                shutil.copyfileobj( b, f, length = 131072 ) # write the buffer to the file # using buffer size of '2 ** 17 = 131072'
 
                     def _write_results_from_offloaded_works( flag_wait_all : bool = False ) :
                         """ # 2023-08-28 23:20:22 
@@ -8663,6 +8664,7 @@ def LongExportNormalizedCountMatrix(
                                         id_reg,
                                         id_promoter,
                                         str_l_var,
+                                        int_total_aligned_length,
                                     ]  # refstart in 1-based coordinate
                                 else:
                                     l_data = [
@@ -8698,6 +8700,7 @@ def LongExportNormalizedCountMatrix(
                                         int_base_reg_count,
                                         id_tx_assigned_by_minimap2,
                                         str_l_var,
+                                        int_total_aligned_length,
                                     ]  # refstart in 1-based coordinate # use 'str_umi_uncorrected' if 'str_umi_corrected' does not exist
                                 l_data_for_counting = list(
                                     l_data[index_col]
@@ -8870,11 +8873,13 @@ def LongExportNormalizedCountMatrix(
                             int_n_sam_record_count
                         )  # report the number of processed sam records
 
+                    ''' close output files '''
                     if not flag_skip_read_analysis_summary_output_bam_file:
                         newsamfile.close()
                     if not flag_skip_read_analysis_summary_output_tsv_file:
                         newfile.close()
-                    newfile_df_count.close()
+                    for e in dict_t_distribution_range_of_interest_to_newfile_df_count :
+                        dict_t_distribution_range_of_interest_to_newfile_df_count[ e ].close()
                     newfile_df_analysis_statistics.close()
                     pipe_sender.send( 'completed' ) # report the worker has completed all works
                     if verbose:
@@ -8915,6 +8920,29 @@ def LongExportNormalizedCountMatrix(
                 def export_count_matrix():  # off-loading a single-core work
                     logger.info(
                         f"[{path_file_bam_input}] Exporting count matrix started."
+                    )
+
+                    ''' combine count files '''
+                    l_col_df_count = ["barcode", "feature", "id_feature", "read_count"]
+                    for t_distribution_range_of_interest in l_t_distribution_range_of_interest : # for each 't_distribution_range_of_interest'
+                        str_suffix = f"count.size_distribution__{_t_distribution_range_of_interest_to_str( t_distribution_range_of_interest )}.tsv.gz" # compose the suffix of the files belonging to the 't_distribution_range_of_interest'
+                        bk.OS_FILE_Combine_Files_in_order(
+                            glob.glob(
+                                f"{path_folder_temp}*.{str_suffix}"
+                            ), # retrieve the list of input file paths
+                            f"{path_folder_output}df_{str_suffix}",
+                            header="\t".join(l_col_df_count) + "\n",
+                            delete_input_files=True,
+                            overwrite_existing_file=True,
+                        )
+                    ''' combine other files '''
+                    l_col_df_stat = ["str_uuid", "id_anno", "wall_time", "int_n_reads"]
+                    bk.OS_FILE_Combine_Files_in_order(
+                        glob.glob(f"{path_folder_temp}*.analysis_statistics.tsv.gz"),
+                        f"{path_folder_output}analysis_statistics.tsv.gz",
+                        header="\t".join(l_col_df_stat) + "\n",
+                        delete_input_files=True,
+                        overwrite_existing_file=True,
                     )
                     # combine results into a single output file (initial read analysis)
                     if not flag_skip_read_analysis_summary_output_tsv_file:
@@ -9007,33 +9035,21 @@ def LongExportNormalizedCountMatrix(
                             delete_input_files=True,
                             overwrite_existing_file=True,
                         )
-                    l_col_df_count = ["barcode", "feature", "id_feature", "read_count"]
-                    bk.OS_FILE_Combine_Files_in_order(
-                        glob.glob(
-                            f"{path_folder_temp}*.count.gene_and_transcript.tsv.gz"
-                        ),
-                        f"{path_folder_output}df_count.gene_and_transcript.tsv.gz",
-                        header="\t".join(l_col_df_count) + "\n",
-                        delete_input_files=True,
-                        overwrite_existing_file=True,
-                    )
-                    l_col_df_stat = ["str_uuid", "id_anno", "wall_time", "int_n_reads"]
-                    bk.OS_FILE_Combine_Files_in_order(
-                        glob.glob(f"{path_folder_temp}*.analysis_statistics.tsv.gz"),
-                        f"{path_folder_output}analysis_statistics.tsv.gz",
-                        header="\t".join(l_col_df_stat) + "\n",
-                        delete_input_files=True,
-                        overwrite_existing_file=True,
-                    )
 
-                    # export_count_matrix
-                    Convert_df_count_to_MTX_10X(
-                        path_file_df_count=f"{path_folder_output}df_count.gene_and_transcript.tsv.gz",
-                        path_folder_mtx_10x_output=f"{path_folder_output}raw_feature_bc_matrix/",
-                        path_folder_mtx_10x_filtered_output=f"{path_folder_output}filtered_feature_bc_matrix/",
-                        chunksize=1000000,
-                        int_min_count_features_for_filtering_barcodes=int_min_count_features_for_filtering_barcodes,
-                    )  # export count matrix as a 10X MTX object
+                    ''' export_count_matrix '''
+                    for t_distribution_range_of_interest in l_t_distribution_range_of_interest : # for each 't_distribution_range_of_interest'
+                        str_t_distribution_range_of_interest = _t_distribution_range_of_interest_to_str( t_distribution_range_of_interest ) # retrieve string representation of 't_distribution_range_of_interest'
+                        str_suffix = f"count.size_distribution__{str_t_distribution_range_of_interest}.tsv.gz" # compose the suffix of the files belonging to the 't_distribution_range_of_interest'
+                        path_folder_mtx = f"{path_folder_output}mtx/{str_t_distribution_range_of_interest}/" # compose the output folder
+                        os.makedirs( path_folder_mtx, exist_ok = True ) # create the output folder
+                        Convert_df_count_to_MTX_10X(
+                            path_file_df_count=f"{path_folder_output}df_{str_suffix}",
+                            path_folder_mtx_10x_output=f"{path_folder_mtx}raw_feature_bc_matrix/",
+                            path_folder_mtx_10x_filtered_output=f"{path_folder_mtx}filtered_feature_bc_matrix/",
+                            chunksize=1000000,
+                            int_min_count_features_for_filtering_barcodes=int_min_count_features_for_filtering_barcodes,
+                        )  # export count matrix as a 10X MTX object
+                        
                     # write a flag indicating the count matrix is exported
                     os.mknod(f"{path_folder_output}count_matrix.export_completed.txt")
                     release_lock()  # release the lock
