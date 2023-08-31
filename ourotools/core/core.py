@@ -155,13 +155,11 @@ str_documentation = """
 documentation_date = '2023-07-30 15:57:49'
 """
 
-
 def _get_random_integer(int_num_possible_integers: int):
     """# 2023-01-09 18:18:37
     int_num_possible_integers : int # the number of integers to create. for example, when 'int_num_possible_integers' =  10, 0 ~ 9 will be randomly generated.
     """
     return int(np.floor(np.random.random() * int_num_possible_integers))
-
 
 def __chromosome_name_remove_chr__(str_name_chrom):
     """# 2023-01-06 00:38:25
@@ -176,7 +174,6 @@ def __chromosome_name_remove_chr__(str_name_chrom):
             return str_name_chrom
     else:
         return str_name_chrom
-
     
 def Call_Mutation_from_Read(
     path_file_input,
@@ -324,7 +321,6 @@ def Call_Mutation_from_Read(
                     )
 
     newfile.close()
-
 
 def Preprocess_and_Load_Annotations(
     path_folder_ref,
@@ -1815,13 +1811,13 @@ def Preprocess_and_Load_Annotations(
 
     return scidx
 
-
 def Convert_df_count_to_MTX_10X(
     path_file_df_count: str,
     path_folder_mtx_10x_output: str,
     path_folder_mtx_10x_filtered_output: str,
     chunksize: int = 1000000,
     int_min_count_features_for_filtering_barcodes: int = 50,
+    flag_output_dtype_is_integer : bool = True,
 ):
     """# 2023-01-06 23:46:20
     convert df_count (ouro output) to 10X MTX (matrix market) format in a memory-efficient manner.
@@ -1831,6 +1827,7 @@ def Convert_df_count_to_MTX_10X(
     path_folder_mtx_10x_filtered_output : str, # a folder containing 10x output matrix (filtered)
     chunksize : int = 500000,
     int_min_count_features_for_filtering_barcodes : int = 50, # the minimum number of features in a barcode to be included in the filtered output
+    flag_output_dtype_is_integer : bool = True, # a boolean flag indicating the output dtype is integer dtype. Set this flag to False if the output dtype is float
     """
     # create output folders
     os.makedirs(path_folder_mtx_10x_output, exist_ok=True)
@@ -1930,15 +1927,16 @@ def Convert_df_count_to_MTX_10X(
     )  # delete objects
 
     # write mtx file
+    str_dtype_mtx_header = 'integer' if flag_output_dtype_is_integer else 'real' # retrieve dtype name for the matrix header
     with gzip.open(f"{path_folder_mtx_10x_output}matrix.mtx.gz", "wb") as newfile:
         newfile.write(
-            f"""%%MatrixMarket matrix coordinate integer general\n%\n{int_num_features} {int_num_barcodes} {int_num_records}\n""".encode()
+            f"""%%MatrixMarket matrix coordinate {str_dtype_mtx_header} general\n%\n{int_num_features} {int_num_barcodes} {int_num_records}\n""".encode()
         )
         with gzip.open(
             f"{path_folder_mtx_10x_filtered_output}matrix.mtx.gz", "wb"
         ) as newfile_filtered:
             newfile_filtered.write(
-                f"""%%MatrixMarket matrix coordinate integer general\n%\n{int_num_features} {int_num_barcodes_filtered} {int_num_records_filtered}\n""".encode()
+                f"""%%MatrixMarket matrix coordinate {str_dtype_mtx_header} general\n%\n{int_num_features} {int_num_barcodes_filtered} {int_num_records_filtered}\n""".encode()
             )
 
             # iterate through each chunk
@@ -6999,6 +6997,7 @@ def LongExportNormalizedCountMatrix(
                                         "UB",
                                         "id_tx_assigned",
                                         "l_name_variant",
+                                        "int_total_aligned_length",
                                     ]
                                 ]
                                 # remove records without cell barcodes
@@ -7181,7 +7180,7 @@ def LongExportNormalizedCountMatrix(
                                         ''' create normalized count matrix '''
                                         for t_distribution_range_of_interest in l_t_distribution_range_of_interest : # for each 't_distribution_range_of_interest', compose output
                                             _apply_size_distribution_correction_and_export_count_matrix( 
-                                                df, 
+                                                df_var_count, 
                                                 t_distribution_range_of_interest = None, 
                                                 l_col_for_dropping_duplicates = [ "barcode", "str_umi", "id_feature", "id_allele_ref", ], # dropping duplicates for each reference allele for each transcript or the current gene
                                                 l_col_for_groupby_operation = ["barcode", "id_var", "id_feature"], # groupby operations for each transcript or the current gene
@@ -7366,7 +7365,7 @@ def LongExportNormalizedCountMatrix(
                             ):  # export variant information for 'variant' annotation type
                                 """compose a dataframe for counting molecules with variants"""
                                 df = df_read[
-                                    ["qname", "str_l_seg", "l_name_variant"]
+                                    ["qname", "str_l_seg", "l_name_variant", "int_total_aligned_length"]
                                     + l_col_for_identifying_unique_molecules
                                 ]
                                 # remove records without cell barcodes
@@ -9038,6 +9037,7 @@ def LongExportNormalizedCountMatrix(
 
                     ''' export_count_matrix '''
                     for t_distribution_range_of_interest in l_t_distribution_range_of_interest : # for each 't_distribution_range_of_interest'
+                        flag_output_dtype_is_integer = t_distribution_range_of_interest is None # output dtype is integer if the raw count matrix is exported.
                         str_t_distribution_range_of_interest = _t_distribution_range_of_interest_to_str( t_distribution_range_of_interest ) # retrieve string representation of 't_distribution_range_of_interest'
                         str_suffix = f"count.size_distribution__{str_t_distribution_range_of_interest}.tsv.gz" # compose the suffix of the files belonging to the 't_distribution_range_of_interest'
                         path_folder_mtx = f"{path_folder_output}mtx/{str_t_distribution_range_of_interest}/" # compose the output folder
@@ -9048,6 +9048,7 @@ def LongExportNormalizedCountMatrix(
                             path_folder_mtx_10x_filtered_output=f"{path_folder_mtx}filtered_feature_bc_matrix/",
                             chunksize=1000000,
                             int_min_count_features_for_filtering_barcodes=int_min_count_features_for_filtering_barcodes,
+                            flag_output_dtype_is_integer = flag_output_dtype_is_integer,
                         )  # export count matrix as a 10X MTX object
                         
                     # write a flag indicating the count matrix is exported
