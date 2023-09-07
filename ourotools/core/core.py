@@ -5779,9 +5779,8 @@ def LongExportNormalizedCountMatrix(
     if path_folder_reference_distribution is not None : # if 'path_folder_reference_distribution' has been given
         path_folder_reference_distribution = os.path.abspath( os.path.realpath( path_folder_reference_distribution ) ) + '/' # preprocess the path
         dict_output = bk.PICKLE_Read( f"{path_folder_reference_distribution}dict_output.pickle" ) # read reference distribution data
-        dict_name_sample_to_arr_ratio_to_ref = dict( ( name_sample, arr_ratio_to_ref ) for name_sample, arr_ratio_to_ref in zip( dict_ref_dist[ 'setting' ][ 'l_name_file_distributions' ], dict_ref_dist[ 'l_arr_ratio_to_ref' ] ) ) # map name_sample to correction ratio data
+        dict_name_sample_to_arr_ratio_to_ref = dict( ( name_sample, arr_ratio_to_ref ) for name_sample, arr_ratio_to_ref in zip( dict_output[ 'setting' ][ 'l_name_file_distributions' ], dict_output[ 'l_arr_ratio_to_ref' ] ) ) # map name_sample to correction ratio data
         del dict_output
-        
     # check whether reference distribution is used for normalization (check all the required arguments were given)
     flag_size_distribution_based_normalization_is_applied = not ( dict_name_sample_to_arr_ratio_to_ref is None or l_l_t_distribution_range_of_interest is None or l_name_distribution is None or len( l_name_distribution ) == 0 ) # retrieve a flag indicating whether size-distribution-based normalization will be applied
     if not flag_size_distribution_based_normalization_is_applied : # if size distribution normalization is not applied, put some dummy values into the list
@@ -6099,41 +6098,22 @@ def LongExportNormalizedCountMatrix(
                 """ if the output folder already exists """
                 if os.path.exists(path_folder_output):
                     """check whether the pipeline has been completed"""
-                    if (
-                        os.path.exists(
-                            f"{path_folder_output}filtered_feature_bc_matrix/matrix.mtx.gz"
-                        )
-                        and (
-                            not os.path.exists(
-                                f"{path_folder_output}raw_feature_bc_matrix/_barcodes.tsv.gz"
-                            )
-                        )
-                        and (
-                            not os.path.exists(
-                                f"{path_folder_output}raw_feature_bc_matrix/_features.tsv.gz"
-                            )
-                        )
-                    ):  # intermediate files should not exists, while all output files should exist
-                        logger.info(
-                            f"[Output folder Already Exists] the output folder {path_folder_output} contains a valid count matrix file. Therefore, the output folder will be skipped."
-                        )
+                    ''' # 2023-09-07 12:41:22 
+                    check whether valid count matrices has been exported
+                    '''
+                    if os.path.exists( f"{path_folder_output}count_matrix.export_completed.txt" ) : # check the presence of count matrix, which should be present if a typical run has been completed.
+                        logger.info( f"[Output folder Already Exists] the output folder {path_folder_output} contains a valid count matrix file. Therefore, the output folder will be skipped." )
                         continue  # skip if the pipeline has been completed for the output folder
                     else:
                         """if required output files does not exist or the an intermediate file exists, remove the entire output folder, and rerun Scarab"""
-                        if (
-                            len(glob.glob(f"{path_folder_output}*/")) > 0
-                        ):  # detect a folder inside the output folder and report the presence of the existing folders.
-                            logger.info(
-                                f"[Output folder Already Exists] the output folder {path_folder_output} does not contain a valid count matrix file. The output folder will be cleaned and the pipeline will start anew."
-                            )
-                        # delete the folders
+                        if ( len(glob.glob(f"{path_folder_output}*/")) > 0 ):  # detect a folder inside the output folder and report the presence of the existing folders.
+                            logger.info( f"[Output folder Already Exists] the output folder {path_folder_output} does not contain a valid count matrix file. The output folder will be cleaned and the pipeline will start anew." )
+                        # delete the folders inside the output folder
                         for path_folder in glob.glob(f"{path_folder_output}*/"):
                             shutil.rmtree(path_folder)
                         # delete the files, excluding the lock file
                         for path_file in glob.glob(f"{path_folder_output}*"):
-                            if (
-                                path_file_lock != path_file
-                            ):  # does not delete the lock file
+                            if ( path_file_lock != path_file ):  # does not delete the lock file
                                 os.remove(path_file)
 
                 """ create directories """
