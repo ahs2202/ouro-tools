@@ -34,6 +34,7 @@ setup(
         "intervaltree>=3.1.0",
         "matplotlib>=3.5.2",
         "mappy>=2.24",
+        "h5py>=3.8.0",
     ],
     entry_points={
         "console_scripts": [

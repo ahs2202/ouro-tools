@@ -87,7 +87,7 @@ logger = logging.getLogger("ouro-count")
 # define version
 _version_ = "0.0.1"
 _scelephant_version_ = _version_
-_last_modified_time_ = "2023-08-30 23:52:10"
+_last_modified_time_ = "2023-09-19 14:57:22"
 
 str_release_note = [
     """
@@ -100,6 +100,9 @@ str_release_note = [
     
     # 2023-08-30 23:51:34 
     draft version of 'LongExportNormalizedCountMatrix' function was completed. chromosome-level multiprocessing is used, and size-distribution-normalized count matrix can be exported for multiple size ranges of interest, along with the raw count matrix.
+
+    # 2023-09-19 12:38:25 
+    utility functions 'DeduplicateBAM' and 'SplitBAMs' was implemented. Currently, 'DeduplicateBAM' function selects the longest read with the same CB-UMI pair for each bucket (unique CB-UMI attachment location on the genome).
 
     ##### Future implementations #####
 
@@ -2110,6 +2113,12 @@ def _draw_bar_plot( df_bar, l_status : list, title : str = '', y_format : str = 
     else :
         return fig
     
+def _check_binary_flags( flags : int, int_bit_flag_position : int ) :
+    """ # 2023-08-08 22:47:02 
+    check a flag in the binary flags at the given position
+    """
+    return ( flags & ( 1 << int_bit_flag_position ) ) > 0 
+    
 def LongFilterNSplit(
     flag_usage_from_command_line_interface: bool = False,
     path_file_minimap_index_genome: Union[str, None] = None,
@@ -3090,7 +3099,7 @@ def LongExtractBarcodeFromBAM(
     int_size_bin_in_base_pairs_for_collecting_size_distributions_at_single_cell_level : int = 50, # the size of the bin (in base pairs) for collecting size distributions at the single-cell level
     verbose: bool = True,
 ) -> None :
-    """# 2023-08-23 22:44:23 
+    """# 2023-09-15 21:02:13 
     
     flag_usage_from_command_line_interface: bool = False, # a flag indicating the usage in the command line
     l_path_file_bam_input: Union[list, None] = None, # list of input BAM files
@@ -3354,12 +3363,6 @@ def LongExtractBarcodeFromBAM(
     'IA', 'i' : the length of detected internal poly(A) priming region in the genomic alignment. 
     'LE', 'i' : the total length of genomic regions that are actually covered by the read, excluding spliced introns (the sum of exons).
     """
-    def _check_binary_flags( flags : int, int_bit_flag_position : int ) :
-        """ # 2023-08-08 22:47:02 
-        check a flag in the binary flags at the given position
-        """
-        return ( flags & ( 1 << int_bit_flag_position ) ) > 0 
-
     def _detect_poly_t_length(
         seq_after_softclipping,
         int_len_window_internal_polyT=30,
@@ -3429,7 +3432,7 @@ def LongExtractBarcodeFromBAM(
         return dict( (e, None) for e in l_name_type_dist )
     
     def run_pipeline():
-        """# 2023-08-23 22:44:15 
+        """# 2023-09-15 21:02:07 
         analyze a pipeline for a given list of samples
         """
         # retrieve id of the pipeline
@@ -4030,6 +4033,7 @@ def LongExtractBarcodeFromBAM(
                     ns[ 'dict_arr_dist_single_cell_level' ] = dict( ) 
 
                     reference_name_current = None # initialize the current contig name
+                    reference_start_current = None # initialize the current position
                     
                     # set_e = set( ) # ❤️ # for debugging
                     """
@@ -4245,13 +4249,16 @@ def LongExtractBarcodeFromBAM(
                                 for t_poly_a_site in list( ns[ 'dict_poly_a_site_to_l_l' ] ) : # retrieve list of 't_poly_a_site'
                                     _empty_bucket( t_poly_a_site )
                                 reference_name_current = reference_name # update the current contig name
-                                
-                            ''' determine whether to empty bucket or not, based on the current position on the sorted BAM file '''
-                            for t_poly_a_site in list( ns[ 'dict_poly_a_site_to_l_l' ] ) : # retrieve list of 't_poly_a_site'
-                                ''' whether poly A site is located at the left or the right side of the read, when the current position passes the poly A site, process the bucket '''
-                                flag_is_reverse_complemented, pos = t_poly_a_site # parse 't_poly_a_site'
-                                if pos < reference_start :
-                                    _empty_bucket( t_poly_a_site )
+                            
+                            ''' when the position has changed, detect buckets that should be emptied '''
+                            if reference_start_current != reference_start :
+                                ''' determine whether to empty bucket or not, based on the current position on the sorted BAM file '''
+                                for t_poly_a_site in list( ns[ 'dict_poly_a_site_to_l_l' ] ) : # retrieve list of 't_poly_a_site'
+                                    ''' regardlesss of whether poly A site is located at the left or the right side of the read, when the current position passes the poly A site, process the bucket '''
+                                    flag_is_reverse_complemented, pos = t_poly_a_site # parse 't_poly_a_site'
+                                    if pos < reference_start :
+                                        _empty_bucket( t_poly_a_site )
+                                reference_start_current = reference_start # update 'reference_start_current'
                                 
                             ''' process read '''
                             """
@@ -9164,6 +9171,316 @@ def ourotools(str_mode=None, **dict_args):
         elif str_mode == "LongExtractBarcodeFromBAM":
             LongExtractBarcodeFromBAM(**dict_args)
 
+""" functions that are currently not supported in the command line (only accessible in python environment, including jupyter notebook) """
+# functions independent of the main ourotools pipeline (utility functions)
+def SplitBAM( path_file_bam_input : str, path_folder_output : str, dict_cb_to_name_clus : dict, name_tag_cb : str = 'CB' ) :
+    """ # 2023-09-07 22:18:43 
+    A standalone pipeline employing multiprocessing for faster splitting of a barcoded BAM file to multiple BAM files, each containing records of cells belonging to a single 'name_cluster' (a single cell type)
+    
+    path_file_bam_input : str # an input Barcoded BAM file to split
+    path_folder_output : str # the output folder where splitted Barcoded BAM files will be exported
+    dict_cb_to_name_clus : dict # a dictionary containing corrected cell barcode to 'name_clus' (name of cluster) mapping. if the name is not compatible with Windoe OS path, incompatible characters will be replaced with spaceholder character.
+    name_tag_cb : str = 'CB' # name of the SAM tag containing the corrected cell barcode
+    
+    """
+    # import packages
+    import multiprocessing as mp
+    import pysam
+    import os
+    # define functions
+    def To_window_path_compatible_str(a_string):
+        """
+            replace following characters to '_' so that a given string will be compatible for Window file system :
+        : (colon)    " (double quote)    / (forward slash)    \ (backslash)    | (vertical bar or pipe)    ? (question mark)    * (asterisk)
+            Also, replace new line character into '_'
+        """
+        return a_string.replace("\n", "_").replace(":", "_").replace('"', "_").replace("/", "_").replace("\\", "_").replace("|", "_").replace("?", "_").replace("*", "_")
+    
+    # convert 'name_cluster' to window-compatible file name
+    dict_convert = dict( ( v, To_window_path_compatible_str( v ).replace( ' ', '_' ) ) for v in set( dict_cb_to_name_clus.values( ) ) )
+    dict_cb_to_name_clus = dict( ( e, dict_convert[ dict_cb_to_name_clus[ e ] ] ) for e in dict_cb_to_name_clus )
+    l_name_clus = list( dict_convert.values( ) ) # retrieve list of 'name_clus' (after correction)
 
+    # create the output folder
+    os.makedirs( path_folder_output, exist_ok = True )
+    
+    # read the header of the input BAM file    
+    with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
+        sam_header = samfile.header
+
+    def _write_bam_of_name_clus( p_in, p_out ) :
+        ''' # 2023-09-07 21:38:10 
+        for writing bam file for each 'name_clus'
+        '''
+        name_clus = p_in.recv( ) # retrieve the name of the cluster
+        path_file_bam = f'{path_folder_output}{name_clus}.bam'
+        with pysam.AlignmentFile( path_file_bam, 'wb', header = sam_header ) as newsamfile :
+            while True :
+                batch = p_in.recv( ) # receive a record
+                if batch is None :
+                    break
+                for str_r in batch : # parse the batch
+                    r = pysam.AlignedSegment.fromstring( str_r, sam_header ) # compose a pysam record
+                    newsamfile.write( r )
+        pysam.index( path_file_bam ) # index the given bam file
+        p_out.send( 'completed' ) # indicate the work has been completed
+
+    dict_name_clus_p_to_writers = dict( )
+    l_p_from_writers = [ ]
+    l_process = [ ] # list of processes
+    for name_clus in l_name_clus : # for each 'name_clus', recruite a worker
+        pm2w, pw4m = mp.Pipe( )
+        pw2m, pm4w = mp.Pipe( )
+        p = mp.Process( target = _write_bam_of_name_clus, args = ( pw4m, pw2m ) )
+        dict_name_clus_p_to_writers[ name_clus ] = pm2w 
+        l_p_from_writers.append( pm4w )
+        p.start( )
+        pm2w.send( name_clus ) # initialize the worker with 'name_clus'
+        l_process.append( p ) # collect the process
+
+    # internal setting
+    int_max_num_record_in_a_batch = 100
+    dict_name_clus_to_batch = dict( ( name_clus, [ ] ) for name_clus in l_name_clus ) # initialize 'dict_name_clus_to_batch'
+
+    def _flush_batch( name_clus : str ) :
+        """ # 2023-09-07 22:00:29 
+        flush the batch
+        """
+        batch = dict_name_clus_to_batch[ name_clus ]
+        if len( batch ) > 0 : # if batch is not empty
+            dict_name_clus_p_to_writers[ name_clus ].send( batch ) # send the batch to the writer
+            dict_name_clus_to_batch[ name_clus ] = [ ] # empty the batch    
+
+    def _write_record( name_clus : str, str_r : str ) :
+        """ # 2023-09-07 22:00:38 
+        write a record
+        """
+        dict_name_clus_to_batch[ name_clus ].append( str_r ) # add the record
+        if len( dict_name_clus_to_batch[ name_clus ] ) >= int_max_num_record_in_a_batch :
+            _flush_batch( name_clus ) # flush the batch
+
+    # read file and write the record
+    with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
+        for r in samfile.fetch( ) :
+            dict_tags = dict( r.get_tags( ) ) # retrieve tags of the read
+            if name_tag_cb in dict_tags :
+                str_cb = dict_tags[ name_tag_cb ]
+                if str_cb in dict_cb_to_name_clus : 
+                    name_clus = dict_cb_to_name_clus[ str_cb ] # retrieve name of the cluster
+                    str_r = r.tostring( ) # convert samtools record to a string
+                    _write_record( name_clus, str_r ) # write the record
+
+    # flush remaining records
+    for name_clus in l_name_clus :
+        _flush_batch( name_clus )
+
+    # notify all works in the main process has been completed
+    for name_clus in l_name_clus :
+        dict_name_clus_p_to_writers[ name_clus ].send( None )
+
+    # wait for all workers to complete their jobs
+    for p in l_p_from_writers :
+        p.recv( ) # receive a signal indicating the worker has dismissed itself
+    # pipeline completed
+    return
+
+def SplitBAMs( dict__path_file_bam_input__to__dict_cb_to_name_clus : dict, path_folder_output : str, name_tag_cb : str = 'CB', int_num_threads : int = 5 ) :
+    """ # 2023-09-11 16:52:39 
+    A pipeline employing multiprocessing for faster splitting of barcoded BAM files of a single cell dataset to multiple BAM files, each containing records of cells belonging to a single 'name_cluster' (a single cell type)
+    
+    dict__path_file_bam_input__to__dict_cb_to_name_clus : dict # a dictionary with key = 'path_file_bam_input' and value = 'dict_cb_to_name_clus'.
+        * dict_cb_to_name_clus : dict # a dictionary containing corrected cell barcode to 'name_clus' (name of cluster) mapping. if the name is not compatible with Windoe OS path, incompatible characters will be replaced with spaceholder character.
+        * path_file_bam_input : str # an input BAM file to split
+        
+    path_folder_output : str # the output folder where splitted BAM files will be exported
+    
+    name_tag_cb : str = 'CB' # name of the SAM tag containing the corrected cell barcode
+    
+    int_num_threads : int = 5 # the number of threads for merging BAM files of the same cluster name (cell type)
+    """
+    # create the output folder
+    os.makedirs( path_folder_output, exist_ok = True )
+    
+    ''' Initiate pipelines for processing individual BAM file separately. '''
+    logger.info(f"Started.")
+    pipelines = bk.Offload_Works( None )  # no limit for the number of works that can be submitted.
+    
+    ''' run 'SplitBAM' for individual BAM files '''
+    for path_file_bam_input in dict__path_file_bam_input__to__dict_cb_to_name_clus : # run 'SplitBAM' for each input BAM file separately
+        str_uuid_file_bam_input = bk.UUID( ) # retrieve UUID of the input bam file
+        pipelines.submit_work( SplitBAM, kwargs = { 'path_file_bam_input' : path_file_bam_input, 'path_folder_output' : f'{path_folder_output}temp_{str_uuid_file_bam_input}/', 'dict_cb_to_name_clus' : dict__path_file_bam_input__to__dict_cb_to_name_clus[ path_file_bam_input ], 'name_tag_cb' : name_tag_cb } )
+                    
+    # wait all pipelines to be completed
+    pipelines.wait_all()
+    
+    ''' combine temporary output BAM files '''
+    df_file_bam = bk.GLOB_Retrive_Strings_in_Wildcards( f'{path_folder_output}*/*.bam' ) # retrieve a list of temporary output BAM files
+    for name_clus, _df in df_file_bam[ [ 'wildcard_1', 'path' ] ].groupby( 'wildcard_1' ) : # for each 'name_clus'
+        l_path_file_output_temp = _df.path.values # retrieve list of temporary output files
+        path_file_bam_output = f"{path_folder_output}{name_clus}.bam"
+        pysam.merge( '--threads', str( min( int_num_threads, 10 ) ), '-c', '-p', path_file_bam_output, * l_path_file_output_temp ) # merge splitted BAM files into a single output BAM file
+        for path_file in l_path_file_output_temp : # delete the temporary output files
+            os.remove( path_file )
+        pysam.index( path_file_bam_output ) # index the output file
+        
+    # remove temporary output files
+    for path_folder in bk.GLOB_Retrive_Strings_in_Wildcards( f"{path_folder_output}temp_*/" ).path.values :
+        shutil.rmtree( path_folder )
+        
+    logger.info(f"Completed.")
+
+def DeduplicateBAM( 
+    path_file_bam_input : str, # an input Barcoded BAM file to split
+    path_folder_output : str, # the output folder where splitted BAM files will be exported
+    name_tag_cb : str = 'CB', 
+    name_tag_umi : str = 'UB',
+    name_tag_length : str = 'LE', # length of molecule aligned to the genome
+    int_num_processes : int = 8, # number of processes to use for processing each chunk
+    int_num_threads_for_sorting_bam : int = 5, # the number of threads for sorting the BAM file 
+) :
+    """ # 2023-09-19 00:50:48 
+    A standalone pipeline for de-duplicating a Barcoded BAM file based on the CB-UMI attachment genomic position and CB-UMI pairs, generated by ourotools.LongExtractBarcodeFromBAM method. Assumes reads are aligned so that read alignment provides strand-specific information, and alignment direction will be used to infer CB-UMI attachment genomic position.
+    
+    path_file_bam_input : str, # an input Barcoded BAM file to split
+    path_folder_output : str, # the output folder where de-duplicated BAM file will be exported
+    name_tag_cb : str = 'CB', 
+    name_tag_umi : str = 'UB',
+    name_tag_length : str = 'LE', # length of molecule aligned to the genome
+    int_num_processes : int = 8, # number of processes to use for processing each chunk
+    int_num_threads_for_sorting_bam : int = 5, # the number of threads for sorting the BAM file 
+    
+    """
+    ''' initialize '''
+    # define folders
+    path_folder_temp = f'{path_folder_output}temp/'
+
+    # create the output folder
+    for path_folder in [ path_folder_temp, path_folder_output ] :
+        os.makedirs( path_folder, exist_ok = True ) # create the parent folder where the output BAM file will reside
+
+    # read the header of the input BAM file    
+    with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
+        sam_header = samfile.header
+
+    # internal settings
+    int_max_num_bucket_deleted = 100000
+
+    def _check_binary_flags( flags : int, int_bit_flag_position : int ) :
+        """ # 2023-08-08 22:47:02 
+        check a flag in the binary flags at the given position
+        """
+        return ( flags & ( 1 << int_bit_flag_position ) ) > 0 
+
+    def _generate_batch( ) :
+        """ # 2023-09-15 20:31:45 
+        generate batch from the input BAM file
+        """
+        ns = dict( ) # create a namespace
+        ns[ 'int_num_buckets_deleted' ] = 0 # initialize 'int_num_buckets_deleted'
+        ns[ 'dict_t_id_to_bucket' ] = dict( ) # a dictionary containing batches
+        reference_name_current = None
+        reference_start_current = None
+
+        def _flush_bucket( t_id ) :
+            """ # 2023-09-19 00:27:31 
+            """
+            bucket = ns[ 'dict_t_id_to_bucket' ].pop( t_id )
+            ns[ 'int_num_buckets_deleted' ] += 1
+            if ns[ 'int_num_buckets_deleted' ] >= int_max_num_bucket_deleted : # if the number of pop operations exceed the limit, recreate the dictionary
+                data = ns[ 'dict_t_id_to_bucket' ]
+                ns[ 'dict_t_id_to_bucket' ] = dict( ( k, data[ k ] ) for k in data )
+            return bucket
+
+        def _add_record( t_id, r ) :
+            """ # 2023-09-19 00:27:25 
+            """
+            dict_tags = dict( r.get_tags( ) )
+            if name_tag_cb not in dict_tags or name_tag_umi not in dict_tags or name_tag_length not in dict_tags : # ignore invalid reads
+                return
+
+            if t_id not in ns[ 'dict_t_id_to_bucket' ] : # initialize the bucket for 't_id'
+                ns[ 'dict_t_id_to_bucket' ][ t_id ] = [ ]
+            ns[ 'dict_t_id_to_bucket' ][ t_id ].append( [ r.to_string( ), dict_tags[ name_tag_cb ], dict_tags[ name_tag_umi ], dict_tags[ name_tag_length ] ] )
+
+        # read file and write the record
+        with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
+            for r in samfile.fetch( ) :
+                # check whether the read was reverse complemented
+                flags, reference_name, reference_start, reference_end = r.flag, r.reference_name, r.reference_start, r.reference_end # retrieve read properties
+
+                ''' process reads for each 'bucket' (reads with the same poly CB-UMI attachment sites) '''
+                ''' when the contig has changed, empty all buckets '''
+                if reference_name_current != reference_name :
+                    for t_id in list( ns[ 'dict_t_id_to_bucket' ] ) : # retrieve list of 't_id'
+                        yield _flush_bucket( t_id )
+                    reference_name_current = reference_name # update 'reference_name_current'
+
+                ''' when the position has changed, detect buckets that should be emptied '''
+                if reference_start_current != reference_start :
+                    ''' determine whether to empty bucket or not, based on the current position on the sorted BAM file '''
+                    for t_id in list( ns[ 'dict_t_id_to_bucket' ] ) : # retrieve list of 't_id'
+                        ''' regardlesss of whether CB-UMI attachment site is located at the left or the right side of the read, when the current position passes the poly A site, process the bucket '''
+                        flag_is_reverse_complemented, pos = t_id # parse 't_id'
+                        if pos < reference_start :
+                            yield _flush_bucket( t_id )
+                    reference_start_current = reference_start # update 'reference_start_current'
+
+                ''' compose 't_id' '''
+                flag_is_reverse_complemented = _check_binary_flags( flags, 4 ) # retrieve a flag indicating whether the read has been reverse-complemented
+                t_id = ( flag_is_reverse_complemented, reference_start if flag_is_reverse_complemented else reference_end ) # compose 't_id'
+                _add_record( t_id, r ) # add record
+
+        # flush remaining data
+        for t_id in list( ns[ 'dict_t_id_to_bucket' ] ) : # retrieve list of 't_id'
+            yield _flush_bucket( t_id )
+
+
+    def _process_batch( p_in, p_out ) :
+        """ # 2023-09-15 20:32:17 
+        """
+        str_uuid_process = bk.UUID( ) # create uuid of the process
+        path_file_bam_unsorted = f"{path_folder_temp}{str_uuid_process}.bam"
+        path_file_bam_sorted = f"{path_folder_temp}{str_uuid_process}.sorted.bam"
+        with pysam.AlignmentFile( path_file_bam_unsorted, 'wb', header = sam_header ) as newsamfile :
+            while True :
+                batch = p_in.recv( ) # receive a record
+                if batch is None :
+                    break
+
+                # compose a dataframe containing reads for the bucket
+                df = pd.DataFrame( batch, columns = [ 'str_r', 'cb', 'umi', 'length' ] )
+                df.sort_values( 'length', inplace = True, ascending = False )
+                df.drop_duplicates( subset = [ 'cb', 'umi' ], keep = 'first', inplace = True ) # drop cb-umi duplicates, while keep the longest molecule
+
+                for str_r in df.str_r.values : # for each de-duplicated record
+                    r = pysam.AlignedSegment.fromstring( str_r, sam_header ) # compose a pysam record
+                    newsamfile.write( r )
+                p_out.send( 'completed' )
+        # process the output BAM file
+        pysam.sort( '-o', path_file_bam_sorted, '-@', str( min( int_num_threads_for_sorting_bam, 5 ) ), path_file_bam_unsorted )
+        os.remove( path_file_bam_unsorted ) # remove the temporary file
+        pysam.index( path_file_bam_sorted ) # index the given bam file
+        p_out.send( 'completed' ) # indicate the work has been completed
+
+
+    bk.Multiprocessing_Batch_Generator_and_Workers(
+        gen_batch = _generate_batch( ),
+        process_batch = _process_batch,
+        int_num_threads = int_num_processes
+        + 2,  # one thread for generating batch, another thread for post-processing of the batch
+        flag_wait_for_a_response_from_worker_after_sending_termination_signal = True, # wait until all worker exists before resuming works in the main process
+    )
+
+    """ combine results into a single output BAM file """
+    path_file_bam_output = f"{path_folder_output}deduplicated_barcoded.bam"
+    l_path_file = glob.glob( f"{path_folder_temp}*.sorted.bam" ) # retrieve a list of BAM files to combine
+    pysam.merge( '--threads', str( min( int_num_threads_for_sorting_bam, 10 ) ), '-c', '-p', path_file_bam_output, * l_path_file ) # merge output BAM files
+    for path_file in l_path_file : # delete the temporary files
+        os.remove( path_file )
+    pysam.index( path_file_bam_output ) # index the input BAM file
+    
+    # delete the temporary folder
+    shutil.rmtree( path_folder_temp )
+    
 if __name__ == "__main__":
     ourotools()  # run ouro at the top-level environment

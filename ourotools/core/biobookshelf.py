@@ -2228,3 +2228,19 @@ def Series_Subset(s, set_index):
     if not isinstance(set_index, set):
         set_index = set(set_index)
     return s[list(True if e in set_index else False for e in s.index.values)]
+
+class Map(object):
+    def __init__(self, dict_a2b):
+        self.dict_a2b = dict_a2b
+
+    def a2b(self, a):
+        if a in self.dict_a2b:
+            return self.dict_a2b[a]
+        else:
+            return np.nan
+
+    def a2b_if_mapping_available_else_Map_a2a(self, a):
+        if a in self.dict_a2b:
+            return self.dict_a2b[a]
+        else:
+            return a
