@@ -13,7 +13,6 @@ from . import SEQ
 from . import STR
 from . import biobookshelf as bk
 
-
 """
 ||||||||||||||||||||||||||||||||
 """
@@ -2122,6 +2121,54 @@ def _check_binary_flags( flags : int, int_bit_flag_position : int ) :
     check a flag in the binary flags at the given position
     """
     return ( flags & ( 1 << int_bit_flag_position ) ) > 0 
+
+def _argmin(seq):
+    """ # 2023-09-20 19:47:25 
+    reference: https://gist.github.com/mscheltienne/4b02ff0095e2d847e1e572d0aae216c6
+    Get the index of the minimum item in a list or dict.
+    
+    Parameters
+    ----------
+    seq : list | dict
+        The list or dict on which to find its min.
+    
+    Returns:
+    --------
+    int
+        The minimum value of the list or dict.
+    """
+    if isinstance(seq, (list, tuple)):
+        return min(range(len(seq)), key=seq.__getitem__)
+
+    elif isinstance(seq, dict):
+        return min(seq, key=seq.__getitem__)
+
+    else:
+        raise TypeError
+
+def _argmax(seq):
+    """ # 2023-09-20 19:47:19 
+    reference: https://gist.github.com/mscheltienne/4b02ff0095e2d847e1e572d0aae216c6
+    Get the index of the maximum item in a list or dict
+    
+    Parameters
+    ----------
+    seq : list | dict
+        The list or dict on which to find its max.
+    
+    Returns:
+    --------
+    int
+        The maximum value of the list or dict.
+    """
+    if isinstance(seq, (list, tuple)):
+        return max(range(len(seq)), key=seq.__getitem__)
+
+    elif isinstance(seq, dict):
+        return max(seq, key=seq.__getitem__)
+
+    else:
+        raise TypeError
     
 def LongFilterNSplit(
     flag_usage_from_command_line_interface: bool = False,
@@ -4976,7 +5023,6 @@ def LongExportNormalizedCountMatrix(
     str_name_bam_tag_cb_uncorrected: str = "CR",
     str_name_bam_tag_umi_corrected: str = "UB",
     str_name_bam_tag_umi_uncorrected: str = "UR",
-    str_name_bam_tag_umi_uncorrected: str = "UR",
     flag_skip_exon_and_splice_junc_counting: bool = False,
     path_file_fa_for_cram: Union[str, None] = None,
     int_num_samples_analyzed_concurrently: int = 2,
@@ -4989,7 +5035,7 @@ def LongExportNormalizedCountMatrix(
     path_file_vcf_for_filtering_variant: Union[str, None] = None,
     int_min_count_features_for_filtering_barcodes: int = 50,
     int_length_of_polya_to_append_to_transcript_sequence_during_realignment : int = 50, # during re-alignment analysis for unique transcript assignment, append poly A sequence of given length at the 3' end of transcript sequences, which aids identification of the correct isoform from which the read is likely originated.
-    flag_enforce_transcript_end_site_matching_for_long_read_during_realignment : bool = False, # should only be used when (1) all read contains poly A sequences (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it also use internal-polyA-tract priming information (the length of the internal poly A tract, recorded as a BAM record tag with the tag name 'str_name_bam_tag_internal_polya_length' for all reads), and does not perform TES matching if the read appear to be primed by internal-polyA-tract.
+    flag_enforce_transcript_end_site_matching_for_long_read_during_realignment : bool = False, # should only be used when (1) all read contains poly A sequences (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it also use internal-polyA-tract priming information (the length of the internal poly A tract, recorded as a BAM record tag with the tag name 'str_name_bam_tag_internal_polya_length' for all reads), and does not perform TES matching if the read appear to be primed by internal-polyA-tract. To enable this behavior, 'int_max_softclipped_length_for_filtering_alignment_to_transcript_during_realignment' should be set to non-negative values, and alignments to transcripts should be filtered based on the softclipping status of the alignment.
     str_name_bam_tag_internal_polya_length : str = 'IA', # the name of the BAM record tag that contains the length of internal poly A tract. The tag should be available for all reads if 'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' is set to True, and TES matching mode is active.
     int_max_softclipped_length_for_filtering_alignment_to_transcript_during_realignment : int = 30, # rather than aligning an entire sequence of the read, exclude soft clipped regions and align the portion of read that was aligned to the genome. Since this portion of read should be perfectly match the transcript without softclipping if the read was indeed originated from the transcript, during realignment, alignments with extensive softclipping longer than the given threshold will be filtered out.
     dict_num_manager_processes_for_each_data_object: dict = {
@@ -5040,9 +5086,10 @@ def LongExportNormalizedCountMatrix(
     l_str_l_t_distribution_range_of_interest : Union[ List[ str ], str, None ] = None, # define a range of distribution of interest for exporting normalized count matrix. a list of string for setting the size distrubution ranges of interest for exporting normalized count matrix. if 'raw' is given, no size-based normalization will be performed, and raw counts of all molecules will be exported. example arguments are the followings: 'raw,50-5000,1000-3500' for exporting raw count and size-normalized count matrices for molecules of 50-5000bp and 1000-3500bp (total three output matrices). if only one argument is given, the argument will be applied to all samples.
 
     int_length_of_polya_to_append_to_transcript_sequence_during_realignment : int = 50, # during re-alignment analysis for unique transcript assignment, append poly A sequence of given length at the 3' end of transcript sequences, which aids identification of the correct isoform from which the read is likely originated.
-    flag_enforce_transcript_end_site_matching_for_long_read_during_realignment : bool = False, # should only be used when (1) all read contains poly A sequences (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it detects internal-polyA-tract priming, and does not perform TES matching if the read appear to be primed by internal-polyA-tract.
-    int_max_softclipped_length_for_filtering_alignment_to_transcript_during_realignment : int = 30, # rather than aligning an entire sequence of the read, exclude soft clipped regions and align the portion of read that was aligned to the genome. Since this portion of read should be perfectly match the transcript without softclipping if the read was indeed originated from the transcript, during realignment, alignments with extensive softclipping longer than the given threshold will be filtered out.
-
+    flag_enforce_transcript_end_site_matching_for_long_read_during_realignment : bool = False, # hould only be used when (1) all read contains poly A sequences (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it also use internal-polyA-tract priming information (the length of the internal poly A tract, recorded as a BAM record tag with the tag name 'str_name_bam_tag_internal_polya_length' for all reads), and does not perform TES matching if the read appear to be primed by internal-polyA-tract. To enable this behavior, 'int_max_softclipped_length_for_filtering_alignment_to_transcript_during_realignment' should be set to non-negative values, and alignments to transcripts should be filtered based on the softclipping status of the alignment.
+    int_max_softclipped_length_for_filtering_alignment_to_transcript_during_realignment : int = 30, # rather than aligning an entire sequence of the read, exclude soft clipped regions and align the portion of read that was aligned to the genome. Since this portion of read should be perfectly match the transcript without softclipping if the read was indeed originated from the transcript, during realignment, alignments with extensive softclipping longer than the given threshold will be filtered out. To disable this behavior, set this value to negative values (e.g., -1).
+    str_name_bam_tag_internal_polya_length : str = 'IA', # the name of the BAM record tag that contains the length of internal poly A tract. The tag should be available for all reads if 'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' is set to True, and TES matching mode is active.
+    
     # the number of manager processes to use for each data object that will be shared across the forked processes. If 0 is given, no manager process will be used. Instead, the object will be directly accessed in the forked process, incurring memory bloating.
     # generally, it is better to use more number of manager processes for data object that are more frequently accessed. If increasing the number of manager processes does not improve performance, considering not using the manager process and accessing the object directly.
     # the expected size of bloated memory per process for each data object is given below.
@@ -5232,12 +5279,12 @@ def LongExportNormalizedCountMatrix(
         )
         arg_grp_isoform_realignment.add_argument(
             "--flag_enforce_transcript_end_site_matching_for_long_read_during_realignment",
-            help="(Default: False) Should only be used when (1) all read contains poly A sequences (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it also use internal-polyA-tract priming information (the length of the internal poly A tract, recorded as a BAM record tag with the tag name 'str_name_bam_tag_internal_polya_length' for all reads), and does not perform TES matching if the read appear to be primed by internal-polyA-tract.",
+            help="(Default: False) Should only be used when (1) all read contains poly A sequences (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it also use internal-polyA-tract priming information (the length of the internal poly A tract, recorded as a BAM record tag with the tag name 'str_name_bam_tag_internal_polya_length' for all reads), and does not perform TES matching if the read appear to be primed by internal-polyA-tract. To enable this behavior, 'int_max_softclipped_length_for_filtering_alignment_to_transcript_during_realignment' should be set to non-negative values, and alignments to transcripts should be filtered based on the softclipping status of the alignment.",
             action="store_true",
         )
         arg_grp_isoform_realignment.add_argument(
             "--int_max_softclipped_length_for_filtering_alignment_to_transcript_during_realignment",
-            help="(Default: 30) Rather than aligning an entire sequence of the read, exclude soft clipped regions and align the portion of read that was aligned to the genome. Since this portion of read should be perfectly match the transcript without softclipping if the read was indeed originated from the transcript, during realignment, alignments with extensive softclipping longer than the given threshold will be filtered out.",
+            help="(Default: 30) Rather than aligning an entire sequence of the read, exclude soft clipped regions and align the portion of read that was aligned to the genome. Since this portion of read should be perfectly match the transcript without softclipping if the read was indeed originated from the transcript, during realignment, alignments with extensive softclipping longer than the given threshold will be filtered out. To disable this behavior, set this value to negative values (e.g., -1).",
             default=30,
             type=int,
         )    
@@ -5817,6 +5864,7 @@ def LongExportNormalizedCountMatrix(
             flag_use_isoform_assignment_from_10x_cellranger,
             flag_use_intronic_read_assignment_from_10x_cellranger,
         ) = (True, True, True)
+    flag_filtering_alignment_to_transcript_during_realignment_based_on_softclipping = int_max_softclipped_length_for_filtering_alignment_to_transcript_during_realignment >= 0 # retrieve a flag indicating whether to filter alignments to transcripts based on the soft-clipping status
 
     # process arguments
     set_seqname_to_skip = set(l_seqname_to_skip)
@@ -7713,7 +7761,7 @@ def LongExportNormalizedCountMatrix(
                             reference_filename=path_file_fa_for_cram,
                         ) as samfile:
                             for r in samfile.fetch( contig = name_contig ) :
-                                """filter alignments based on mapq, flag, and position (ignore reads outside start/end sites, which often occurs due to samtools's algorithm)"""
+                                """retrieve attributes of the current alignment and filter the alignment based on mapq, flag, and position (ignore reads outside start/end sites, which often occurs due to samtools's algorithm)"""
                                 (
                                     refstart,
                                     refend,
@@ -7722,6 +7770,7 @@ def LongExportNormalizedCountMatrix(
                                     seq,
                                     flag,
                                     cigartuples,
+                                    int_mapq,
                                 ) = (
                                     r.reference_start,
                                     r.reference_end,
@@ -7730,7 +7779,8 @@ def LongExportNormalizedCountMatrix(
                                     r.seq,
                                     r.flag,
                                     r.cigartuples,
-                                )  # 0-based coordinates
+                                    r.mapq,
+                                )  # 0-based coordinates # retrieve mapping quality
                                 if flag_is_5prime:
                                     if flag_is_paired_end:
                                         raise NotImplementedError(
@@ -7740,11 +7790,12 @@ def LongExportNormalizedCountMatrix(
                                         flag ^= (
                                             1 << 4
                                         )  # flip the read's direction if the technology is 5prime and single-end
-                                int_mapq = r.mapq  # retrieve mapping quality
+                                # check whether the read was reverse complemented
+                                flag_is_reverse_complemented = _check_binary_flags( flag, 4 ) 
 
                                 """ filter aligned records using mapping quality (this filter out reads with invalid cigar string, too) """
                                 if (
-                                    r.mapq < int_min_mapq_unique_mapped
+                                    int_mapq < int_min_mapq_unique_mapped
                                 ):  # skip read whose mapq is below 'int_min_mapq_unique_mapped'
                                     continue
 
@@ -7752,13 +7803,13 @@ def LongExportNormalizedCountMatrix(
                                 # ignore records with flag indicating secondary alignment
                                 if (
                                     flag_ignore_record_with_flag_secondary_alignment
-                                    and (r.flag & (1 << 8))
+                                    and (flag & (1 << 8))
                                 ):
                                     continue
                                 # ignore records with flag indicating the alignment is optical pcr duplicates
                                 if (
                                     flag_ignore_record_with_flag_optical_or_pcr_duplicate
-                                    and (r.flag & (1 << 10))
+                                    and (flag & (1 << 10))
                                 ):
                                     continue
 
@@ -7780,6 +7831,9 @@ def LongExportNormalizedCountMatrix(
                                 )  # if seq is not included in the record, write -1 as the length of the sequence
                                 # retrieve a dictionary of SAM tags
                                 dict_tags = dict(r.tags)
+                                
+                                # retrieve useful flags
+                                flag_internal_polya_tract_primed = dict_tags[ str_name_bam_tag_internal_polya_length ] > 0 if str_name_bam_tag_internal_polya_length in dict_tags else False # if 'str_name_bam_tag_internal_polya_length' tag is available, classify the alignment as internal-polyA-tract-primed read if the detected length of the internal polyA tract is longer than 0. if the tag is not available, assume all read is not primed by internal polyA-tract
 
                                 # initialize the dictionary of sam tags
                                 for key in [
@@ -8040,7 +8094,7 @@ def LongExportNormalizedCountMatrix(
                                                         )  # add the number of base pairs of overlap to the gene_id to which the current exon belongs to
                                                 """ (GEX mode specific) if the strand to which read was aligned is different from the gene annotation strand, filter out the gene_id from the possible list of gene_ids that can be assigned to the current read. if strand specific sequencing information is not available, does not filter possible list of genes using the information """
                                                 if (
-                                                    not ( flag_is_mode_scarab_count_atac or flag_no_strand_specificity )
+                                                    not ( flag_is_mode_scarab_count_atac or flag_include_read_aligned_to_opposite_strand ) # if 'flag_include_read_aligned_to_opposite_strand' is True, ignore the strand information of the read.
                                                 ):
                                                     strand_read = (
                                                         "-"
@@ -8166,81 +8220,96 @@ def LongExportNormalizedCountMatrix(
                                             not flag_use_isoform_assignment_from_10x_cellranger
                                             and seq is not None
                                         ):
-                                            for hit in list(
-                                                reads["data"][id_gene]["am_tx"].map(
-                                                    seq
-                                                )
-                                            ):  # align the current read to the transcript sequences # exhaust the iterator to avoid the potential memory leakage issue from minimap2 mappy
-                                                if (
-                                                    hit.mapq
-                                                    >= int_min_mapq_minimap2_tx_assignment
-                                                ):  # if mapping quality of the current hit exceed that of the minimum mapq set by the setting, use the id_tx to which the current read was aligned
-                                                    id_tx_assigned_by_minimap2 = (
-                                                        hit.ctg
+                                            ''' 
+                                            retrieve alignments to transcripts 
+                                            # align the current read to the transcript sequences # exhaust the iterator to avoid the potential memory leakage issue from minimap2 mappy
+                                            '''
+                                            if flag_filtering_alignment_to_transcript_during_realignment_based_on_softclipping : # retrieve alignments to transcripts by aligning a sequence excluding softclipped regions
+                                                ''' retrieve a read sequence excluding soft-clipped regions, in correct strand '''
+                                                int_length_softclipped_left = cigartuples[ 0 ][ 1 ] if int_cigarop_S == cigartuples[ 0 ][ 0 ] else 0
+                                                int_length_softclipped_right = cigartuples[ -1 ][ 1 ] if int_cigarop_S == cigartuples[ -1 ][ 0 ] else 0
+                                                
+                                                seq_excluding_soft_clipping = seq[ int_length_softclipped_left : len( seq ) - int_length_softclipped_right ] # retrieve a read sequence excluding softclipped, reverse complemented back to the original read if the read has been reverse complemented.
+                                                seq_excluding_soft_clipping_correct_strand = SEQ.Reverse_Complement( seq_excluding_soft_clipping ) if flag_is_reverse_complemented else seq_excluding_soft_clipping # retrieve sequence of the correct strand
+                                                len_seq_excluding_soft_clipping = len( seq_excluding_soft_clipping_correct_strand ) # retrieve length of sequence excluding soft clipping from the genomic alignment
+                                                
+                                                ''' retrieve alignments to transcripts '''
+                                                l_aln_to_tx = list( reads["data"][id_gene]["am_tx"].map( seq_excluding_soft_clipping_correct_strand ) ) # retrieve alignments to the transcripts by aligning the sequence excluding soft-clipped portions, strand-corrected
+                                            else :
+                                                seq_correct_strand = SEQ.Reverse_Complement( seq ) if flag_is_reverse_complemented else seq # retrieve sequence of the correct strand
+                                                l_aln_to_tx = list( reads["data"][id_gene]["am_tx"].map( seq_correct_strand ) ) # retrieve alignments to the transcripts by aligning an entire sequence, strand-corrected
+                                                
+                                            ''' filter out alignments that were reverse complemented during re-alignment, if read aligned to opposite strand will be excluded. '''
+                                            if not flag_include_read_aligned_to_opposite_strand :
+                                                l_aln_to_tx = list( hit for hit in l_aln_to_tx if hit.strand > 0 ) # filter out reverse complemented alignments
+                                                
+                                            if flag_filtering_alignment_to_transcript_during_realignment_based_on_softclipping : # filter alignment to transcript based on softclipping
+                                                ''' filter alignments with extensive softclipping '''
+                                                l_aln_to_tx = list( hit for hit in l_aln_to_tx if max( hit.q_st, len_seq_excluding_soft_clipping - hit.q_en ) <= int_max_softclipped_length_for_filtering_alignment_to_transcript_during_realignment ) # filter alignments to the transcript if the length of the softclipping exceed the limit
+                                            
+                                            if flag_enforce_transcript_end_site_matching_for_long_read_during_realignment and not flag_internal_polya_tract_primed :
+                                                ''' filter transcript alignments by enforcing transcript end site (TES) matching. transcript alignment with the distance between the alignment end position and the actual end of the transcript larger than the threshold will be filtered, if the read is not internal-polyA-primed. '''
+                                                l_aln_to_tx = list( hit for hit in l_aln_to_tx if ( hit.ctg_len - hit.r_en ) <= 100 ) # filter alignments with transcript end site (TES) matching, and retain transcript alignment 
+                                                
+                                            dict_assignment_to_score = dict( ( ( hit.ctg, hit.r_st, hit.r_en ), hit.mapq ) for hit in l_aln_to_tx if hit.mapq >= int_min_mapq_minimap2_tx_assignment ) # filter with mapping quality, # retrieve tx assignment - score mapping
+                                            if len( dict_assignment_to_score ) > 0 : # if at least one transcript alignment is available
+                                                id_tx_assigned_by_minimap2, start_in_transcript, end_in_transcript = _argmax( dict_assignment_to_score ) # find the transcript alignment with the best score (if more than two best scores are available, select one without specific criteria, for now)
+                                                    
+                                            if ( not flag_skip_exon_and_splice_junc_counting and len( id_tx_assigned_by_minimap2 ) > 0 ):  # if exon and splice_junction counting behavior is enabled and valid 'id_tx_assigned_by_minimap2' has been assigned.
+                                                """ retrieve exons of the current transcript overlapped with the current read - using minimap2 realignment result """
+                                                for (
+                                                    e
+                                                ) in __data_object_search_query(
+                                                    data_dict_it_exon_transcriptome,
+                                                    id_tx_assigned_by_minimap2,
+                                                    slice(
+                                                        start_in_transcript,
+                                                        end_in_transcript,
+                                                    ),
+                                                ):
+                                                    l_id_anno_exon_and_splice_junc.append(
+                                                        id_gene
+                                                        + "|tx_name="
+                                                        + scidx[
+                                                            "dict_id_tx_to_name_tx"
+                                                        ][
+                                                            id_tx_assigned_by_minimap2
+                                                        ]
+                                                        + "|tx_id="
+                                                        + id_tx_assigned_by_minimap2
+                                                        + "|exon_id="
+                                                        + "{}:{}-{}.{}".format(
+                                                            *e[2]
+                                                        )
+                                                        + "|realigned"
                                                     )
-                                                    if (
-                                                        not flag_skip_exon_and_splice_junc_counting
-                                                    ):  # if exon and splice_junction counting behavior is enabled
-                                                        (
-                                                            start_in_transcript,
-                                                            end_in_transcript,
-                                                        ) = (hit.r_st, hit.r_en)
-                                                        # mark that this feature was assigned using minimap2 re-alignment
-                                                        """ retrieve exons of the current transcript overlapped with the current read - using minimap2 realignment result """
-                                                        for (
-                                                            e
-                                                        ) in __data_object_search_query(
-                                                            data_dict_it_exon_transcriptome,
-                                                            id_tx_assigned_by_minimap2,
-                                                            slice(
-                                                                start_in_transcript,
-                                                                end_in_transcript,
-                                                            ),
-                                                        ):
-                                                            l_id_anno_exon_and_splice_junc.append(
-                                                                id_gene
-                                                                + "|tx_name="
-                                                                + scidx[
-                                                                    "dict_id_tx_to_name_tx"
-                                                                ][
-                                                                    id_tx_assigned_by_minimap2
-                                                                ]
-                                                                + "|tx_id="
-                                                                + id_tx_assigned_by_minimap2
-                                                                + "|exon_id="
-                                                                + "{}:{}-{}.{}".format(
-                                                                    *e[2]
-                                                                )
-                                                                + "|realigned"
-                                                            )
-                                                        """ retrieve splice junctions of the current transcript overlapped with the current read - using minimap2 realignment result """
-                                                        for (
-                                                            e
-                                                        ) in __data_object_search_query(
-                                                            data_dict_it_splice_junc_transcriptome,
-                                                            id_tx_assigned_by_minimap2,
-                                                            slice(
-                                                                start_in_transcript,
-                                                                end_in_transcript,
-                                                            ),
-                                                        ):  # single exon genes lack splice junction annotations
-                                                            l_id_anno_exon_and_splice_junc.append(
-                                                                id_gene
-                                                                + "|tx_name="
-                                                                + scidx[
-                                                                    "dict_id_tx_to_name_tx"
-                                                                ][
-                                                                    id_tx_assigned_by_minimap2
-                                                                ]
-                                                                + "|tx_id="
-                                                                + id_tx_assigned_by_minimap2
-                                                                + "|sj_id="
-                                                                + "{}:{}-{}.{}".format(
-                                                                    *e[2]
-                                                                )
-                                                                + "|realigned"
-                                                            )
-                                                    break  # stop at the first transcript to which the read is uniquely aligned
+                                                """ retrieve splice junctions of the current transcript overlapped with the current read - using minimap2 realignment result """
+                                                for (
+                                                    e
+                                                ) in __data_object_search_query(
+                                                    data_dict_it_splice_junc_transcriptome,
+                                                    id_tx_assigned_by_minimap2,
+                                                    slice(
+                                                        start_in_transcript,
+                                                        end_in_transcript,
+                                                    ),
+                                                ):  # single exon genes lack splice junction annotations
+                                                    l_id_anno_exon_and_splice_junc.append(
+                                                        id_gene
+                                                        + "|tx_name="
+                                                        + scidx[
+                                                            "dict_id_tx_to_name_tx"
+                                                        ][
+                                                            id_tx_assigned_by_minimap2
+                                                        ]
+                                                        + "|tx_id="
+                                                        + id_tx_assigned_by_minimap2
+                                                        + "|sj_id="
+                                                        + "{}:{}-{}.{}".format(
+                                                            *e[2]
+                                                        )
+                                                        + "|realigned"
+                                                    )
 
                                         """ calculate proportion of non-exonic features (=intronic) in the reads and classify reads """
                                         # count bases overlapping exonic features
