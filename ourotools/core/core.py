@@ -85,9 +85,9 @@ logging.basicConfig(
 logger = logging.getLogger("ouro-count")
 
 # define version
-_version_ = "0.0.1"
+_version_ = "0.0.2"
 _scelephant_version_ = _version_
-_last_modified_time_ = "2023-09-19 14:57:22"
+_last_modified_time_ = "2023-09-19 23:20:11"
 
 str_release_note = [
     """
@@ -102,7 +102,11 @@ str_release_note = [
     draft version of 'LongExportNormalizedCountMatrix' function was completed. chromosome-level multiprocessing is used, and size-distribution-normalized count matrix can be exported for multiple size ranges of interest, along with the raw count matrix.
 
     # 2023-09-19 12:38:25 
-    utility functions 'DeduplicateBAM' and 'SplitBAMs' was implemented. Currently, 'DeduplicateBAM' function selects the longest read with the same CB-UMI pair for each bucket (unique CB-UMI attachment location on the genome).
+    utility functions 'DeduplicateBAM' and 'SplitBAMs' were implemented. Currently, 'DeduplicateBAM' function selects the longest read with the same CB-UMI pair for each bucket (unique CB-UMI attachment location on the genome).
+    
+    # 2023-08-30 23:51:34 
+    'LongExportNormalizedCountMatrix' function was modified to 
+
 
     ##### Future implementations #####
 
@@ -3116,7 +3120,7 @@ def LongExtractBarcodeFromBAM(
     str_seq_tso : str = 'AAGCAGTGGTATCAACGCAGAG', # the sequence of TSO adaptor (in 10x GEX v3 kit, located at 5' end of the molecule)
     path_file_valid_cb : str = None, # (required argument) the path to tsv file of whitelist barcodes. For more details, please see 10x cellranger references.
     int_max_num_cell_expected : int = 20000, # the max number of expected cells
-    int_len_sliding_window_internal_polyT : int = 10, # the length of sliding window for searching internal poly T (poly A) tract. (When poly-A tailed read is reverse complemented, R1 adaptor become situated in the forward direction
+    int_len_sliding_window_internal_polyT : int = 10, # the length of sliding window for searching internal poly T (poly A) tract. (When R1 adaptor become situated in the forward direction, poly-A tailed read is reverse complemented to become poly-T containing read)
     int_len_window_internal_polyT : int = 30, # the size of window for searching for internal poly T
     float_min_T_fraction : float = 0.8, # the minimum T fraction for identifying the stretch of poly T tract
     int_min_n_overlap_kmer_for_clustering_umi : int = 1, # the minimum number of overlapped kmer for initiating UMI clustering 
@@ -4965,12 +4969,13 @@ def LongExportNormalizedCountMatrix(
         ]
     ] = ["gex3prime"],
     int_bp_padding_for_defining_promoter_from_transcript_start: int = 2000,
-    int_min_mapq_minimap2_tx_assignment=30,
+    int_min_mapq_minimap2_tx_assignment : int = 30,
     flag_does_not_remove_the_version_information_from_id_transcript_in_the_file_fa_transcriptome: bool = False,
     flag_does_not_make_gene_names_unique: bool = False,
     str_name_bam_tag_cb_corrected: str = "CB",
     str_name_bam_tag_cb_uncorrected: str = "CR",
     str_name_bam_tag_umi_corrected: str = "UB",
+    str_name_bam_tag_umi_uncorrected: str = "UR",
     str_name_bam_tag_umi_uncorrected: str = "UR",
     flag_skip_exon_and_splice_junc_counting: bool = False,
     path_file_fa_for_cram: Union[str, None] = None,
@@ -4983,6 +4988,10 @@ def LongExportNormalizedCountMatrix(
     float_min_prop_of_reads_for_filtering_genomic_variant=0.1,
     path_file_vcf_for_filtering_variant: Union[str, None] = None,
     int_min_count_features_for_filtering_barcodes: int = 50,
+    int_length_of_polya_to_append_to_transcript_sequence_during_realignment : int = 50, # during re-alignment analysis for unique transcript assignment, append poly A sequence of given length at the 3' end of transcript sequences, which aids identification of the correct isoform from which the read is likely originated.
+    flag_enforce_transcript_end_site_matching_for_long_read_during_realignment : bool = False, # should only be used when (1) all read contains poly A sequences (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it also use internal-polyA-tract priming information (the length of the internal poly A tract, recorded as a BAM record tag with the tag name 'str_name_bam_tag_internal_polya_length' for all reads), and does not perform TES matching if the read appear to be primed by internal-polyA-tract.
+    str_name_bam_tag_internal_polya_length : str = 'IA', # the name of the BAM record tag that contains the length of internal poly A tract. The tag should be available for all reads if 'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' is set to True, and TES matching mode is active.
+    int_max_softclipped_length_for_filtering_alignment_to_transcript_during_realignment : int = 30, # rather than aligning an entire sequence of the read, exclude soft clipped regions and align the portion of read that was aligned to the genome. Since this portion of read should be perfectly match the transcript without softclipping if the read was indeed originated from the transcript, during realignment, alignments with extensive softclipping longer than the given threshold will be filtered out.
     dict_num_manager_processes_for_each_data_object: dict = {
         'dict_it_promoter' : 0,
         'dict_t_splice_junc_to_info_genome' : 0,
@@ -4997,7 +5006,7 @@ def LongExportNormalizedCountMatrix(
     l_seqname_to_skip: list = ["MT"],
     flag_no_strand_specificity : bool = False,
 ) -> dict:
-    """# 2023-08-08 00:56:31 
+    """# 2023-09-19 23:18:30 
     perform secondary analysis of cell-ranger output (barcoded BAM)
 
     l_str_mode_scarab_count : list[ Literal[ "gex5prime-single-end", 'gex5prime-paired-end', "gex3prime-single-end", 'gex3prime', 'gex', 'gex5prime', 'atac', 'multiome' ] ] = [ 'gex3prime' ], # list of scarab_count operation mode
@@ -5029,7 +5038,11 @@ def LongExportNormalizedCountMatrix(
     path_folder_reference_distribution : Union[ str, None ] = None, # a folder containing the reference distribution, the output of the 'LongCreateReferenceSizeDistribution'
     l_name_distribution : Union[ List[ str ], str, None ] = None, # the name of each sample that was used to build the reference distribution. the distribution of each sample and pre-calculated correction ratios will be retrieved from the data stored in the reference distribution folder using the given names.
     l_str_l_t_distribution_range_of_interest : Union[ List[ str ], str, None ] = None, # define a range of distribution of interest for exporting normalized count matrix. a list of string for setting the size distrubution ranges of interest for exporting normalized count matrix. if 'raw' is given, no size-based normalization will be performed, and raw counts of all molecules will be exported. example arguments are the followings: 'raw,50-5000,1000-3500' for exporting raw count and size-normalized count matrices for molecules of 50-5000bp and 1000-3500bp (total three output matrices). if only one argument is given, the argument will be applied to all samples.
-    
+
+    int_length_of_polya_to_append_to_transcript_sequence_during_realignment : int = 50, # during re-alignment analysis for unique transcript assignment, append poly A sequence of given length at the 3' end of transcript sequences, which aids identification of the correct isoform from which the read is likely originated.
+    flag_enforce_transcript_end_site_matching_for_long_read_during_realignment : bool = False, # should only be used when (1) all read contains poly A sequences (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it detects internal-polyA-tract priming, and does not perform TES matching if the read appear to be primed by internal-polyA-tract.
+    int_max_softclipped_length_for_filtering_alignment_to_transcript_during_realignment : int = 30, # rather than aligning an entire sequence of the read, exclude soft clipped regions and align the portion of read that was aligned to the genome. Since this portion of read should be perfectly match the transcript without softclipping if the read was indeed originated from the transcript, during realignment, alignments with extensive softclipping longer than the given threshold will be filtered out.
+
     # the number of manager processes to use for each data object that will be shared across the forked processes. If 0 is given, no manager process will be used. Instead, the object will be directly accessed in the forked process, incurring memory bloating.
     # generally, it is better to use more number of manager processes for data object that are more frequently accessed. If increasing the number of manager processes does not improve performance, considering not using the manager process and accessing the object directly.
     # the expected size of bloated memory per process for each data object is given below.
@@ -5209,6 +5222,30 @@ def LongExportNormalizedCountMatrix(
             default=2000,
             type=int,
         )
+        
+        arg_grp_isoform_realignment = parser.add_argument_group("Isoform assignment - Realignment")
+        arg_grp_isoform_realignment.add_argument(
+            "--int_length_of_polya_to_append_to_transcript_sequence_during_realignment",
+            help="(Default: 50) During re-alignment analysis for unique transcript assignment, append poly A sequence of given length at the 3' end of transcript sequences, which aids identification of the correct isoform from which the read is likely originated.",
+            default=50,
+            type=int,
+        )
+        arg_grp_isoform_realignment.add_argument(
+            "--flag_enforce_transcript_end_site_matching_for_long_read_during_realignment",
+            help="(Default: False) Should only be used when (1) all read contains poly A sequences (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it also use internal-polyA-tract priming information (the length of the internal poly A tract, recorded as a BAM record tag with the tag name 'str_name_bam_tag_internal_polya_length' for all reads), and does not perform TES matching if the read appear to be primed by internal-polyA-tract.",
+            action="store_true",
+        )
+        arg_grp_isoform_realignment.add_argument(
+            "--int_max_softclipped_length_for_filtering_alignment_to_transcript_during_realignment",
+            help="(Default: 30) Rather than aligning an entire sequence of the read, exclude soft clipped regions and align the portion of read that was aligned to the genome. Since this portion of read should be perfectly match the transcript without softclipping if the read was indeed originated from the transcript, during realignment, alignments with extensive softclipping longer than the given threshold will be filtered out.",
+            default=30,
+            type=int,
+        )    
+        arg_grp_isoform_realignment.add_argument(
+            "--str_name_bam_tag_internal_polya_length",
+            help="(Default: 'IA') The name of the BAM record tag that contains the length of internal poly A tract. The tag should be available for all reads if 'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' is set to True, and TES matching mode is active.",
+            default = "IA",
+        )    
 
         # regulatory elements
         arg_grp_annotation_reg = parser.add_argument_group(
@@ -5604,6 +5641,11 @@ def LongExportNormalizedCountMatrix(
         path_folder_reference_distribution = args.path_folder_reference_distribution
         l_name_distribution = args.l_name_distribution
         l_str_l_t_distribution_range_of_interest = args.l_str_l_t_distribution_range_of_interest
+        
+        int_length_of_polya_to_append_to_transcript_sequence_during_realignment = args.int_length_of_polya_to_append_to_transcript_sequence_during_realignment
+        flag_enforce_transcript_end_site_matching_for_long_read_during_realignment = args.flag_enforce_transcript_end_site_matching_for_long_read_during_realignment
+        int_max_softclipped_length_for_filtering_alignment_to_transcript_during_realignment = args.int_max_softclipped_length_for_filtering_alignment_to_transcript_during_realignment
+        str_name_bam_tag_internal_polya_length = args.str_name_bam_tag_internal_polya_length
 
     """
     Start of the Scarab-Count Program
@@ -6211,6 +6253,10 @@ def LongExportNormalizedCountMatrix(
                     'path_folder_reference_distribution' : path_folder_reference_distribution,
                     'l_name_distribution' : l_name_distribution,
                     'l_str_l_t_distribution_range_of_interest' : l_str_l_t_distribution_range_of_interest,
+                    'int_length_of_polya_to_append_to_transcript_sequence_during_realignment' : int_length_of_polya_to_append_to_transcript_sequence_during_realignment,
+                    'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' : flag_enforce_transcript_end_site_matching_for_long_read_during_realignment,
+                    'int_max_softclipped_length_for_filtering_alignment_to_transcript_during_realignment' : int_max_softclipped_length_for_filtering_alignment_to_transcript_during_realignment,
+                    'str_name_bam_tag_internal_polya_length' : str_name_bam_tag_internal_polya_length,
                     # internal
                     "path_folder_temp": path_folder_temp,
                     "path_folder_graph": path_folder_graph,
@@ -6473,6 +6519,7 @@ def LongExportNormalizedCountMatrix(
 
                 """ define internal functions """
                 int_max_n_removed_elements = 10000  # maximum number of removed elements that can exist in a dictionary storing analyzed reads (avoid a 'memory leakeage')
+                seq_polya_sequence_to_append_to_tx = 'A' * int( int_length_of_polya_to_append_to_transcript_sequence_during_realignment ) # retrieve poly A sequence to append
 
                 def __Get_Genomic_Region__(int_pos, int_bp_for_bins=int_bp_for_bins):
                     """get start and end coordinates (0-based) of the genomic region of the current position (0-based)"""
@@ -6655,9 +6702,14 @@ def LongExportNormalizedCountMatrix(
                             )  # handle when no id_tx is available for the id_gene
                             # retrieve fasta files of transcripts, and save as a fasta file
                             # since creating a dictionary using the one-liner expression (for some reason) cause occasional deadlocks (why??) the multi-line version should be used
-                            dict_data["dict_fasta_tx"] = __data_object_subset(
+                            dict_fasta_for_current_gene = __data_object_subset(
                                 data_dict_fa_transcriptome, dict_data["l_id_tx"]
                             )
+                            # append poly A sequence to the transcript
+                            if len( seq_polya_sequence_to_append_to_tx ) > 0 :
+                                dict_fasta_for_current_gene = dict( ( k, dict_fasta_for_current_gene[ k ] + seq_polya_sequence_to_append_to_tx ) for k in dict_fasta_for_current_gene ) # append poly A sequence to the transcript (update 'dict_fasta_for_current_gene')
+                            dict_data["dict_fasta_tx"] = dict_fasta_for_current_gene
+                                
                             dict_data[
                                 "path_file_fasta_tx"
                             ] = f"{path_folder_temp}{bk.UUID( )}.tx.fa.gz"
@@ -7735,6 +7787,7 @@ def LongExportNormalizedCountMatrix(
                                     str_name_bam_tag_cb_uncorrected,
                                     str_name_bam_tag_umi_corrected,
                                     str_name_bam_tag_umi_uncorrected,
+                                    str_name_bam_tag_internal_polya_length,
                                     "TX",
                                     "AN",
                                     "GX",
@@ -7985,7 +8038,7 @@ def LongExportNormalizedCountMatrix(
                                                             [start_seg, end_seg],
                                                             flag_0_based_coordinate_system=True,
                                                         )  # add the number of base pairs of overlap to the gene_id to which the current exon belongs to
-                                                """ (GEX mode specific) if the strand to which read was aligned is different from gene annotation's strand, filter out the gene_id from the possible list of gene_ids that can be assigned to the current read. if strand specific sequencing information is not available, does not filter possible list of genes using the information """
+                                                """ (GEX mode specific) if the strand to which read was aligned is different from the gene annotation strand, filter out the gene_id from the possible list of gene_ids that can be assigned to the current read. if strand specific sequencing information is not available, does not filter possible list of genes using the information """
                                                 if (
                                                     not ( flag_is_mode_scarab_count_atac or flag_no_strand_specificity )
                                                 ):
