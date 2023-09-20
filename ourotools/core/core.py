@@ -13,6 +13,7 @@ from . import SEQ
 from . import STR
 from . import biobookshelf as bk
 
+
 """
 ||||||||||||||||||||||||||||||||
 """
@@ -86,7 +87,7 @@ logger = logging.getLogger("ouro-count")
 # define version
 _version_ = "0.0.2"
 _scelephant_version_ = _version_
-_last_modified_time_ = "2023-09-19 23:20:11"
+_last_modified_time_ = "2023-09-20 23:03:05"
 
 str_release_note = [
     """
@@ -104,7 +105,7 @@ str_release_note = [
     utility functions 'DeduplicateBAM' and 'SplitBAMs' were implemented. Currently, 'DeduplicateBAM' function selects the longest read with the same CB-UMI pair for each bucket (unique CB-UMI attachment location on the genome).
     
     # 2023-08-30 23:51:34 
-    'LongExportNormalizedCountMatrix' function was modified to 
+    'LongExportNormalizedCountMatrix' function was modified for more accurate identification of specific transcript using re-alignment (TES matching, filtering alignment with excessive soft-clipping, and strand-specific assignment)
 
 
     ##### Future implementations #####
@@ -5038,6 +5039,8 @@ def LongExportNormalizedCountMatrix(
     flag_enforce_transcript_end_site_matching_for_long_read_during_realignment : bool = False, # should only be used when (1) all read contains poly A sequences (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it also use internal-polyA-tract priming information (the length of the internal poly A tract, recorded as a BAM record tag with the tag name 'str_name_bam_tag_internal_polya_length' for all reads), and does not perform TES matching if the read appear to be primed by internal-polyA-tract. To enable this behavior, 'int_max_softclipped_length_for_filtering_alignment_to_transcript_during_realignment' should be set to non-negative values, and alignments to transcripts should be filtered based on the softclipping status of the alignment.
     str_name_bam_tag_internal_polya_length : str = 'IA', # the name of the BAM record tag that contains the length of internal poly A tract. The tag should be available for all reads if 'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' is set to True, and TES matching mode is active.
     int_max_softclipped_length_for_filtering_alignment_to_transcript_during_realignment : int = 30, # rather than aligning an entire sequence of the read, exclude soft clipped regions and align the portion of read that was aligned to the genome. Since this portion of read should be perfectly match the transcript without softclipping if the read was indeed originated from the transcript, during realignment, alignments with extensive softclipping longer than the given threshold will be filtered out.
+    int_max_distance_from_transcript_start_and_end_for_tss_and_tes_matching_during_realignment : int = 100, # the maximum distance (in base pairs, bp) from the transcript start or end coordinates for a read to be classified as a specific transcript. Currently, only TES matching is supported, due to 5' frequent degradation events. This argument will be only effective if 'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' is True.
+    str_mappy_aligner_preset_for_realignment : str = 'sr', # minimap2 presets for re-alignment analysis: 'sr' for single-end short read data; 'map-pb' for PacBio long read data; 'map-ont' for Oxford Nanopore long read data. Please avoid using the 'splice' preset, since re-alignment to transcripts should not contain 'splicing', or large deletions.
     dict_num_manager_processes_for_each_data_object: dict = {
         'dict_it_promoter' : 0,
         'dict_t_splice_junc_to_info_genome' : 0,
@@ -5085,10 +5088,13 @@ def LongExportNormalizedCountMatrix(
     l_name_distribution : Union[ List[ str ], str, None ] = None, # the name of each sample that was used to build the reference distribution. the distribution of each sample and pre-calculated correction ratios will be retrieved from the data stored in the reference distribution folder using the given names.
     l_str_l_t_distribution_range_of_interest : Union[ List[ str ], str, None ] = None, # define a range of distribution of interest for exporting normalized count matrix. a list of string for setting the size distrubution ranges of interest for exporting normalized count matrix. if 'raw' is given, no size-based normalization will be performed, and raw counts of all molecules will be exported. example arguments are the followings: 'raw,50-5000,1000-3500' for exporting raw count and size-normalized count matrices for molecules of 50-5000bp and 1000-3500bp (total three output matrices). if only one argument is given, the argument will be applied to all samples.
 
+    ------ for re-alignment -------
     int_length_of_polya_to_append_to_transcript_sequence_during_realignment : int = 50, # during re-alignment analysis for unique transcript assignment, append poly A sequence of given length at the 3' end of transcript sequences, which aids identification of the correct isoform from which the read is likely originated.
     flag_enforce_transcript_end_site_matching_for_long_read_during_realignment : bool = False, # hould only be used when (1) all read contains poly A sequences (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it also use internal-polyA-tract priming information (the length of the internal poly A tract, recorded as a BAM record tag with the tag name 'str_name_bam_tag_internal_polya_length' for all reads), and does not perform TES matching if the read appear to be primed by internal-polyA-tract. To enable this behavior, 'int_max_softclipped_length_for_filtering_alignment_to_transcript_during_realignment' should be set to non-negative values, and alignments to transcripts should be filtered based on the softclipping status of the alignment.
     int_max_softclipped_length_for_filtering_alignment_to_transcript_during_realignment : int = 30, # rather than aligning an entire sequence of the read, exclude soft clipped regions and align the portion of read that was aligned to the genome. Since this portion of read should be perfectly match the transcript without softclipping if the read was indeed originated from the transcript, during realignment, alignments with extensive softclipping longer than the given threshold will be filtered out. To disable this behavior, set this value to negative values (e.g., -1).
     str_name_bam_tag_internal_polya_length : str = 'IA', # the name of the BAM record tag that contains the length of internal poly A tract. The tag should be available for all reads if 'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' is set to True, and TES matching mode is active.
+    int_max_distance_from_transcript_start_and_end_for_tss_and_tes_matching_during_realignment : int = 100, # the maximum distance (in base pairs, bp) from the transcript start or end coordinates for a read to be classified as a specific transcript. Currently, only TES matching is supported, due to 5' frequent degradation events. This argument will be only effective if 'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' is True.
+    str_mappy_aligner_preset_for_realignment : str = 'sr', # minimap2 presets for re-alignment analysis: 'sr' for single-end short read data; 'map-pb' for PacBio long read data; 'map-ont' for Oxford Nanopore long read data. Please avoid using the 'splice' preset, since re-alignment to transcripts should not contain 'splicing', or large deletions.
     
     # the number of manager processes to use for each data object that will be shared across the forked processes. If 0 is given, no manager process will be used. Instead, the object will be directly accessed in the forked process, incurring memory bloating.
     # generally, it is better to use more number of manager processes for data object that are more frequently accessed. If increasing the number of manager processes does not improve performance, considering not using the manager process and accessing the object directly.
@@ -5271,6 +5277,17 @@ def LongExportNormalizedCountMatrix(
         )
         
         arg_grp_isoform_realignment = parser.add_argument_group("Isoform assignment - Realignment")
+        arg_grp_isoform_realignment.add_argument(
+            "--int_max_distance_from_transcript_start_and_end_for_tss_and_tes_matching_during_realignment",
+            help="(Default: 100) The maximum distance (in base pairs, bp) from the transcript start or end coordinates for a read to be classified as a specific transcript. Currently, only TES matching is supported, due to 5' frequent degradation events. This argument will be only effective if 'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' is True.",
+            default=100,
+            type=int,
+        )    
+        arg_grp_isoform_realignment.add_argument(
+            "--str_mappy_aligner_preset_for_realignment",
+            help="(Default: 'sr') minimap2 presets for re-alignment analysis: 'sr' for single-end short read data; 'map-pb' for PacBio long read data; 'map-ont' for Oxford Nanopore long read data. Please avoid using the 'splice' preset, since re-alignment to transcripts should not contain 'splicing', or large deletions.",
+            default = 'sr',
+        )    
         arg_grp_isoform_realignment.add_argument(
             "--int_length_of_polya_to_append_to_transcript_sequence_during_realignment",
             help="(Default: 50) During re-alignment analysis for unique transcript assignment, append poly A sequence of given length at the 3' end of transcript sequences, which aids identification of the correct isoform from which the read is likely originated.",
@@ -5693,6 +5710,8 @@ def LongExportNormalizedCountMatrix(
         flag_enforce_transcript_end_site_matching_for_long_read_during_realignment = args.flag_enforce_transcript_end_site_matching_for_long_read_during_realignment
         int_max_softclipped_length_for_filtering_alignment_to_transcript_during_realignment = args.int_max_softclipped_length_for_filtering_alignment_to_transcript_during_realignment
         str_name_bam_tag_internal_polya_length = args.str_name_bam_tag_internal_polya_length
+        str_mappy_aligner_preset_for_realignment = args.str_mappy_aligner_preset_for_realignment
+        int_length_of_polya_to_append_to_transcript_sequence_during_realignment = args.int_length_of_polya_to_append_to_transcript_sequence_during_realignment
 
     """
     Start of the Scarab-Count Program
@@ -6766,7 +6785,7 @@ def LongExportNormalizedCountMatrix(
                                 dict_fasta=dict_data["dict_fasta_tx"],
                             )  # save as a fasta file
                             dict_data["am_tx"] = mappy.Aligner(
-                                fn_idx_in=dict_data["path_file_fasta_tx"], preset="sr"
+                                fn_idx_in=dict_data["path_file_fasta_tx"], preset=str_mappy_aligner_preset_for_realignment # initialize the aligner using the given preset
                             )  # load minimap aligner using the minimap2 index with the single-end short read alignment mode
 
                         # load the initialized data
@@ -8249,7 +8268,7 @@ def LongExportNormalizedCountMatrix(
                                             
                                             if flag_enforce_transcript_end_site_matching_for_long_read_during_realignment and not flag_internal_polya_tract_primed :
                                                 ''' filter transcript alignments by enforcing transcript end site (TES) matching. transcript alignment with the distance between the alignment end position and the actual end of the transcript larger than the threshold will be filtered, if the read is not internal-polyA-primed. '''
-                                                l_aln_to_tx = list( hit for hit in l_aln_to_tx if ( hit.ctg_len - hit.r_en ) <= 100 ) # filter alignments with transcript end site (TES) matching, and retain transcript alignment 
+                                                l_aln_to_tx = list( hit for hit in l_aln_to_tx if ( hit.ctg_len - hit.r_en ) <= int_max_distance_from_transcript_start_and_end_for_tss_and_tes_matching_during_realignment ) # filter alignments with transcript end site (TES) matching, and retain transcript alignment 
                                                 
                                             dict_assignment_to_score = dict( ( ( hit.ctg, hit.r_st, hit.r_en ), hit.mapq ) for hit in l_aln_to_tx if hit.mapq >= int_min_mapq_minimap2_tx_assignment ) # filter with mapping quality, # retrieve tx assignment - score mapping
                                             if len( dict_assignment_to_score ) > 0 : # if at least one transcript alignment is available
