@@ -5055,7 +5055,7 @@ def LongExportNormalizedCountMatrix(
     l_seqname_to_skip: list = ["MT"],
     flag_no_strand_specificity : bool = False,
 ) -> dict:
-    """# 2023-09-19 23:18:30 
+    """# 2023-09-22 22:18:32 
     perform secondary analysis of cell-ranger output (barcoded BAM)
 
     l_str_mode_scarab_count : list[ Literal[ "gex5prime-single-end", 'gex5prime-paired-end', "gex3prime-single-end", 'gex3prime', 'gex', 'gex5prime', 'atac', 'multiome' ] ] = [ 'gex3prime' ], # list of scarab_count operation mode
@@ -9048,13 +9048,13 @@ def LongExportNormalizedCountMatrix(
                         f"[{path_file_bam_input}] the analysis pipeline will be run with {n_threads} number of threads"
                     )
                 bk.Multiprocessing_Batch_Generator_and_Workers(
-                    gen_batch=iter( SAM.Get_contig_names_from_bam_header( path_file_bam_input ) ), # analyze the pre-processed BAM file for each chromosome
+                    gen_batch=iter( set( SAM.Get_contig_names_from_bam_header( path_file_bam_input ) ).difference( set_seqname_to_skip ) ), # analyze the pre-processed BAM file for each chromosome # exclude the chromosomes in the given list of sequence names to exclude in the analysis
                     process_batch=process_batch,
                     post_process_batch=post_process_batch,
                     int_num_threads=n_threads
                     + 2,  # one thread for generating batch, another thread for post-processing of the batch
                 )
-
+                
                 """ 
                 Export Gene, Transcript, and Misc. Annotation Read Count Matrix 
                 """
