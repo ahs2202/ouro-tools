@@ -87,7 +87,7 @@ logger = logging.getLogger("ouro-count")
 # define version
 _version_ = "0.0.2"
 _ourotools_version_ = _version_
-_last_modified_time_ = "2023-09-20 23:03:05"
+_last_modified_time_ = "2023-09-27 23:12:37"
 
 str_release_note = [
     """
@@ -104,9 +104,9 @@ str_release_note = [
     # 2023-09-19 12:38:25 
     utility functions 'DeduplicateBAM' and 'SplitBAMs' were implemented. Currently, 'DeduplicateBAM' function selects the longest read with the same CB-UMI pair for each bucket (unique CB-UMI attachment location on the genome).
     
-    # 2023-08-30 23:51:34 
+    # 2023-09-27 23:12:53 
     'LongExportNormalizedCountMatrix' function was modified for more accurate identification of specific transcript using re-alignment (TES matching, filtering alignment with excessive soft-clipping, and strand-specific assignment)
-
+    Also, a typo in graph labels were fixed.
 
     ##### Future implementations #####
 
@@ -2471,7 +2471,7 @@ def LongFilterNSplit(
         hit # a Minimap2 mappy alignment record. multiple hits can be given as a list of hits. 
         
         # possible labels
-        'no_poly_A', 'external_poly_A__unrefenced_G', 'internal_poly_A__unrefenced_G', 'external_poly_A__no_unrefenced_G', 'internal_poly_A__no_unrefenced_G'
+        'no_poly_A', 'external_poly_A__unreferenced_G', 'internal_poly_A__unreferenced_G', 'external_poly_A__no_unreferenced_G', 'internal_poly_A__no_unreferenced_G'
         
         return the direction of the read and the classification label
         """
@@ -2524,26 +2524,26 @@ def LongFilterNSplit(
         if flag_internal_poly_A_flipped or flag_internal_poly_A :
             if flag_internal_poly_A_flipped :
                 if flag_unreferenced_Gs_flipped :
-                    return 'internal_poly_A__unrefenced_G', '-'
+                    return 'internal_poly_A__unreferenced_G', '-'
                 else :
-                    return 'internal_poly_A__no_unrefenced_G', '-'
+                    return 'internal_poly_A__no_unreferenced_G', '-'
             else :
                 if flag_unreferenced_Gs :
-                    return 'internal_poly_A__unrefenced_G', '+'
+                    return 'internal_poly_A__unreferenced_G', '+'
                 else :
-                    return 'internal_poly_A__no_unrefenced_G', '+'
+                    return 'internal_poly_A__no_unreferenced_G', '+'
         
         ''' handles external poly A '''
         if flag_external_poly_A_flipped :
             if flag_unreferenced_Gs_flipped :
-                return 'external_poly_A__unrefenced_G', '-'
+                return 'external_poly_A__unreferenced_G', '-'
             else :
-                return 'external_poly_A__no_unrefenced_G', '-'
+                return 'external_poly_A__no_unreferenced_G', '-'
         else :
             if flag_unreferenced_Gs :
-                return 'external_poly_A__unrefenced_G', '+'
+                return 'external_poly_A__unreferenced_G', '+'
             else :
-                return 'external_poly_A__no_unrefenced_G', '+'
+                return 'external_poly_A__no_unreferenced_G', '+'
     
     def _initialize_dict_arr_dist( ) :
         """ # 2023-08-03 11:49:26 
@@ -2555,16 +2555,16 @@ def LongFilterNSplit(
             'aligned_to_genome' : None,
 
             'aligned_to_genome__non_chimeric__no_poly_A' : None,
-            'aligned_to_genome__non_chimeric__external_poly_A__unrefenced_G' : None,
-            'aligned_to_genome__non_chimeric__internal_poly_A__unrefenced_G' : None,
-            'aligned_to_genome__non_chimeric__external_poly_A__no_unrefenced_G' : None,
-            'aligned_to_genome__non_chimeric__internal_poly_A__no_unrefenced_G' : None,
+            'aligned_to_genome__non_chimeric__external_poly_A__unreferenced_G' : None,
+            'aligned_to_genome__non_chimeric__internal_poly_A__unreferenced_G' : None,
+            'aligned_to_genome__non_chimeric__external_poly_A__no_unreferenced_G' : None,
+            'aligned_to_genome__non_chimeric__internal_poly_A__no_unreferenced_G' : None,
 
             'aligned_to_genome__chimeric__no_poly_A' : None,
-            'aligned_to_genome__chimeric__external_poly_A__unrefenced_G' : None,
-            'aligned_to_genome__chimeric__internal_poly_A__unrefenced_G' : None,
-            'aligned_to_genome__chimeric__external_poly_A__no_unrefenced_G' : None,
-            'aligned_to_genome__chimeric__internal_poly_A__no_unrefenced_G' : None,
+            'aligned_to_genome__chimeric__external_poly_A__unreferenced_G' : None,
+            'aligned_to_genome__chimeric__internal_poly_A__unreferenced_G' : None,
+            'aligned_to_genome__chimeric__external_poly_A__no_unreferenced_G' : None,
+            'aligned_to_genome__chimeric__internal_poly_A__no_unreferenced_G' : None,
         }
         
     def run_pipeline():
@@ -3074,15 +3074,15 @@ def LongFilterNSplit(
                         'aligned_to_unwanted_sequence',
                         'cannot_aligned_to_genome',
                         'aligned_to_genome__non_chimeric__no_poly_A',
-                        'aligned_to_genome__non_chimeric__external_poly_A__unrefenced_G',
-                        'aligned_to_genome__non_chimeric__internal_poly_A__unrefenced_G',
-                        'aligned_to_genome__non_chimeric__external_poly_A__no_unrefenced_G',
-                        'aligned_to_genome__non_chimeric__internal_poly_A__no_unrefenced_G',
+                        'aligned_to_genome__non_chimeric__external_poly_A__unreferenced_G',
+                        'aligned_to_genome__non_chimeric__internal_poly_A__unreferenced_G',
+                        'aligned_to_genome__non_chimeric__external_poly_A__no_unreferenced_G',
+                        'aligned_to_genome__non_chimeric__internal_poly_A__no_unreferenced_G',
                         'aligned_to_genome__chimeric__no_poly_A',
-                        'aligned_to_genome__chimeric__external_poly_A__unrefenced_G',
-                        'aligned_to_genome__chimeric__internal_poly_A__unrefenced_G',
-                        'aligned_to_genome__chimeric__external_poly_A__no_unrefenced_G',
-                        'aligned_to_genome__chimeric__internal_poly_A__no_unrefenced_G',
+                        'aligned_to_genome__chimeric__external_poly_A__unreferenced_G',
+                        'aligned_to_genome__chimeric__internal_poly_A__unreferenced_G',
+                        'aligned_to_genome__chimeric__external_poly_A__no_unreferenced_G',
+                        'aligned_to_genome__chimeric__internal_poly_A__no_unreferenced_G',
                     ],
                     title = 'Adaptor-Based Classification Results',
                     flag_save_figure = True, path_folder_graph = path_folder_graph_interactive,
