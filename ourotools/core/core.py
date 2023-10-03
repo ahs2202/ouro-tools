@@ -2179,7 +2179,7 @@ def LongFilterNSplit(
     l_path_folder_output: [list[str], None] = None,
     n_threads: int = 32,
     int_num_samples_analyzed_concurrently : int = 2, # the number of samples that can be analyzed concurrently to reduce bottlenecks due to processing of very large chunks.
-    int_num_reads_in_a_batch : int = 10_000, # the number of reads in a batch
+    int_num_base_pairs_in_a_batch : int = 2_500_000, # the number of base pairs in a batch
     float_memory_in_GiB: float = 50,
     verbose: bool = True,
     str_minimap_aligner_preset : str = 'splice', # preset of the minimap2 aligner
@@ -2188,11 +2188,12 @@ def LongFilterNSplit(
     int_max_size_intervening_sequence_between_alignment_end_and_poly_A : int = 20, # max size of the intervening sequence between alignment end position and poly A tract. it will be applied for both internal poly A or external (enzymatically attached) poly A.
     float_min_A_frequency_for_identifying_poly_A : float = 0.75, # the minimum frequency to determine a sequence contains a poly A tract
     int_min_size_intervening_sequence_for_splitting : int = 150, # the minimum length of intervening sequence between alignments for splitting the reads
-    int_max_intron_size_for_determining_chimeric_molecule : int = 200000, # the maximum allowed intron size for classifying considering the molecule as a intra-chromosomal chimeric read
+    int_max_intron_size_for_determining_chimeric_molecule : int = 200_000, # the maximum allowed intron size for classifying considering the molecule as a intra-chromosomal chimeric read
+    int_max_read_length : int = 20_000, # the maximum read length to analyze. If the speed of the analysis seems to be slower than expected, try lowering this parameter to filter out repeat-containing artifact reads present in long-read sequencing data, which takes a long time to align and filter out based on the alignment profile.
     am_genome = None, # mappy aligner for genome (optional. if given, will override 'path_file_minimap_index_genome' argument)
     l_am_unwanted : Union[ None, List ] = None, # mappy aligner for unwanted sequences (optional. if given, will override 'l_path_file_minimap_index_unwanted' argument)
 ) -> None :
-    """# 2023-08-10 16:30:50 
+    """# 2023-10-03 19:39:24 
     
     flag_usage_from_command_line_interface: bool = False,
     path_file_minimap_index_genome: Union[str, None] = None, # required for identifying valid regions of a read and identify chimeric transcripts
@@ -2201,7 +2202,7 @@ def LongFilterNSplit(
     l_path_folder_output: [list[str], None] = None,
     n_threads: int = 32,
     int_num_samples_analyzed_concurrently : int = 2, # the number of samples that can be analyzed concurrently to reduce bottlenecks due to processing of very large chunks.
-    int_num_reads_in_a_batch : int = 10_000, # the number of reads in a batch
+    int_num_base_pairs_in_a_batch : int = 2_500_000, # the number of base pairs in a batch
     float_memory_in_GiB: float = 50,
     str_minimap_aligner_preset = 'splice', # preset of the minimap2 aligner
     verbose: bool = True,
@@ -2210,6 +2211,7 @@ def LongFilterNSplit(
     int_max_size_intervening_sequence_between_alignment_end_and_poly_A : int = 20, # max size of the intervening sequence between alignment end position and poly A tract. it will be applied for both internal poly A or external (enzymatically attached) poly A.
     float_min_A_frequency_for_identifying_poly_A : float = 0.75, # the minimum frequency to determine a sequence contains a poly A tract
     int_max_intron_size_for_determining_chimeric_molecule : int = 200000, # the maximum allowed intron size for classifying considering the molecule as a intra-chromosomal chimeric read
+    int_max_read_length : int = 30_000, # the maximum read length to analyze. If the speed of the analysis seems to be slower than expected, try lowering this parameter to filter out repeat-containing artifact reads present in long-read sequencing data, which takes a long time to align and filter out based on the alignment profile.
     am_genome = None, # mappy aligner for genome (optional. if given, will override 'path_file_minimap_index_genome' argument)
     int_min_size_intervening_sequence_for_splitting : int = 150, # the minimum length of intervening sequence between alignments for splitting the reads
     l_am_unwanted : Union[ None, List ] = None, # mappy aligner for unwanted sequences (optional. if given, will override 'l_path_file_minimap_index_unwanted' argument)
@@ -2254,9 +2256,9 @@ def LongFilterNSplit(
         )
         arg_grp_general.add_argument(
             "-b",
-            "--int_num_reads_in_a_batch",
-            help="(default: 10000) the number of reads in a batch.",
-            default=10_000,
+            "--int_num_base_pairs_in_a_batch",
+            help="(default: 2,500,000) the number of base pairs in a batch.",
+            default = 2_500_000,
             type=int,
         )
         arg_grp_general.add_argument(
@@ -2306,6 +2308,13 @@ def LongFilterNSplit(
             default="splice",
             type=str,
         )
+        arg_grp_alignment.add_argument(
+            "-L", 
+            "--int_max_read_length", 
+            help="(default: 30,000) the maximum read length to analyze. If the speed of the analysis seems to be slower than expected, try lowering this parameter to filter out repeat-containing artifact reads present in long-read sequencing data, which takes a long time to align and filter out based on the alignment profile.", 
+            default=30_000,
+            type=int,
+        )
         arg_grp_poly_a_tail_detection = parser.add_argument_group("Poly A tail detection")
         arg_grp_poly_a_tail_detection.add_argument(
             "-w",
@@ -2354,7 +2363,7 @@ def LongFilterNSplit(
         int_num_samples_analyzed_concurrently = args.int_num_samples_analyzed_concurrently
         float_memory_in_GiB = args.float_memory_in_GiB
         verbose = args.verbose
-        int_num_reads_in_a_batch = args.int_num_reads_in_a_batch
+        int_num_base_pairs_in_a_batch = args.int_num_base_pairs_in_a_batch
         l_path_file_minimap_index_unwanted = args.l_path_file_minimap_index_unwanted
         int_min_mapq = args.int_min_mapq
         str_minimap_aligner_preset = args.str_minimap_aligner_preset
@@ -2363,6 +2372,7 @@ def LongFilterNSplit(
         float_min_A_frequency_for_identifying_poly_A = args.float_min_A_frequency_for_identifying_poly_A
         int_min_size_intervening_sequence_for_splitting = args.int_min_size_intervening_sequence_for_splitting
         int_max_intron_size_for_determining_chimeric_molecule = args.int_max_intron_size_for_determining_chimeric_molecule
+        int_max_read_length = args.int_max_read_length
 
     """
     Start of the pipeline
@@ -2568,7 +2578,7 @@ def LongFilterNSplit(
         }
         
     def run_pipeline():
-        """# 2023-07-30 17:20:19 
+        """# 2023-10-03 20:00:57 
         analyze a pipeline for a given list of samples
         """
         # retrieve id of the pipeline
@@ -2734,11 +2744,12 @@ def LongFilterNSplit(
                 "n_threads" : n_threads,
                 "int_num_samples_analyzed_concurrently" : int_num_samples_analyzed_concurrently,
                 "float_memory_in_GiB" : float_memory_in_GiB,
-                "int_num_reads_in_a_batch" : int_num_reads_in_a_batch,
+                "int_num_base_pairs_in_a_batch" : int_num_base_pairs_in_a_batch,
                 'str_minimap_aligner_preset' : str_minimap_aligner_preset,
                 'int_min_mapq' : int_min_mapq,
                 'int_size_window_for_searching_poly_a_tail' : int_size_window_for_searching_poly_a_tail,
                 'float_min_A_frequency_for_identifying_poly_A' : float_min_A_frequency_for_identifying_poly_A,
+                'int_max_read_length' : int_max_read_length,
                 # internal
                 "path_folder_temp": path_folder_temp,
                 "path_folder_graph": path_folder_graph,
@@ -2773,14 +2784,15 @@ def LongFilterNSplit(
                 """# 2023-07-30 18:37:49 
                 create batch from the input fastq file
                 """
-                int_read_counter = 0 # count read
+                int_base_pair_counter = 0 # initialize base pair counter
                 l_r_for_a_batch = [ ] # a list of records for a batch
                 for r in bk.FASTQ_Iterate( path_file_fastq_input ) : # iterate through the input FASTQ file
                     l_r_for_a_batch.append( r ) # add the record
-                    int_read_counter += 1 # increase the counter
-                    if int_read_counter % int_num_reads_in_a_batch == 0 : # if the batch is full, yield the batch
+                    int_base_pair_counter += len( r[ 1 ] ) # increase the counter
+                    if int_base_pair_counter >= int_num_base_pairs_in_a_batch : # if the batch is full, yield the batch
                         yield l_r_for_a_batch
                         l_r_for_a_batch = [ ] # initialize the next batch
+                        int_base_pair_counter = 0 # initialize base pair counter
                 if len( l_r_for_a_batch ) > 0 : # if records are remaining in the list, yield the list as the last batch
                     yield l_r_for_a_batch
 
@@ -2867,6 +2879,14 @@ def LongFilterNSplit(
                         header, seq, _, qual = r # parse fastq record
                         len_seq = len( seq ) # retrieve length of the sequence
                         qname = header.split( ' ', 1 )[ 0 ][ 1 : ] # retrieve qname
+                        
+                        """
+                        handle the case when read length exceed the given limit (will be considered as 'cannot be aligned to genome')
+                        """
+                        if len_seq > int_max_read_length :
+                            dict_arr_dist[ 'cannot_aligned_to_genome' ] = _update_size_distribution( new_size = len_seq, arr_dist = dict_arr_dist[ 'cannot_aligned_to_genome' ] ) # update distribution of reads that cannot be aligned to the genome
+                            _write_a_fastq_record( dict_newfile_fastq_output[ 'cannot_aligned_to_genome' ], r ) # write the current read to the appropriate output fastq file
+                            continue # skip the remaining operations
                         
                         """
                         align read to the list of unwanted sequences
@@ -2967,6 +2987,9 @@ def LongFilterNSplit(
                         'int_total_num_records_for_a_batch' : int_total_num_records_for_a_batch,
                         'dict_arr_dist' : dict_arr_dist,
                     } )  # report the number of processed records
+                    """ report the worker has completed a batch """
+                    if verbose:
+                        logger.info(f"[Completed] completed a batch (worker_id={str_uuid})")
                     
                 """ close output files """
                 for name_type in dict_newfile_fastq_output :
@@ -3000,7 +3023,7 @@ def LongFilterNSplit(
                 logger.info(
                     f"[{path_file_fastq_input}] the analysis pipeline will be run with {n_threads} number of threads"
                 )
-            bk.Multiprocessing_Batch_Generator_and_Workers(
+            bk.Multiprocessing_Batch_Generator_and_Workers( 
                 gen_batch=gen_batch(),
                 process_batch=process_batch,
                 post_process_batch=post_process_batch,
@@ -3132,7 +3155,7 @@ def LongExtractBarcodeFromBAM(
     l_path_folder_output: [list[str], None] = None, # list of output folders
     n_threads: int = 32, # the number of threads to use
     int_num_samples_analyzed_concurrently : int = 2, # the number of samples that can be analyzed concurrently to reduce bottlenecks due to processing of very large chunks.
-    int_num_reads_in_a_batch : int = 10_000, # the number of reads in a batch
+    int_num_base_pairs_in_a_batch : int = 2_500_000, # the number of base pairs in a batch
     int_min_mapq : int = 1, # minimum mapping quality of the alignment to filter read with low alignment quality
     float_memory_in_GiB : float = 50, # expected memory usage of the pipeline
     float_error_rate : float = 0.2, # maximum error rate to consider when searching adaptor sequence in the read
@@ -3141,7 +3164,7 @@ def LongExtractBarcodeFromBAM(
     str_seq_r1 : str = 'CTACACGACGCTCTTCCGATCT', # the sequence of R1 adaptor (in 10x GEX v3 kit, located upstream of CB and UMI)
     str_seq_tso : str = 'AAGCAGTGGTATCAACGCAGAG', # the sequence of TSO adaptor (in 10x GEX v3 kit, located at 5' end of the molecule)
     path_file_valid_cb : str = None, # (required argument) the path to tsv file of whitelist barcodes. For more details, please see 10x cellranger references.
-    int_max_num_cell_expected : int = 20000, # the max number of expected cells
+    int_max_num_cell_expected : int = 20_000, # the max number of expected cells
     int_len_sliding_window_internal_polyT : int = 10, # the length of sliding window for searching internal poly T (poly A) tract. (When poly-A tailed read is reverse complemented, R1 adaptor become situated in the forward direction
     int_len_window_internal_polyT : int = 30, # the size of window for searching for internal poly T
     float_min_T_fraction : float = 0.8, # the minimum T fraction for identifying the stretch of poly T tract
@@ -3151,14 +3174,14 @@ def LongExtractBarcodeFromBAM(
     int_size_bin_in_base_pairs_for_collecting_size_distributions_at_single_cell_level : int = 50, # the size of the bin (in base pairs) for collecting size distributions at the single-cell level
     verbose: bool = True,
 ) -> None :
-    """# 2023-09-15 21:02:13 
+    """# 2023-10-03 23:35:54 
     
     flag_usage_from_command_line_interface: bool = False, # a flag indicating the usage in the command line
     l_path_file_bam_input: Union[list, None] = None, # list of input BAM files
     l_path_folder_output: [list[str], None] = None, # list of output folders
     n_threads: int = 32, # the number of threads to use
     int_num_samples_analyzed_concurrently : int = 2, # the number of samples that can be analyzed concurrently to reduce bottlenecks due to processing of very large chunks.
-    int_num_reads_in_a_batch : int = 10_000, # the number of reads in a batch
+    int_num_base_pairs_in_a_batch : int = 2_500_000, # the number of base pairs in a batch
     int_min_mapq : int = 1, # minimum mapping quality of the alignment to filter read with low alignment quality
     float_memory_in_GiB: float = 50,
     float_error_rate : float = 0.2, # maximum error rate to consider when searching adaptor sequence in the read
@@ -3229,9 +3252,9 @@ def LongExtractBarcodeFromBAM(
         )
         arg_grp_general.add_argument(
             "-b",
-            "--int_num_reads_in_a_batch",
-            help="(default: 10000) the number of reads in a batch.",
-            default=10_000,
+            "--int_num_base_pairs_in_a_batch",
+            help="(default: 2,500,000) the number of base pairs in a batch.",
+            default=2_500_000,
             type=int,
         )
         arg_grp_general.add_argument(
@@ -3293,7 +3316,7 @@ def LongExtractBarcodeFromBAM(
         l_path_file_bam_input = args.l_path_file_bam_input
         l_path_folder_output = args.l_path_folder_output
         n_threads = args.n_threads
-        int_num_reads_in_a_batch = args.int_num_reads_in_a_batch
+        int_num_base_pairs_in_a_batch = args.int_num_base_pairs_in_a_batch
         int_num_samples_analyzed_concurrently = args.int_num_samples_analyzed_concurrently
         float_memory_in_GiB = args.float_memory_in_GiB
         verbose = args.verbose
@@ -3484,7 +3507,7 @@ def LongExtractBarcodeFromBAM(
         return dict( (e, None) for e in l_name_type_dist )
     
     def run_pipeline():
-        """# 2023-09-15 21:02:07 
+        """# 2023-10-03 23:36:11 
         analyze a pipeline for a given list of samples
         """
         # retrieve id of the pipeline
@@ -3645,7 +3668,7 @@ def LongExtractBarcodeFromBAM(
                 "path_folder_output" : path_folder_output,
                 "n_threads" : n_threads,
                 "int_num_samples_analyzed_concurrently" : int_num_samples_analyzed_concurrently,
-                "int_num_reads_in_a_batch" : int_num_reads_in_a_batch,
+                "int_num_base_pairs_in_a_batch" : int_num_base_pairs_in_a_batch,
                 "int_min_mapq" : int_min_mapq,
                 "float_memory_in_GiB" : float_memory_in_GiB,
                 # internal
@@ -3683,12 +3706,30 @@ def LongExtractBarcodeFromBAM(
                 """
                 with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
                     gen_r = samfile.fetch( ) # open the generator
-                    try :
-                        r = next( gen_r ) # retrieve the first read
-                    except StopIteration : # if the bam file is emtpy, end the generator
-                        return
+                    ''' retrieve the first valid read '''
+                    while True :
+                        ''' retrieve a read '''
+                        try :
+                            r = next( gen_r ) # retrieve the first read
+                        except StopIteration : # if the bam file is emtpy, end the generator
+                            return
+                        
+                        """ filter read """
+                        if r.mapq < int_min_mapq : # filter out reads with low mapq
+                            continue
+                        if r.seq is None : # consider only the primary alignment
+                            continue
+                        len_seq = len( r.seq ) # retrieve the length of the sequence
+                        cigartuples, flags = r.cigartuples, r.flag # retrieve attributes
+                        if int_cigarop_H == cigartuples[ 0 ][ 0 ] or int_cigarop_H == cigartuples[ -1 ][ 0 ] : # skip hard-clipped reads
+                            continue 
+                        if _check_binary_flags( flags, 10 ) or _check_binary_flags( flags, 8 ) : # filter out optical duplicates or secondary alignments
+                            continue
+                        ''' once the first valid read is found, continue to the next step '''
+                        break
+
                     # initialize the batch
-                    ns_batch = { 'int_num_reads_encountered_for_a_batch' : 1, 'start__reference_name' : r.reference_name, 'start__reference_start' : r.reference_start, } # initialize the dictionary containing information about the batch # counts of reads in a batch
+                    ns_batch = { 'int_num_base_pairs_encountered_for_a_batch' : len( r.seq ), 'start__reference_name' : r.reference_name, 'start__reference_start' : r.reference_start, } # initialize the dictionary containing information about the batch using the first valid read # counts of base pairs in a batch
                     
                     while True :
                         """ retrieve a read """ 
@@ -3703,6 +3744,7 @@ def LongExtractBarcodeFromBAM(
                             continue
                         if r.seq is None : # consider only the primary alignment
                             continue
+                        len_seq = len( r.seq ) # retrieve the length of the sequence
                         cigartuples, flags = r.cigartuples, r.flag # retrieve attributes
                         if int_cigarop_H == cigartuples[ 0 ][ 0 ] or int_cigarop_H == cigartuples[ -1 ][ 0 ] : # skip hard-clipped reads
                             continue 
@@ -3713,12 +3755,12 @@ def LongExtractBarcodeFromBAM(
                         if r.reference_name != ns_batch[ 'start__reference_name' ] :
                             yield ns_batch # yield the last batch for the last contig
                             # initialize the next batch
-                            ns_batch = { 'int_num_reads_encountered_for_a_batch' : 0 } # initialize the counter
+                            ns_batch = { 'int_num_base_pairs_encountered_for_a_batch' : 0 } # initialize the counter
                             ns_batch[ 'start__reference_name' ] = r.reference_name
                             ns_batch[ 'start__reference_start' ] = r.reference_start
                             
-                        ns_batch[ 'int_num_reads_encountered_for_a_batch' ] += 1 # increase the read count
-                        if int_num_reads_in_a_batch <= ns_batch[ 'int_num_reads_encountered_for_a_batch' ] : # once the batch is full, yield the batch and consume remaining reads starting at the reference start position, so that the reads of the same reference start position are processed together.
+                        ns_batch[ 'int_num_base_pairs_encountered_for_a_batch' ] += len_seq # increase the base pair count
+                        if int_num_base_pairs_in_a_batch <= ns_batch[ 'int_num_base_pairs_encountered_for_a_batch' ] : # once the batch is full, yield the batch and consume remaining reads starting at the reference start position, so that the reads of the same reference start position are processed together. # pipe overloading might happens, causing dead lock. in this case, 'int_num_base_pairs_in_a_batch' can be lowered.
                             # update batch information
                             ns_batch[ 'end__reference_start' ] = r.reference_start
                             while True :
@@ -3728,12 +3770,25 @@ def LongExtractBarcodeFromBAM(
                                 except StopIteration : # once all reads were analyzed, exit the loop
                                     break
                                     
+                                """ filter read """
+                                if r.mapq < int_min_mapq : # filter out reads with low mapq
+                                    continue
+                                if r.seq is None : # consider only the primary alignment
+                                    continue
+                                len_seq = len( r.seq ) # retrieve the length of the sequence
+                                cigartuples, flags = r.cigartuples, r.flag # retrieve attributes
+                                if int_cigarop_H == cigartuples[ 0 ][ 0 ] or int_cigarop_H == cigartuples[ -1 ][ 0 ] : # skip hard-clipped reads
+                                    continue 
+                                if _check_binary_flags( flags, 10 ) or _check_binary_flags( flags, 8 ) : # filter out optical duplicates or secondary alignments
+                                    continue
+                                    
+                                """ check boundary condition """
                                 if ns_batch[ 'end__reference_start' ] != r.reference_start : # when the 'reference_start' position changes, finish the batch
                                     break
                                 
-                                ns_batch[ 'int_num_reads_encountered_for_a_batch' ] += 1 # increase the counter
+                                ns_batch[ 'int_num_base_pairs_encountered_for_a_batch' ] += len_seq # increase the counter
                             yield ns_batch # yield the batch
-                            ns_batch = { 'int_num_reads_encountered_for_a_batch' : 1 } # initialize the counter
+                            ns_batch = { 'int_num_base_pairs_encountered_for_a_batch' : len_seq } # initialize the counter
                             ns_batch[ 'start__reference_name' ] = r.reference_name
                             ns_batch[ 'start__reference_start' ] = r.reference_start
                             
@@ -3783,6 +3838,7 @@ def LongExtractBarcodeFromBAM(
                             seq = r.seq
                             if seq is None : # consider only the primary alignment
                                 continue
+                            len_seq = len( seq ) # retrieve the length of the sequence
                             cigartuples, flags = r.cigartuples, r.flag # retrieve attributes
                             if int_cigarop_H == cigartuples[ 0 ][ 0 ] or int_cigarop_H == cigartuples[ -1 ][ 0 ] : # skip hard-clipped reads
                                 continue 
@@ -3872,7 +3928,7 @@ def LongExtractBarcodeFromBAM(
                 ns["int_num_records_with_cb_umi"] += len( res["l_cb_umi"] ) # update ns["int_num_records_with_cb_umi"]
                 ns["l_cb_umi"] += res["l_cb_umi"]
                 logger.info( f"[{path_file_bam_input}] total {ns[ 'int_num_read_currently_processed' ]} number of reads has been processed. CB/UMI sequence identification rate is {np.round(ns['int_num_records_with_cb_umi'] / ns['int_num_read_currently_processed'], 2 ) if ns['int_num_read_currently_processed'] > 0 else np.nan}" )  # report
-                ns[ 'l_l' ].append( [ res[ 'ns_batch' ][ 'int_num_reads_encountered_for_a_batch' ], res[ 'ns_batch' ][ 'start__reference_name' ], res[ 'ns_batch' ][ 'start__reference_start' ], np.nan if 'end__reference_start' not in res[ 'ns_batch' ] else res[ 'ns_batch' ][ 'end__reference_start' ], res[ 'int_total_num_records_for_a_batch' ] ] ) # for debugging
+                ns[ 'l_l' ].append( [ res[ 'ns_batch' ][ 'int_num_base_pairs_encountered_for_a_batch' ], res[ 'ns_batch' ][ 'start__reference_name' ], res[ 'ns_batch' ][ 'start__reference_start' ], np.nan if 'end__reference_start' not in res[ 'ns_batch' ] else res[ 'ns_batch' ][ 'end__reference_start' ], res[ 'int_total_num_records_for_a_batch' ] ] ) # for debugging
             
             """
             Analyze an input BAM file
@@ -3889,7 +3945,7 @@ def LongExtractBarcodeFromBAM(
             )
             
             ''' write temporary objects for debugging '''
-            df_bookmark = pd.DataFrame( ns[ 'l_l' ], columns = [ 'int_num_reads_encountered_for_a_batch', 'start__reference_name', 'start__reference_start', 'end__reference_start', 'int_total_num_records_for_a_batch' ] )
+            df_bookmark = pd.DataFrame( ns[ 'l_l' ], columns = [ 'int_num_base_pairs_encountered_for_a_batch', 'start__reference_name', 'start__reference_start', 'end__reference_start', 'int_total_num_records_for_a_batch' ] )
             df_bookmark.to_csv( f"{path_folder_output}df_bookmark.tsv.gz", index = False, sep = '\t' ) # for debugging
             # bk.PICKLE_Write( f"{path_folder_output}l_cb_umi.pickle", ns["l_cb_umi"] ) # ❤️
             
