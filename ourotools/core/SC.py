@@ -576,3 +576,72 @@ def MTX_Convert_10x_MEX_to_10x_HDF5_Format(
 
     # close the file
     newfile.close()
+    
+def MTX_Convert_10x_HDF5_to_10x_MEX_Format(
+    path_file_matrix_input_hdf5_format: str,
+    path_folder_matrix_output_mex_format: str,
+):
+    """# 2023-10-04 13:31:40 
+    path_file_matrix_input_hdf5_format: str, # the path of the input 10x HDF5 matrix file
+    path_folder_matrix_output_mex_format: str, # the path of the output 10x MEX matrix folder
+    """
+    """ import libaries """
+    import h5py
+    import scipy.io
+
+    """ read hdf5 file """
+    newfile = h5py.File(path_file_matrix_input_hdf5_format, "r" )  # open new HDF5 file
+    mtx = newfile[ 'matrix' ] # retrieve the group
+
+    ''' read barcodes '''
+    arr_bc = mtx[ 'barcodes' ][ : ] # retrieve col (cell) boundary positions
+    arr_bc = np.array( list( e.decode( ) for e in arr_bc ), dtype = object ) # change dtype of the barcode
+
+    ''' read features '''
+    ft = mtx[ 'features' ] # retrieve the group
+    arr_id_ft = np.array( list( e.decode( ) for e in ft[ 'id' ][ : ] ), dtype = object ) # change dtype of the barcode
+    arr_id_name = np.array( list( e.decode( ) for e in ft[ 'name' ][ : ] ), dtype = object ) # change dtype of the barcode
+    arr_id_feature_type = np.array( list( e.decode( ) for e in ft[ 'feature_type' ][ : ] ), dtype = object ) # change dtype of the barcode
+    arr_genome = np.array( list( e.decode( ) for e in ft[ 'genome' ][ : ] ), dtype = object ) # change dtype of the barcode
+    # compose feature dataframe
+    df_feature = pd.DataFrame( { 'id_feature' : arr_id_ft, 'feature' : arr_id_name, 'feature_type' : arr_id_feature_type, 'genome' : arr_genome } )
+
+    ''' read count values '''
+    arr_data = mtx[ 'data' ][ : ]
+    arr_row_indices = mtx[ 'indices' ][ : ] # retrieve row (gene) indices
+    arr_col_index_boundary = mtx[ 'indptr' ][ : ] # retrieve col (cell) boundary positions
+    # compose arr_col_indices
+    arr_col_indices = np.zeros_like( arr_row_indices ) # initialize 'arr_col_indices' 
+    for idx_bc in range( len( arr_bc ) ) : # for each barcode index (0-based coordinates)
+        arr_col_indices[ arr_col_index_boundary[ idx_bc ] : arr_col_index_boundary[ idx_bc + 1 ] ] = idx_bc
+    # compose 'df_mtx'
+    df_mtx = pd.DataFrame( { 
+        'id_row' : arr_row_indices, # 0 based coordinates
+        'id_column' : arr_col_indices, # 0 based coordinates
+        'read_count' : arr_data,
+    } )
+
+    ''' write the output MEX files '''
+    # create the output directory
+    os.makedirs( path_folder_matrix_output_mex_format, exist_ok = True )
+
+    # save barcodes
+    pd.DataFrame(arr_bc).to_csv( f"{path_folder_matrix_output_mex_format}barcodes.tsv.gz", sep="\t", index=False, header=False, )
+
+    # save features
+    # compose a feature dataframe
+    df_feature[["id_feature", "feature", "feature_type"]].to_csv( f"{path_folder_matrix_output_mex_format}features.tsv.gz", sep="\t", index=False, header=False, )  # save as a file
+    # retrieve list of features
+
+    # save count matrix as a gzipped matrix market format
+    row, col, data = df_mtx[["id_row", "id_column", "read_count"]].values.T
+    sm = scipy.sparse.coo_matrix(
+        (data, (row, col)), shape=(len(df_feature), len(arr_bc))
+    )
+    scipy.io.mmwrite(f"{path_folder_matrix_output_mex_format}matrix", sm)
+
+    # remove previous output file to overwrite the file
+    path_file_mtx_output = f"{path_folder_matrix_output_mex_format}matrix.mtx.gz"
+    if os.path.exists( path_file_mtx_output ) :
+        os.remove( path_file_mtx_output )
+    bk.OS_Run(["gzip", f"{path_folder_matrix_output_mex_format}matrix.mtx"])  # gzip the mtx file

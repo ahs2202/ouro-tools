@@ -1448,7 +1448,7 @@ def Multiprocessing_Batch_Generator_and_Workers(
     int_num_seconds_to_wait_before_identifying_completed_processes_for_a_loop : float = 0.2,
     flag_wait_for_a_response_from_worker_after_sending_termination_signal : bool = True, # wait until all worker exists before resuming works in the main process
 ):
-    """# 2023-08-11 23:00:16 
+    """# 2023-10-06 01:52:29 
     'Multiprocessing_Batch_Generator_and_Workers' : multiprocessing using batch generator and workers.
     all worker process will be started using the default ('fork' in UNIX) method.
     perform batch-based multiprocessing using the three components, (1) gen_batch, (2) process_batch, (3) post_process_batch. (3) will be run in the main process, while (1) and (2) will be offloaded to worker processes.
@@ -1468,11 +1468,11 @@ def Multiprocessing_Batch_Generator_and_Workers(
         l_pipe_receiver_output,
         pipe_sender_output_to_main_process,
     ):
-        """# 2022-09-06 15:16:29
+        """# 2023-10-06 01:52:24 
         define a worker for generating batch and distributing batches across the workers, receives results across the workers, and send result back to the main process
         """
         # hard coded setting
-        int_max_num_batches_in_a_queue_for_each_worker = 2
+        int_max_num_batches_in_a_queue_for_each_worker = 2 # 2 batches distributed to each process should be optimal, while preventing pipe buffer overloading.
 
         q_batch = collections.deque()  # initialize queue of batchs
         int_num_batch_processing_workers = len(l_pipe_sender_input)
@@ -1482,17 +1482,17 @@ def Multiprocessing_Batch_Generator_and_Workers(
         )  # retrieve the number of batches currently being processed in each worker. if this number becomes 0, assumes the worker is available
         while True:
             """retrieve batch (if available)"""
-            if not flag_batch_generation_completed:
+            if not flag_batch_generation_completed and len( q_batch ) < int_num_batch_processing_workers * int_max_num_batches_in_a_queue_for_each_worker : # if batch generation has not been completed, or the number of batches that have been generated are not large, continue to generate batches.
                 try:
                     batch = next(gen_batch)  # retrieve the next barcode
                     q_batch.appendleft(batch)  # append batch
                 except StopIteration:
                     flag_batch_generation_completed = True
             else:
-                # if all batches have been distributed and processed, exit the loop
-                if len(q_batch) == 0 and arr_num_batch_being_processed.sum() == 0:
+                # if batch generation has been completed, all batches have been distributed, and processed, exit the loop
+                if flag_batch_generation_completed and len(q_batch) == 0 and arr_num_batch_being_processed.sum() == 0:
                     break
-                # if batch generation has been completed, sleep for a while
+                # sleep for a while
                 time.sleep(
                     int_num_seconds_to_wait_before_identifying_completed_processes_for_a_loop
                 )  # sleep
