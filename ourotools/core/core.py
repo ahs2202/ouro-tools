@@ -7152,7 +7152,7 @@ def LongExportNormalizedCountMatrix(
                                 for t_distribution_range_of_interest in l_t_distribution_range_of_interest : # for each 't_distribution_range_of_interest', compose output
                                     _apply_size_distribution_correction_and_export_count_matrix( 
                                         df_tx_count, 
-                                        t_distribution_range_of_interest = None, 
+                                        t_distribution_range_of_interest = t_distribution_range_of_interest, 
                                         l_col_for_dropping_duplicates = l_col_for_identifying_unique_molecules + [ 'id_tx_assigned' ], 
                                         l_col_for_groupby_operation = [ "CB", "id_tx_assigned" ], 
                                         dict_rename_columns = {"CB": "barcode"}, 
@@ -7358,7 +7358,7 @@ def LongExportNormalizedCountMatrix(
                                         for t_distribution_range_of_interest in l_t_distribution_range_of_interest : # for each 't_distribution_range_of_interest', compose output
                                             _apply_size_distribution_correction_and_export_count_matrix( 
                                                 df_var_count, 
-                                                t_distribution_range_of_interest = None, 
+                                                t_distribution_range_of_interest = t_distribution_range_of_interest, 
                                                 l_col_for_dropping_duplicates = [ "barcode", "str_umi", "id_feature", "id_allele_ref", ], # dropping duplicates for each reference allele for each transcript or the current gene
                                                 l_col_for_groupby_operation = ["barcode", "id_var", "id_feature"], # groupby operations for each transcript or the current gene
                                                 dict_rename_columns = None, 
@@ -7706,7 +7706,7 @@ def LongExportNormalizedCountMatrix(
                                         for t_distribution_range_of_interest in l_t_distribution_range_of_interest : # for each 't_distribution_range_of_interest', compose output
                                             _apply_size_distribution_correction_and_export_count_matrix( 
                                                 df_var_count, 
-                                                t_distribution_range_of_interest = None, 
+                                                t_distribution_range_of_interest = t_distribution_range_of_interest, 
                                                 l_col_for_dropping_duplicates = [ "barcode", "t_unique_identifier_for_a_cell", "id_allele_ref", ], # dropping duplicates for each reference allele
                                                 l_col_for_groupby_operation = [ "barcode", "id_var" ], # groupby for each variant detected
                                                 dict_rename_columns = None, 
