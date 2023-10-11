@@ -87,7 +87,7 @@ logger = logging.getLogger("ouro-count")
 # define version
 _version_ = "0.0.2"
 _ourotools_version_ = _version_
-_last_modified_time_ = "2023-09-27 23:12:37"
+_last_modified_time_ = "2023-10-11 01:13:23"
 
 str_release_note = [
     """
@@ -108,6 +108,8 @@ str_release_note = [
     'LongExportNormalizedCountMatrix' function was modified for more accurate identification of specific transcript using re-alignment (TES matching, filtering alignment with excessive soft-clipping, and strand-specific assignment)
     Also, a typo in graph labels were fixed.
 
+    # 2023-10-11 01:08:56 
+    'LongExportNormalizedCountMatrix' function was modified for exporting count features excluding internal poly-A primed reads, which can be helpful for alternative splicing analysis. Most features, excluding variant information features, will be exported with/without internal polyA primed reads if possible.
     ##### Future implementations #####
 
     """
@@ -5085,6 +5087,7 @@ def LongExportNormalizedCountMatrix(
     int_num_samples_analyzed_concurrently: int = 2,
     flag_does_not_collect_variant_information: bool = False,
     flag_skip_intron_retention_counting: bool = False,
+    flag_skip_internal_polyA_filtered_feature_counting: bool = False,
     int_min_length_intron_for_detecting_intron_retention_event: int = 10,
     flag_output_variant_information_with_annotations: bool = False,
     int_min_num_of_reads_for_filtering_genomic_variant: int = 10,
@@ -5126,6 +5129,7 @@ def LongExportNormalizedCountMatrix(
     int_min_count_features_for_filtering_barcodes : int = 50, # the minimum number of features for filtering barcodes.
     int_num_samples_analyzed_concurrently : int = 2, # the number of samples that can be analyzed concurrently to reduce bottlenecks due to processing of very large chunks.
     l_seqname_to_skip : list = [ 'MT' ], # the list of names of the chromosomes of the reference genome to skip the analysis. By default, reads aligned to the mitochondrial genomes will be skipped. Because gene boundaries of the mitochondrial genome-encoded genes are often overlapping, an entire mitochondrial genome often assigned as a single chunk, creating a huge bottleneck in the analysis pipeline.
+    flag_skip_internal_polyA_filtered_feature_counting: bool = False, # skip exporting counts excluding internal polyA primed reads (if it is set to False, in addition to the default counting mode, internal polyA primed-read filtered reads will be counted for most of the features).
     flag_skip_intron_retention_counting: bool = False, # skip exporting counts of intron retention events
     int_min_length_intron_for_detecting_intron_retention_event: int = 10, # the minimum length of intron to be present in a read in order to detect an intron retention event in the read.
     dict_num_manager_processes_for_each_data_object : dict = {
@@ -5570,6 +5574,12 @@ def LongExportNormalizedCountMatrix(
         )
         
         arg_grp_bam_processing.add_argument(
+            "--flag_skip_internal_polyA_filtered_feature_counting",
+            help="(Default: False) skip exporting counts excluding internal polyA primed reads (if it is set to False, in addition to the default counting mode, internal polyA primed-read filtered reads will be counted for most of the features).",
+            action="store_true",
+        )
+        
+        arg_grp_bam_processing.add_argument(
             "--int_min_length_intron_for_detecting_intron_retention_event",
             help="(Default: 10). The minimum length of intron to be present in a read in order to detect an intron retention event in the read.",
             default=10,
@@ -5768,6 +5778,7 @@ def LongExportNormalizedCountMatrix(
         str_name_bam_tag_internal_polya_length = args.str_name_bam_tag_internal_polya_length
         str_mappy_aligner_preset_for_realignment = args.str_mappy_aligner_preset_for_realignment
         int_length_of_polya_to_append_to_transcript_sequence_during_realignment = args.int_length_of_polya_to_append_to_transcript_sequence_during_realignment
+        flag_skip_internal_polyA_filtered_feature_counting = args.flag_skip_internal_polyA_filtered_feature_counting
 
     """
     Start of the Scarab-Count Program
@@ -6380,6 +6391,7 @@ def LongExportNormalizedCountMatrix(
                     'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' : flag_enforce_transcript_end_site_matching_for_long_read_during_realignment,
                     'int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment' : int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment,
                     'str_name_bam_tag_internal_polya_length' : str_name_bam_tag_internal_polya_length,
+                    'flag_skip_internal_polyA_filtered_feature_counting' : flag_skip_internal_polyA_filtered_feature_counting,
                     # internal
                     "path_folder_temp": path_folder_temp,
                     "path_folder_graph": path_folder_graph,
@@ -6458,6 +6470,8 @@ def LongExportNormalizedCountMatrix(
                 """ load local settings """
                 flag_is_mode_scarab_count_atac = str_mode_scarab_count == "atac"
                 flag_is_5prime, flag_is_paired_end = None, None  # initialize the fiags
+                # retrieve a flag indiciating whether to export filter excluding internal polyA primed reads
+                flag_export_internal_polyA_filtered_count_as_a_separate_feature = not ( flag_is_mode_scarab_count_atac or flag_skip_internal_polyA_filtered_feature_counting )
                 if not flag_is_mode_scarab_count_atac:
                     flag_is_5prime = "gex5prime" in str_mode_scarab_count
                     flag_is_paired_end = "paired-end" in str_mode_scarab_count
@@ -6553,6 +6567,7 @@ def LongExportNormalizedCountMatrix(
                         "id_tx_assigned_by_minimap2",
                         "l_name_variant",
                         'int_total_aligned_length',
+                        'flag_internal_polya_tract_primed',
                     ]
                     # a list of names of columns for collecting information about the current alignment just for counting (only essential information to reduce memory footprint)
                     l_col_for_counting = [
@@ -6568,6 +6583,7 @@ def LongExportNormalizedCountMatrix(
                         "id_tx_assigned_by_minimap2",
                         "l_name_variant",
                         'int_total_aligned_length',
+                        'flag_internal_polya_tract_primed',
                     ]
                     # a list of names of columns that will be added as BAM tags to the output BAM file # should be a contiguous subset of 'l_col'
                     l_name_col_newanno = l_col[-12:]
@@ -6905,9 +6921,21 @@ def LongExportNormalizedCountMatrix(
                         } # initialize the dictionary containing the outputs as binary stream objects                        
                         return dict_output
                                         
-                    def _apply_size_distribution_correction_and_export_count_matrix( df, t_distribution_range_of_interest : Union[ None, tuple ] = None, l_col_for_dropping_duplicates : Union[ List[ str ], None ] = l_col_for_identifying_unique_molecules, l_col_for_groupby_operation : Union[ List[ str ], None ] = [ 'CB' ], dict_rename_columns : Union[ dict, None ] = {"CB": "barcode"}, func_set_id_feature = None, func_set_feature = None, inplace : bool = False ) : 
+                    def _apply_size_distribution_correction_and_export_count_matrix( 
+                        df, 
+                        t_distribution_range_of_interest : Union[ None, tuple ] = None, 
+                        l_col_for_dropping_duplicates : Union[ List[ str ], None ] = l_col_for_identifying_unique_molecules, 
+                        l_col_for_groupby_operation : Union[ List[ str ], None ] = [ 'CB' ], 
+                        dict_rename_columns : Union[ dict, None ] = {"CB": "barcode"}, 
+                        func_set_id_feature = None, 
+                        func_set_feature = None, 
+                        inplace : bool = False,
+                        str_suffix : str = '',
+                    ) : 
                         ''' # 2023-08-30 20:09:49 
                         apply size distribution correction in a dataframe with [ "read_count", "int_total_aligned_length" ] columns, and compose a count matrix
+                        
+                        str_suffix : str = '', # suffix to add to 'name_feature' and 'id_feature'
                         '''
                         flag_size_distribution_correction_is_applied = t_distribution_range_of_interest is not None
                     
@@ -6943,15 +6971,21 @@ def LongExportNormalizedCountMatrix(
                             df.rename( columns = dict_rename_columns, inplace=True )
                         df[ 'id_feature' ] = func_set_id_feature if isinstance( func_set_id_feature, str ) else func_set_id_feature( df ) # set 'id_feature'
                         df[ 'feature' ] = func_set_feature if isinstance( func_set_feature, str ) else func_set_feature( df ) # set 'feature'
+                        
+                        ''' add suffix '''
+                        if isinstance( str_suffix, str ) and len( str_suffix ) > 0 : # if valid 'str_suffix' has been given, add the suffix
+                            df[ 'id_feature' ] = df[ 'id_feature' ] + str_suffix
+                            df[ 'feature' ] = df[ 'feature' ] + str_suffix
                         df = df[ l_col_df_count ]  # reorder columns
                         return df # return the resulting dataframe containing count data
-                        
+                    
+                    l_col_for_composing_df_count = [ ] if flag_is_mode_scarab_count_atac else [ 'flag_internal_polya_tract_primed' ] # define a additional list of columns for composing 'df_count'
                     def _process_gene_and_isoform_data( id_anno : str, dict_data : dict ):
                         """ # 2023-08-28 16:25:33 
                         Flush data for gene and isoform
                         assumes uniquely aligned reads
                         requires the following columns:
-                        l_col_for_counting = [ 'qname', 'mapq', 'flag', 'str_l_seg', 'CB', 'UB', 'TX', 'RE', 'int_flag_classification', 'id_tx_assigned_by_minimap2', 'l_name_variant', 'int_total_aligned_length' ]
+                        l_col_for_counting = [ 'qname', 'mapq', 'flag', 'str_l_seg', 'CB', 'UB', 'TX', 'RE', 'int_flag_classification', 'id_tx_assigned_by_minimap2', 'l_name_variant', 'int_total_aligned_length' ] + l_col_for_composing_df_count
                         
                         id_anno # name of the annotation
                         dict_data # dictionary data of the annotation
@@ -7037,7 +7071,7 @@ def LongExportNormalizedCountMatrix(
 
                             """ count at gene-level """
                             df = df_read[
-                                ["qname", "mapq", "flag", "CB", "UB", "id_tx_assigned", "int_total_aligned_length"]
+                                ["qname", "mapq", "flag", "CB", "UB", "id_tx_assigned", "int_total_aligned_length"] + l_col_for_composing_df_count
                             ]
                             # remove records without cell barcodes
                             df.loc[:, l_col_for_identifying_unique_molecules] = df[l_col_for_identifying_unique_molecules].replace(
@@ -7064,18 +7098,22 @@ def LongExportNormalizedCountMatrix(
                                 """count and write gene annotation count data to the given file handle 'newfile_df_count'"""
                                 if len(df) == 0:  # detect empty dataframe
                                     return -1
-                                df_count = df[ l_col_for_identifying_unique_molecules + [ "read_count", "int_total_aligned_length" ] ] # subset the data
+                                df_count = df[ l_col_for_identifying_unique_molecules + [ "read_count", "int_total_aligned_length" ] + l_col_for_composing_df_count ] # subset the data
                                 ''' create normalized count matrix '''
                                 for t_distribution_range_of_interest in l_t_distribution_range_of_interest : # for each 't_distribution_range_of_interest', compose output
-                                    _apply_size_distribution_correction_and_export_count_matrix( 
-                                        df_count, 
-                                        t_distribution_range_of_interest = t_distribution_range_of_interest, 
-                                        l_col_for_dropping_duplicates = l_col_for_identifying_unique_molecules, 
-                                        l_col_for_groupby_operation = [ 'CB' ], 
-                                        dict_rename_columns = {"CB": "barcode"}, 
-                                        func_set_id_feature = id_feature, 
-                                        func_set_feature = feature
-                                    ).to_csv( dict_output[ 'dict_t_distribution_range_of_interest_to_bio_newfile_df_count' ][ t_distribution_range_of_interest ], sep="\t", header=None, index=False )
+                                    for _suffix, _df_count in zip( [ '', '|excluding_internal_polyA_primed' ] if flag_export_internal_polyA_filtered_count_as_a_separate_feature else [ '' ], [ df_count, df_count[ df_count.flag_internal_polya_tract_primed == False ] ] if flag_export_internal_polyA_filtered_count_as_a_separate_feature else [ df_count ] ) : # exclude internal poly A primed reads during counting
+                                        if len( _df_count ) == 0 : # ignore empty dataframe
+                                            continue
+                                        _apply_size_distribution_correction_and_export_count_matrix( 
+                                            _df_count, 
+                                            t_distribution_range_of_interest = t_distribution_range_of_interest, 
+                                            l_col_for_dropping_duplicates = l_col_for_identifying_unique_molecules, 
+                                            l_col_for_groupby_operation = [ 'CB' ], 
+                                            dict_rename_columns = {"CB": "barcode"}, 
+                                            func_set_id_feature = id_feature, 
+                                            func_set_feature = feature,
+                                            str_suffix = _suffix,
+                                        ).to_csv( dict_output[ 'dict_t_distribution_range_of_interest_to_bio_newfile_df_count' ][ t_distribution_range_of_interest ], sep="\t", header=None, index=False )
 
                             """ count strand specific reads """
                             flag_valid_strand_info = strand_anno in [
@@ -7139,7 +7177,7 @@ def LongExportNormalizedCountMatrix(
                             df.dropna( subset=["id_tx_assigned"], inplace=True )  # retrieve reads uniquely aligned to a single transcript
                             
                             df_tx_count = df[
-                                ["CB", "UB", "id_tx_assigned", "read_count", "int_total_aligned_length"]
+                                ["CB", "UB", "id_tx_assigned", "read_count", "int_total_aligned_length"] + l_col_for_composing_df_count
                             ]
                             if len(df_tx_count) > 0:  # if a valid isoform count exists
                                 ''' functions for mapping identifiers '''
@@ -7150,15 +7188,19 @@ def LongExportNormalizedCountMatrix(
                                     return name_anno + "|tx_name=" + df["id_tx_assigned"].apply( mapping ) + "|tx_id=" + df["id_tx_assigned"]
                                 ''' create normalized count matrix '''
                                 for t_distribution_range_of_interest in l_t_distribution_range_of_interest : # for each 't_distribution_range_of_interest', compose output
-                                    _apply_size_distribution_correction_and_export_count_matrix( 
-                                        df_tx_count, 
-                                        t_distribution_range_of_interest = t_distribution_range_of_interest, 
-                                        l_col_for_dropping_duplicates = l_col_for_identifying_unique_molecules + [ 'id_tx_assigned' ], 
-                                        l_col_for_groupby_operation = [ "CB", "id_tx_assigned" ], 
-                                        dict_rename_columns = {"CB": "barcode"}, 
-                                        func_set_id_feature = _tx__func_set_id_feature, 
-                                        func_set_feature = _tx__func_set_feature
-                                    ).to_csv( dict_output[ 'dict_t_distribution_range_of_interest_to_bio_newfile_df_count' ][ t_distribution_range_of_interest ], sep="\t", header=None, index=False )
+                                    for _suffix, _df_count in zip( [ '', '|excluding_internal_polyA_primed' ] if flag_export_internal_polyA_filtered_count_as_a_separate_feature else [ '' ], [ df_tx_count, df_tx_count[ df_tx_count.flag_internal_polya_tract_primed == False ] ] if flag_export_internal_polyA_filtered_count_as_a_separate_feature else [ df_tx_count ] ) : # exclude internal poly A primed reads during counting
+                                        if len( _df_count ) == 0 : # ignore empty dataframe
+                                            continue
+                                        _apply_size_distribution_correction_and_export_count_matrix( 
+                                            _df_count, 
+                                            t_distribution_range_of_interest = t_distribution_range_of_interest, 
+                                            l_col_for_dropping_duplicates = l_col_for_identifying_unique_molecules + [ 'id_tx_assigned' ], 
+                                            l_col_for_groupby_operation = [ "CB", "id_tx_assigned" ], 
+                                            dict_rename_columns = {"CB": "barcode"}, 
+                                            func_set_id_feature = _tx__func_set_id_feature, 
+                                            func_set_feature = _tx__func_set_feature,
+                                            str_suffix = _suffix,
+                                        ).to_csv( dict_output[ 'dict_t_distribution_range_of_interest_to_bio_newfile_df_count' ][ t_distribution_range_of_interest ], sep="\t", header=None, index=False )
 
                             """ count gene/transcript counts for each detected variant """
                             if (
@@ -7175,7 +7217,7 @@ def LongExportNormalizedCountMatrix(
                                         "id_tx_assigned",
                                         "l_name_variant",
                                         "int_total_aligned_length",
-                                    ]
+                                    ] + l_col_for_composing_df_count
                                 ]
                                 # remove records without cell barcodes
                                 df.loc[:, l_col_for_identifying_unique_molecules] = df[l_col_for_identifying_unique_molecules].replace(
@@ -7452,7 +7494,7 @@ def LongExportNormalizedCountMatrix(
                                 """retain unique reads"""
                                 df = df_read[
                                     ["qname", "flag", 'int_total_aligned_length']
-                                    + l_col_for_identifying_unique_molecules
+                                    + l_col_for_identifying_unique_molecules + l_col_for_composing_df_count
                                 ]
                                 # remove records without cell barcodes
                                 df.loc[:, l_col_for_identifying_unique_molecules] = df[
@@ -7498,18 +7540,22 @@ def LongExportNormalizedCountMatrix(
                                     """count and write misc anno data to the given file handle 'newfile_df_count'"""
                                     if len(df) == 0:  # detect empty dataframe
                                         return -1
-                                    df_count = df[ l_col_for_identifying_unique_molecules + [ "read_count", "int_total_aligned_length" ] ] # subset the data
+                                    df_count = df[ l_col_for_identifying_unique_molecules + [ "read_count", "int_total_aligned_length" ] + l_col_for_composing_df_count ] # subset the data
                                     ''' create normalized count matrix '''
                                     for t_distribution_range_of_interest in l_t_distribution_range_of_interest : # for each 't_distribution_range_of_interest', compose output
-                                        _apply_size_distribution_correction_and_export_count_matrix( 
-                                            df_count, 
-                                            t_distribution_range_of_interest = t_distribution_range_of_interest, 
-                                            l_col_for_dropping_duplicates = l_col_for_identifying_unique_molecules, 
-                                            l_col_for_groupby_operation = [ 'CB' ], 
-                                            dict_rename_columns = {"CB": "barcode"}, 
-                                            func_set_id_feature = id_anno, 
-                                            func_set_feature = name_anno
-                                        ).to_csv( dict_output[ 'dict_t_distribution_range_of_interest_to_bio_newfile_df_count' ][ t_distribution_range_of_interest ], sep="\t", header=None, index=False )
+                                        for _suffix, _df_count in zip( [ '', '|excluding_internal_polyA_primed' ] if flag_export_internal_polyA_filtered_count_as_a_separate_feature else [ '' ], [ df_count, df_count[ df_count.flag_internal_polya_tract_primed == False ] ] if flag_export_internal_polyA_filtered_count_as_a_separate_feature else [ df_count ] ) : # exclude internal poly A primed reads during counting
+                                            if len( _df_count ) == 0 : # ignore empty dataframe
+                                                continue
+                                            _apply_size_distribution_correction_and_export_count_matrix( 
+                                                _df_count, 
+                                                t_distribution_range_of_interest = t_distribution_range_of_interest, 
+                                                l_col_for_dropping_duplicates = l_col_for_identifying_unique_molecules, 
+                                                l_col_for_groupby_operation = [ 'CB' ], 
+                                                dict_rename_columns = {"CB": "barcode"}, 
+                                                func_set_id_feature = id_anno, 
+                                                func_set_feature = name_anno,
+                                                str_suffix = _suffix,
+                                            ).to_csv( dict_output[ 'dict_t_distribution_range_of_interest_to_bio_newfile_df_count' ][ t_distribution_range_of_interest ], sep="\t", header=None, index=False )
 
                                 __Count_and_Write_misc_anno_data__(
                                     df,
@@ -7543,7 +7589,7 @@ def LongExportNormalizedCountMatrix(
                                 """compose a dataframe for counting molecules with variants"""
                                 df = df_read[
                                     ["qname", "str_l_seg", "l_name_variant", "int_total_aligned_length"]
-                                    + l_col_for_identifying_unique_molecules
+                                    + l_col_for_identifying_unique_molecules + l_col_for_composing_df_count
                                 ]
                                 # remove records without cell barcodes
                                 df.loc[:, l_col_for_identifying_unique_molecules] = df[
@@ -8899,6 +8945,7 @@ def LongExportNormalizedCountMatrix(
                                         id_tx_assigned_by_minimap2,
                                         str_l_var,
                                         int_total_aligned_length,
+                                        flag_internal_polya_tract_primed,
                                     ]  # refstart in 1-based coordinate # use 'str_umi_uncorrected' if 'str_umi_corrected' does not exist
                                 l_data_for_counting = list(
                                     l_data[index_col]
