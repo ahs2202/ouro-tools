@@ -2096,26 +2096,48 @@ def _get_df_bar( dict_arr_dist : dict, l_name_type_dist : Union[ list, None ] = 
     df_bar = pd.DataFrame( np.vstack( l_arr ), index = l_name_type_dist, columns = np.arange( 1, len( l_arr[ 0 ] ) + 1, dtype = int ) * int_size_bin_in_base_pairs )
     return df_bar
 
-def _draw_bar_plot( df_bar, l_status : list, title : str = '', y_format : str = ':.3f', flag_save_figure : bool = False, path_folder_graph : Union[ str, None ] = None ) :
-    ''' # 2023-08-15 15:44:40 
+def _draw_bar_plot( 
+    df_bar, 
+    l_status : list, 
+    title : str = '', 
+    y_format : str = ':.3f', 
+    flag_save_figure : bool = False, 
+    path_folder_graph : Union[ str, None ] = None,
+    l_color : Union[ List[ str ], None ] = None,
+    flag_use_proportion : bool = False,
+) :
+    ''' # 2023-10-22 16:58:58 
     draw barplot for the given 'df_bar'
     Return plotly fig
     maximum number of l_status (unique color will be assigned to each) is 56
+    l_color : Union[ List[ str ], None ] = None, # list of color for each status
+    flag_use_proportion : bool = False, # if True, draw proportion graph
     '''
     import plotly.express as px
     import plotly.graph_objects as go
     x = df_bar.columns.values # retrieve x categories
-    l_color = px.colors.qualitative.Dark24 + px.colors.qualitative.Pastel2 + px.colors.qualitative.Light24 # retrieve unique colors for each status # plotly express can draw barplot more easily, but for annotating each status with the same color annotation, for loop with go.Bar will be used instead
+    if l_color is None :
+        l_color = px.colors.qualitative.Dark24 + px.colors.qualitative.Pastel2 + px.colors.qualitative.Light24  # retrieve unique colors for each status # plotly express can draw barplot more easily, but for annotating each status with the same color annotation, for loop with go.Bar will be used instead
     set_valid_status = set( df_bar.index.values ) # retrieve a set of valid status
+    df_bar = df_bar.copy( ) # copy the data
+    df_bar = df_bar.loc[ list( e for e in l_status if e in set_valid_status ) ] # drop invalid categories
+    if flag_use_proportion : # if use proportions, calculate proportions
+        df_bar = df_bar / df_bar.sum( axis = 0 )
+        df_bar.fillna( 0, inplace = True )
+    
     l_go = list( go.Bar( x = x, y = df_bar.loc[ str_status ].values, name = str_status, marker_color = str_color, hovertemplate = 'size_bin: <b>%{x}</b><br><br>proportion: <b>%{y' + y_format + '}</b>' ) for str_status, str_color in zip( l_status, l_color ) if str_status in set_valid_status ) # retrieve graph object for each valid str_status
 
     # compose a bar plot
     fig = go.Figure( l_go[ 0 ] )
     for go_bar in l_go[ 1 : ] :
         fig.add_trace( go_bar )
-    fig.update_layout( barmode = 'stack', xaxis = { 'categoryorder' : 'category ascending' }, title_text = title )
+    fig.update_layout( barmode = 'stack', xaxis = { 'categoryorder' : 'category ascending' }, title_text = title, plot_bgcolor='white' )
+    float_ratio_padding_y_axis = 0.05
+    fig.update_layout( yaxis_range = [ 0, 1 + float_ratio_padding_y_axis ] if flag_use_proportion else [ 0, df_bar.sum( axis = 0 ).max( ) * ( 1 + float_ratio_padding_y_axis ) ] ) # update y-axis range        
+    fig.update_xaxes( mirror=True, ticks='outside', showline=True, linecolor='black', gridcolor='#f8f8f8' )
+    fig.update_yaxes( mirror=True, ticks='outside', showline=True, linecolor='black', gridcolor='#f8f8f8' )
     if flag_save_figure and path_folder_graph is not None :
-        fig.write_html( f"{path_folder_graph}distribution.bar.{title}.html" ) # write HTML file
+        fig.write_html( f"{path_folder_graph}distribution.bar.{'proportion' if flag_use_proportion else 'read_count'}.{title}.html" ) # write HTML file
     else :
         return fig
     
@@ -9740,6 +9762,103 @@ def DeduplicateBAM(
     
     # delete the temporary folder
     shutil.rmtree( path_folder_temp )
+    
+def FilterInternalPolyAPrimedReadFromBAM( path_file_bam_input : str, path_folder_output : str, int_min_length_internal_polyA_tract : int = 8, name_tag_ia : str = 'IA' ) :
+    """ # 2023-10-11 19:56:11 
+    Filter internal PolyA primed reads from BAM file
+    
+    path_file_bam_input : str # an input Barcoded BAM file to filter internal-polyA-region primed reads
+    path_folder_output : str # the output folder where splitted Barcoded BAM files will be exported
+    int_min_length_internal_polyA_tract : int = 8 # minimum length of an internal poly A/T tract to classify a read as 'internal poly A/T tract'
+    name_tag_ia : str = 'IA' # name of the SAM tag containing the length of internal polyA tract. 
+    
+    """
+    # import packages
+    import multiprocessing as mp
+    import pysam
+    import os
+    # define functions
+
+    # create the output folder
+    os.makedirs( path_folder_output, exist_ok = True )
+    
+    # read the header of the input BAM file    
+    with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
+        sam_header = samfile.header
+
+    l_name_file = [ 'internal_polyA_primed_reads', 'without_internal_polyA_primed_reads' ] # define the name of the files
+    def _write_bam_of_name_file( p_in, p_out ) :
+        ''' # 2023-09-07 21:38:10 
+        for writing bam file for each 'name_file'
+        '''
+        name_file = p_in.recv( ) # retrieve the name of file
+        path_file_bam = f'{path_folder_output}{name_file}.bam'
+        with pysam.AlignmentFile( path_file_bam, 'wb', header = sam_header ) as newsamfile :
+            while True :
+                batch = p_in.recv( ) # receive a record
+                if batch is None :
+                    break
+                for str_r in batch : # parse the batch
+                    r = pysam.AlignedSegment.fromstring( str_r, sam_header ) # compose a pysam record
+                    newsamfile.write( r )
+        pysam.index( path_file_bam ) # index the given bam file
+        p_out.send( 'completed' ) # indicate the work has been completed
+
+    dict_name_file_p_to_writers = dict( )
+    l_p_from_writers = [ ]
+    l_process = [ ] # list of processes
+    for name_file in l_name_file : # for each 'name_file', recruite a worker
+        pm2w, pw4m = mp.Pipe( )
+        pw2m, pm4w = mp.Pipe( )
+        p = mp.Process( target = _write_bam_of_name_file, args = ( pw4m, pw2m ) )
+        dict_name_file_p_to_writers[ name_file ] = pm2w 
+        l_p_from_writers.append( pm4w )
+        p.start( )
+        pm2w.send( name_file ) # initialize the worker with 'name_file'
+        l_process.append( p ) # collect the process
+
+    # internal setting
+    int_max_num_record_in_a_batch = 100
+    dict_name_file_to_batch = dict( ( name_file, [ ] ) for name_file in l_name_file ) # initialize 'dict_name_file_to_batch'
+
+    def _flush_batch( name_file : str ) :
+        """ # 2023-09-07 22:00:29 
+        flush the batch
+        """
+        batch = dict_name_file_to_batch[ name_file ]
+        if len( batch ) > 0 : # if batch is not empty
+            dict_name_file_p_to_writers[ name_file ].send( batch ) # send the batch to the writer
+            dict_name_file_to_batch[ name_file ] = [ ] # empty the batch    
+
+    def _write_record( name_file : str, str_r : str ) :
+        """ # 2023-09-07 22:00:38 
+        write a record
+        """
+        dict_name_file_to_batch[ name_file ].append( str_r ) # add the record
+        if len( dict_name_file_to_batch[ name_file ] ) >= int_max_num_record_in_a_batch :
+            _flush_batch( name_file ) # flush the batch
+
+    # read file and write the record
+    with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
+        for r in samfile.fetch( ) :
+            dict_tags = dict( r.get_tags( ) ) # retrieve tags of the read
+            if name_tag_ia in dict_tags :
+                str_r = r.tostring( ) # convert samtools record to a string
+                _write_record( 'internal_polyA_primed_reads' if dict_tags[ name_tag_ia ] >= int_min_length_internal_polyA_tract else 'without_internal_polyA_primed_reads', str_r ) # write the record
+                
+    # flush remaining records
+    for name_file in l_name_file :
+        _flush_batch( name_file )
+
+    # notify all works in the main process has been completed
+    for name_file in l_name_file :
+        dict_name_file_p_to_writers[ name_file ].send( None )
+
+    # wait for all workers to complete their jobs
+    for p in l_p_from_writers :
+        p.recv( ) # receive a signal indicating the worker has dismissed itself
+    # pipeline completed
+    return
     
 if __name__ == "__main__":
     ourotools()  # run ouro at the top-level environment
