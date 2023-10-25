@@ -2105,13 +2105,19 @@ def _draw_bar_plot(
     path_folder_graph : Union[ str, None ] = None,
     l_color : Union[ List[ str ], None ] = None,
     flag_use_proportion : bool = False,
+    float_ratio_padding_y_axis : float = 0.05,
+    xaxis_range : Union[ List[ float ], None ] = None,
+    int_min_total_counts_bin_for_proportion_calculation : int = 10,
 ) :
-    ''' # 2023-10-22 16:58:58 
+    ''' # 2023-10-25 21:16:00 
     draw barplot for the given 'df_bar'
     Return plotly fig
     maximum number of l_status (unique color will be assigned to each) is 56
     l_color : Union[ List[ str ], None ] = None, # list of color for each status
     flag_use_proportion : bool = False, # if True, draw proportion graph
+    float_ratio_padding_y_axis : float = 0.05, # padding added to the max value of the y-axis
+    xaxis_range : Union[ List[ float ], None ] = None, # if given, set the xaxis range using the given start and end positions
+    int_min_total_counts_bin_for_proportion_calculation : int = 10, # min total counts for a bin to plot the proportions of categories for the bin. bins below this total counts will be shown as '0'
     '''
     import plotly.express as px
     import plotly.graph_objects as go
@@ -2122,18 +2128,22 @@ def _draw_bar_plot(
     df_bar = df_bar.copy( ) # copy the data
     df_bar = df_bar.loc[ list( e for e in l_status if e in set_valid_status ) ] # drop invalid categories
     if flag_use_proportion : # if use proportions, calculate proportions
-        df_bar = df_bar / df_bar.sum( axis = 0 )
+        s_sum = df_bar.sum( axis = 0 )
+        df_bar = df_bar / s_sum
+        df_bar.loc[ :, s_sum.values < int_min_total_counts_bin_for_proportion_calculation ] = 0 # does not plot bins below 'int_min_total_counts_bin_for_proportion_calculation'
         df_bar.fillna( 0, inplace = True )
     
-    l_go = list( go.Bar( x = x, y = df_bar.loc[ str_status ].values, name = str_status, marker_color = str_color, hovertemplate = 'size_bin: <b>%{x}</b><br><br>proportion: <b>%{y' + y_format + '}</b>' ) for str_status, str_color in zip( l_status, l_color ) if str_status in set_valid_status ) # retrieve graph object for each valid str_status
+    l_go = list( go.Bar( x = x, y = df_bar.loc[ str_status ].values, name = str_status, marker_color = str_color, hovertemplate = 'size_bin: <b>%{x}</b><br><br>proportion: <b>%{y' + y_format + '}</b>', width = df_bar.columns[ 1 ] - df_bar.columns[ 0 ] ) for str_status, str_color in zip( l_status, l_color ) if str_status in set_valid_status ) # retrieve graph object for each valid str_status # infer width from the input 'df_bar'
 
     # compose a bar plot
     fig = go.Figure( l_go[ 0 ] )
     for go_bar in l_go[ 1 : ] :
         fig.add_trace( go_bar )
+    fig.update_traces(marker=dict( line = dict(width=0) )) 
     fig.update_layout( barmode = 'stack', xaxis = { 'categoryorder' : 'category ascending' }, title_text = title, plot_bgcolor='white' )
-    float_ratio_padding_y_axis = 0.05
     fig.update_layout( yaxis_range = [ 0, 1 + float_ratio_padding_y_axis ] if flag_use_proportion else [ 0, df_bar.sum( axis = 0 ).max( ) * ( 1 + float_ratio_padding_y_axis ) ] ) # update y-axis range        
+    if xaxis_range is not None : # update xaxis_range
+        fig.update_layout( xaxis_range = [ xaxis_range[ 0 ], xaxis_range[ 1 ] ] ) 
     fig.update_xaxes( mirror=True, ticks='outside', showline=True, linecolor='black', gridcolor='#f8f8f8' )
     fig.update_yaxes( mirror=True, ticks='outside', showline=True, linecolor='black', gridcolor='#f8f8f8' )
     if flag_save_figure and path_folder_graph is not None :
