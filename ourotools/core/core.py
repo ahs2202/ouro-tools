@@ -85,9 +85,9 @@ logging.basicConfig(
 logger = logging.getLogger("ouro-count")
 
 # define version
-_version_ = "0.0.2"
+_version_ = "0.0.3"
 _ourotools_version_ = _version_
-_last_modified_time_ = "2023-11-02 23:01:10"
+_last_modified_time_ = "2023-11-03 23:33:12"
 
 str_release_note = [
     """
@@ -113,6 +113,9 @@ str_release_note = [
     
     # 2023-11-02 23:00:23 
     'LongFilterNSplit' : Ouro-Enrich applied samples can be now processed with 'LongFilterNSplit' with 'flag_recover_original_molecule_before_self_circularization_and_digestion' flag turned on.
+    
+    # 2023-11-03 23:32:31 
+    'LongFilterNSplit' : now molecules with poly A at both ends can be detected and filtered accordingly. Also, subsampling of input FASTQ file for exploratory analysis is now supported.
     ##### Future implementations #####
 
     """
@@ -2229,6 +2232,7 @@ def LongFilterNSplit(
     int_max_read_length : int = 20_000, # the maximum read length to analyze. If the speed of the analysis seems to be slower than expected, try lowering this parameter to filter out repeat-containing artifact reads present in long-read sequencing data, which takes a long time to align and filter out based on the alignment profile.
     flag_recover_original_molecule_before_self_circularization_and_digestion : bool = False, # by default, this flag is set to False. However, when Ourn-Enrich was applied and the sequenced molecules are rearranged so that the adaptors are located in the middle, please set this flag to True, which enables a recovery mode to reconstruct the original molecules from the rearranged sequences.
     int_max_coordinate_difference_at_predicted_cut_site_for_recovering_original_molecule_before_self_circularization_and_digestion : int = 30, # the max coordinate difference at the predicted cut site for recovering original molecule before self-circularization. this argument is only active when 'flag_recover_original_molecule_before_self_circularization' is True
+    int_num_reads_to_analyze : int = 0, # by default, analyze all reads in the fastq file. However, for rapidly assess the quality of given fastq file, only a subset (fastq reads, subsampled sequentially from the start of the input FASTQ file) of reads can be analyzed by given an non-zero integer number to this argument.
     am_genome = None, # mappy aligner for genome (optional. if given, will override 'path_file_minimap_index_genome' argument)
     l_am_unwanted : Union[ None, List ] = None, # mappy aligner for unwanted sequences (optional. if given, will override 'l_path_file_minimap_index_unwanted' argument)
 ) -> None :
@@ -2253,6 +2257,7 @@ def LongFilterNSplit(
     int_max_read_length : int = 30_000, # the maximum read length to analyze. If the speed of the analysis seems to be slower than expected, try lowering this parameter to filter out repeat-containing artifact reads present in long-read sequencing data, which takes a long time to align and filter out based on the alignment profile.
     flag_recover_original_molecule_before_self_circularization_and_digestion : bool = False, # by default, this flag is set to False. However, when Ourn-Enrich was applied and the sequenced molecules are rearranged so that the adaptors are located in the middle, please set this flag to True, which enables a recovery mode to reconstruct the original molecules from the rearranged sequences.
     int_max_coordinate_difference_at_predicted_cut_site_for_recovering_original_molecule_before_self_circularization_and_digestion : int = 30, # the max coordinate difference at the predicted cut site for recovering original molecule before self-circularization. this argument is only active when 'flag_recover_original_molecule_before_self_circularization_and_digestion' is True
+    int_num_reads_to_analyze : int = 0, # by default, analyze all reads in the fastq file. However, for rapidly assess the quality of given fastq file, only a subset (fastq reads, subsampled sequentially from the start of the input FASTQ file) of reads can be analyzed by given an non-zero integer number to this argument.
     am_genome = None, # mappy aligner for genome (optional. if given, will override 'path_file_minimap_index_genome' argument)
     int_min_size_intervening_sequence_for_splitting : int = 150, # the minimum length of intervening sequence between alignments for splitting the reads
     l_am_unwanted : Union[ None, List ] = None, # mappy aligner for unwanted sequences (optional. if given, will override 'l_path_file_minimap_index_unwanted' argument)
@@ -2321,6 +2326,13 @@ def LongFilterNSplit(
             "--verbose", 
             help="turn on verbose mode", 
             action="store_true"
+        )
+        arg_grp_general.add_argument(
+            "-N",
+            "--int_num_reads_to_analyze",
+            help="(default: 0) by default, analyze all reads in the fastq file. However, for rapidly assess the quality of given fastq file, only a subset (fastq reads, subsampled sequentially from the start of the input FASTQ file) of reads can be analyzed by given an non-zero integer number to this argument.",
+            default=0,
+            type=int,
         )
         arg_grp_alignment = parser.add_argument_group("Alignment")
         arg_grp_alignment.add_argument(
@@ -2429,6 +2441,7 @@ def LongFilterNSplit(
         int_max_read_length = args.int_max_read_length
         flag_recover_original_molecule_before_self_circularization_and_digestion = args.flag_recover_original_molecule_before_self_circularization_and_digestion
         int_max_coordinate_difference_at_predicted_cut_site_for_recovering_original_molecule_before_self_circularization_and_digestion = args.int_max_coordinate_difference_at_predicted_cut_site_for_recovering_original_molecule_before_self_circularization_and_digestion
+        int_num_reads_to_analyze = args.int_num_reads_to_analyze
 
     """
     Start of the pipeline
@@ -2515,14 +2528,17 @@ def LongFilterNSplit(
     """
     Pipeline specific functions and variables
     """
+    flag_subsample_reads = int_num_reads_to_analyze > 0 # retrieve a flag for subsampling
     l_type_molecule = [ 'non_chimeric', 'chimeric' ] 
     if flag_recover_original_molecule_before_self_circularization_and_digestion : # add a 'type_molecule' if 'flag_recover_original_molecule_before_self_circularization_and_digestion' is True
         l_type_molecule += [ 'non_chimeric__before_self_circularization_and_digestion' ]
     l_name_output = [ 'aligned_to_unwanted_sequences', 'cannot_aligned_to_genome' ] # 'aligned_to_genome__non_chimeric__poly_A__plus_strand' : main fastq output file
     l_name_dist = [ 'aligned_to_unwanted_sequence', 'cannot_aligned_to_genome', 'aligned_to_genome' ] 
     for type_molecule in l_type_molecule :
-        l_name_output.extend( [ f'aligned_to_genome__{type_molecule}__no_poly_A', f'aligned_to_genome__{type_molecule}__poly_A__plus_strand', ] )
-        l_name_dist.extend( [ f'aligned_to_genome__{type_molecule}__no_poly_A', f'aligned_to_genome__{type_molecule}__external_poly_A__unreferenced_G', f'aligned_to_genome__{type_molecule}__internal_poly_A__unreferenced_G', f'aligned_to_genome__{type_molecule}__external_poly_A__no_unreferenced_G', f'aligned_to_genome__{type_molecule}__internal_poly_A__no_unreferenced_G', ] )
+        for e in [ 'no_poly_A', 'poly_A__plus_strand', 'identical_poly_A_types_at_both_ends', ] :
+            l_name_output.append( f'aligned_to_genome__{type_molecule}__{e}' )
+        for e in [ 'no_poly_A', 'external_poly_A__unreferenced_G', 'internal_poly_A__unreferenced_G', 'external_poly_A__no_unreferenced_G', 'internal_poly_A__no_unreferenced_G', 'external_poly_A__external_poly_A', 'external_poly_A__internal_poly_A', 'internal_poly_A__internal_poly_A', ] :
+            l_name_dist.append( f'aligned_to_genome__{type_molecule}__{e}' )
     
     def _write_a_fastq_record( newfastqfile, r ) :
         """ # 2023-08-01 12:21:30 
@@ -2544,7 +2560,7 @@ def LongFilterNSplit(
         classlfy read by detecting poly A and unreferenced Gs.
 
         # possible labels
-        'no_poly_A', 'external_poly_A__unreferenced_G', 'internal_poly_A__unreferenced_G', 'external_poly_A__no_unreferenced_G', 'internal_poly_A__no_unreferenced_G'
+        'no_poly_A', 'external_poly_A__unreferenced_G', 'internal_poly_A__unreferenced_G', 'external_poly_A__no_unreferenced_G', 'internal_poly_A__no_unreferenced_G', 'external_poly_A__external_poly_A', 'external_poly_A__internal_poly_A', 'internal_poly_A__internal_poly_A'
 
         return the direction of the read and the classification label
         """
@@ -2586,8 +2602,20 @@ def LongFilterNSplit(
             ''' handles 'no_poly_A' (after retrying) '''
             if not( flag_external_poly_A_flipped or flag_internal_poly_A_flipped or flag_external_poly_A or flag_internal_poly_A ) :
                 return 'no_poly_A', None # no direction for the 'no_poly_A' label
-
-        ''' handles internal poly A '''
+            
+        ''' handles polyA at both ends '''
+        if ( flag_external_poly_A_flipped or flag_internal_poly_A_flipped ) and ( flag_external_poly_A or flag_internal_poly_A ) : # polyA at both ends
+            if flag_internal_poly_A_flipped and flag_internal_poly_A :
+                return 'internal_poly_A__internal_poly_A', None # no direction for the 'external_poly_A__external_poly_A' label
+            elif flag_internal_poly_A_flipped or flag_internal_poly_A :
+                if flag_internal_poly_A_flipped :
+                    return 'external_poly_A__internal_poly_A', '-'
+                else :
+                    return 'external_poly_A__internal_poly_A', '+'
+            else :
+                return 'external_poly_A__external_poly_A', None # no direction for the 'external_poly_A__external_poly_A' label
+            
+        ''' handles internal poly A at only one end '''
         if flag_internal_poly_A_flipped or flag_internal_poly_A :
             if flag_internal_poly_A_flipped :
                 if flag_unreferenced_Gs_flipped :
@@ -2600,7 +2628,7 @@ def LongFilterNSplit(
                 else :
                     return 'internal_poly_A__no_unreferenced_G', '+'
 
-        ''' handles external poly A '''
+        ''' handles external poly A at only one end '''
         if flag_external_poly_A_flipped :
             if flag_unreferenced_Gs_flipped :
                 return 'external_poly_A__unreferenced_G', '-'
@@ -2793,6 +2821,7 @@ def LongFilterNSplit(
                 'int_max_read_length' : int_max_read_length,
                 'flag_recover_original_molecule_before_self_circularization_and_digestion' : flag_recover_original_molecule_before_self_circularization_and_digestion,
                 'int_max_coordinate_difference_at_predicted_cut_site_for_recovering_original_molecule_before_self_circularization_and_digestion' : int_max_coordinate_difference_at_predicted_cut_site_for_recovering_original_molecule_before_self_circularization_and_digestion,
+                'int_num_reads_to_analyze' : int_num_reads_to_analyze,
                 # internal
                 "path_folder_temp": path_folder_temp,
                 "path_folder_graph": path_folder_graph,
@@ -2822,16 +2851,19 @@ def LongFilterNSplit(
             """
             Define a generator for partitioning input file
             """
-
             def gen_batch( ):
                 """# 2023-07-30 18:37:49 
                 create batch from the input fastq file
                 """
-                int_base_pair_counter = 0 # initialize base pair counter
+                int_base_pair_counter, int_read_counter = 0, 0 # initialize the counters
                 l_r_for_a_batch = [ ] # a list of records for a batch
                 for r in bk.FASTQ_Iterate( path_file_fastq_input ) : # iterate through the input FASTQ file
                     l_r_for_a_batch.append( r ) # add the record
                     int_base_pair_counter += len( r[ 1 ] ) # increase the counter
+                    if flag_subsample_reads : # if reads are subsampled
+                        int_read_counter += 1 # increase the counter
+                        if int_read_counter >= int_num_reads_to_analyze : # if the number of reads for subsampling has been reached, exit
+                            break
                     if int_base_pair_counter >= int_num_base_pairs_in_a_batch : # if the batch is full, yield the batch
                         yield l_r_for_a_batch
                         l_r_for_a_batch = [ ] # initialize the next batch
@@ -2933,6 +2965,8 @@ def LongFilterNSplit(
 
                         if label == 'no_poly_A' : # (likely to be not analyzed)
                             _write_a_fastq_record( dict_newfile_fastq_output[ f'aligned_to_genome__{type_molecule}__no_poly_A' ], [ "@" + qname + qname_suffix, seg, '+', qual_seg ] ) # write the current read to the appropriate output fastq file
+                        elif direction is None : # when molecules has identical poly A types at both ends (likely to be not analyzed)
+                            _write_a_fastq_record( dict_newfile_fastq_output[ f'aligned_to_genome__{type_molecule}__identical_poly_A_types_at_both_ends' ], [ "@" + qname + qname_suffix, seg, '+', qual_seg ] ) # write the current read to the appropriate output fastq file
                         else : # collect all reads with poly A to 'poly_A__plus_strand' output file. (likely to be analyzed together)
                             """
                             if needed, modify the fastq record so that poly A can be located at the right, representing the '+' strand of the original mRNA initially captured by the primer.

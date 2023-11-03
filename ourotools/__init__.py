@@ -3,7 +3,7 @@ from .__main__ import *
 from ourotools.core import *
 
 # Version of cressp package
-__version__ = "0.0.2"
+__version__ = "0.0.3"
 
 # import modules
 
