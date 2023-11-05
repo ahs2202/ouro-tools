@@ -2608,7 +2608,7 @@ def LongFilterNSplit(
             if flag_internal_poly_A_flipped and flag_internal_poly_A :
                 return 'internal_poly_A__internal_poly_A', None # no direction for the 'external_poly_A__external_poly_A' label
             elif flag_internal_poly_A_flipped or flag_internal_poly_A :
-                if flag_internal_poly_A_flipped :
+                if flag_internal_poly_A : # when internal polyA exists in 3' end and external polyA at 5' end, reverse complement the read so that the external polyA is situated at 3' end to prioritize cell barcode information in the external polyA tail, since it is more likely that internal polyA priming occured after external poly A capture by cell-barcode containing primer
                     return 'external_poly_A__internal_poly_A', '-'
                 else :
                     return 'external_poly_A__internal_poly_A', '+'
@@ -9520,20 +9520,34 @@ def ourotools(str_mode=None, **dict_args):
 
 """ functions that are currently not supported in the command line (only accessible in python environment, including jupyter notebook) """
 # functions independent of the main ourotools pipeline (utility functions)
-def SplitBAM( path_file_bam_input : str, path_folder_output : str, dict_cb_to_name_clus : dict, name_tag_cb : str = 'CB' ) :
-    """ # 2023-09-07 22:18:43 
-    A standalone pipeline employing multiprocessing for faster splitting of a barcoded BAM file to multiple BAM files, each containing records of cells belonging to a single 'name_cluster' (a single cell type)
+def SplitBAM( 
+    path_file_bam_input : str, 
+    path_folder_output : str, 
+    dict_cb_to_name_clus : dict, 
+    name_tag_cb : str = 'CB',
+    int_max_num_files_for_each_process : int = 700,
+    int_num_worker_processes : int = 100,
+) :
+    """ # 2023-11-05 17:20:03 
+    A standalone pipeline employing multiprocessing for faster splitting of a barcoded BAM file to multiple BAM files, each containing the list of cell barcodes of the cells belonging to each 'name_cluster' (representing a cell type), or even a single-cell (a single cell-barcode).
+    Capable of splitting BAM file into more then thousand of files.
     
     path_file_bam_input : str # an input Barcoded BAM file to split
     path_folder_output : str # the output folder where splitted Barcoded BAM files will be exported
     dict_cb_to_name_clus : dict # a dictionary containing corrected cell barcode to 'name_clus' (name of cluster) mapping. if the name is not compatible with Windoe OS path, incompatible characters will be replaced with spaceholder character.
     name_tag_cb : str = 'CB' # name of the SAM tag containing the corrected cell barcode
+    int_max_num_files_for_each_process : int = 700, # max number of file descriptors (an output BAM file or a pipe object) that can be opened in a single process.
+    int_num_worker_processes : int = 100, # the max number of worker processes for writing output BAM files
     
     """
+    ''' prepare : retrieve file header, preprocess name_clus, and group 'name_clus' values for each worker process. '''
     # import packages
     import multiprocessing as mp
     import pysam
     import os
+    import math
+    # create the output folder
+    os.makedirs( path_folder_output, exist_ok = True )
     # define functions
     def To_window_path_compatible_str(a_string):
         """
@@ -9547,64 +9561,99 @@ def SplitBAM( path_file_bam_input : str, path_folder_output : str, dict_cb_to_na
     dict_convert = dict( ( v, To_window_path_compatible_str( v ).replace( ' ', '_' ) ) for v in set( dict_cb_to_name_clus.values( ) ) )
     dict_cb_to_name_clus = dict( ( e, dict_convert[ dict_cb_to_name_clus[ e ] ] ) for e in dict_cb_to_name_clus )
     l_name_clus = list( dict_convert.values( ) ) # retrieve list of 'name_clus' (after correction)
-
-    # create the output folder
-    os.makedirs( path_folder_output, exist_ok = True )
+    
+    # raise OSError when the number of output 'name_clus' exceeds the current limit, set by int_max_num_files_for_each_process and int_num_worker_processes arguments.
+    num_name_clus = len( l_name_clus )
+    if num_name_clus > int_max_num_files_for_each_process * int_num_worker_processes :
+        raise OSError( f'{int_max_num_files_for_each_process * int_num_worker_processes = }, but {num_name_clus} number of output labels were given.' )
+        return - 1
+    # adjust 'int_num_worker_processes' according to the number of 'name_clus'
+    if num_name_clus < int_num_worker_processes :
+        int_num_worker_processes = num_name_clus
     
     # read the header of the input BAM file    
     with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
         sam_header = samfile.header
-
+        
     def _write_bam_of_name_clus( p_in, p_out ) :
-        ''' # 2023-09-07 21:38:10 
-        for writing bam file for each 'name_clus'
+        ''' # 2023-11-05 17:44:33 
+        for writing bam files for a list of 'name_clus'
         '''
-        name_clus = p_in.recv( ) # retrieve the name of the cluster
-        path_file_bam = f'{path_folder_output}{name_clus}.bam'
-        with pysam.AlignmentFile( path_file_bam, 'wb', header = sam_header ) as newsamfile :
-            while True :
-                batch = p_in.recv( ) # receive a record
-                if batch is None :
-                    break
-                for str_r in batch : # parse the batch
-                    r = pysam.AlignedSegment.fromstring( str_r, sam_header ) # compose a pysam record
-                    newsamfile.write( r )
-        pysam.index( path_file_bam ) # index the given bam file
+        ''' prepare : create output files '''
+        set_name_clus = p_in.recv( ) # retrieve a list of cluster names
+        l_path_file_bam = [ ] # collect the paths of output BAM files
+        dict_name_clus_to_newsamfile = dict( ) # mapping between name_clus to the newsamfile
+        for name_clus in set_name_clus :
+            path_file_bam = f'{path_folder_output}{name_clus}.bam'
+            dict_name_clus_to_newsamfile[ name_clus ] = pysam.AlignmentFile( path_file_bam, 'wb', header = sam_header ) # collect the newsamfile
+            l_path_file_bam.append( path_file_bam ) # collect a path of an output BAM file
+        
+        ''' work : retrieve records and write the records to output BAM files '''
+        while True :
+            batch = p_in.recv( ) # receive a record
+            if batch is None :
+                break
+            for name_clus, str_r in batch : # parse the batch
+                r = pysam.AlignedSegment.fromstring( str_r, sam_header ) # compose a pysam record
+                dict_name_clus_to_newsamfile[ name_clus ].write( r ) # write the record to the output file
+                
+        ''' post-process : close files and index the files '''
+        for name_clus in dict_name_clus_to_newsamfile :
+            dict_name_clus_to_newsamfile[ name_clus ].close( ) # close the output file
+            
+        for path_file_bam in l_path_file_bam :
+            pysam.index( path_file_bam ) # index an output bam file
+            
         p_out.send( 'completed' ) # indicate the work has been completed
-
-    dict_name_clus_p_to_writers = dict( )
+    
+    dict_name_clus_to_idx_process = dict( ) # name_clus to idx_process mapping
+    l_p_to_writers = [ ] # collect the pipes
     l_p_from_writers = [ ]
     l_process = [ ] # list of processes
-    for name_clus in l_name_clus : # for each 'name_clus', recruite a worker
-        pm2w, pw4m = mp.Pipe( )
+    # initialize
+    idx_process = 0
+    idx_name_clus = 0
+    int_num_name_clus_for_each_worker_process = math.ceil( num_name_clus / int_num_worker_processes ) # retrieve the number of output BAM files for each worker process.
+    int_num_worker_process_assigned_with_int_num_name_clus_for_each_worker_process = num_name_clus % int_num_worker_processes
+    while idx_name_clus < num_name_clus : # until all 'name_clus' is assigned
+        int_num_name_clus = ( int_num_name_clus_for_each_worker_process if ( idx_process < int_num_worker_process_assigned_with_int_num_name_clus_for_each_worker_process ) else ( int_num_name_clus_for_each_worker_process - 1 ) ) if int_num_worker_process_assigned_with_int_num_name_clus_for_each_worker_process > 0 else int_num_name_clus_for_each_worker_process # retrieve number of 'name_clus' labels that will be assigned to the current process
+        set_name_clus_for_worker_process = set( l_name_clus[ idx_name_clus : idx_name_clus + int_num_name_clus ] ) # retrieve a list of 'name_clus' for the current process
+        
+        pm2w, pw4m = mp.Pipe( ) # create pipes
         pw2m, pm4w = mp.Pipe( )
         p = mp.Process( target = _write_bam_of_name_clus, args = ( pw4m, pw2m ) )
-        dict_name_clus_p_to_writers[ name_clus ] = pm2w 
+        l_p_to_writers.append( pm2w ) # collect the pipes
         l_p_from_writers.append( pm4w )
-        p.start( )
-        pm2w.send( name_clus ) # initialize the worker with 'name_clus'
+        p.start( ) # start the process
+        pm2w.send( set_name_clus_for_worker_process ) # initialize the worker with 'name_clus'
         l_process.append( p ) # collect the process
+        for name_clus in set_name_clus_for_worker_process : # record 'idx_process' for each 'name_clus'
+            dict_name_clus_to_idx_process[ name_clus ] = idx_process 
+        
+        idx_process += 1 # increase the indices
+        idx_name_clus += int_num_name_clus
 
     # internal setting
     int_max_num_record_in_a_batch = 100
-    dict_name_clus_to_batch = dict( ( name_clus, [ ] ) for name_clus in l_name_clus ) # initialize 'dict_name_clus_to_batch'
+    l_batch = list( [ ] for _ in range( int_num_worker_processes ) ) # initialize 'l_batch'
 
-    def _flush_batch( name_clus : str ) :
-        """ # 2023-09-07 22:00:29 
+    def _flush_batch( idx_process : int ) :
+        """ # 2023-11-05 18:44:28 
         flush the batch
         """
-        batch = dict_name_clus_to_batch[ name_clus ]
-        if len( batch ) > 0 : # if batch is not empty
-            dict_name_clus_p_to_writers[ name_clus ].send( batch ) # send the batch to the writer
-            dict_name_clus_to_batch[ name_clus ] = [ ] # empty the batch    
+        batch = l_batch[ idx_process ] # retrieve the batch
+        if len( batch ) > 0 : # if batch is not empty, empty the batch
+            l_p_to_writers[ idx_process ].send( batch ) # send the batch to the writer
+            l_batch[ idx_process ] = [ ] # empty the batch    
 
     def _write_record( name_clus : str, str_r : str ) :
         """ # 2023-09-07 22:00:38 
         write a record
         """
-        dict_name_clus_to_batch[ name_clus ].append( str_r ) # add the record
-        if len( dict_name_clus_to_batch[ name_clus ] ) >= int_max_num_record_in_a_batch :
-            _flush_batch( name_clus ) # flush the batch
+        idx_process = dict_name_clus_to_idx_process[ name_clus ] # retrieve index of the process assigned to 'name_clus'
+        l_batch[ idx_process ].append( ( name_clus, str_r ) ) # add the record
+        if len( l_batch[ idx_process ] ) >= int_max_num_record_in_a_batch : # if the batch is full,
+            _flush_batch( idx_process ) # flush the batch 
 
     # read file and write the record
     with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
@@ -9618,12 +9667,12 @@ def SplitBAM( path_file_bam_input : str, path_folder_output : str, dict_cb_to_na
                     _write_record( name_clus, str_r ) # write the record
 
     # flush remaining records
-    for name_clus in l_name_clus :
-        _flush_batch( name_clus )
+    for idx_process in range( int_num_worker_processes ) :
+        _flush_batch( idx_process )
 
     # notify all works in the main process has been completed
-    for name_clus in l_name_clus :
-        dict_name_clus_p_to_writers[ name_clus ].send( None )
+    for p_to_writers in l_p_to_writers :
+        p_to_writers.send( None )
 
     # wait for all workers to complete their jobs
     for p in l_p_from_writers :
@@ -9631,7 +9680,14 @@ def SplitBAM( path_file_bam_input : str, path_folder_output : str, dict_cb_to_na
     # pipeline completed
     return
 
-def SplitBAMs( dict__path_file_bam_input__to__dict_cb_to_name_clus : dict, path_folder_output : str, name_tag_cb : str = 'CB', int_num_threads : int = 5 ) :
+def SplitBAMs( 
+    dict__path_file_bam_input__to__dict_cb_to_name_clus : dict, 
+    path_folder_output : str, 
+    name_tag_cb : str = 'CB', 
+    int_num_threads : int = 5,
+    int_max_num_files_for_each_process : int = 700,
+    int_num_worker_processes : int = 100,
+) :
     """ # 2023-09-11 16:52:39 
     A pipeline employing multiprocessing for faster splitting of barcoded BAM files of a single cell dataset to multiple BAM files, each containing records of cells belonging to a single 'name_cluster' (a single cell type)
     
@@ -9644,6 +9700,10 @@ def SplitBAMs( dict__path_file_bam_input__to__dict_cb_to_name_clus : dict, path_
     name_tag_cb : str = 'CB' # name of the SAM tag containing the corrected cell barcode
     
     int_num_threads : int = 5 # the number of threads for merging BAM files of the same cluster name (cell type)
+    
+    int_max_num_files_for_each_process : int = 700, # max number of file descriptors (an output BAM file or a pipe object) that can be opened in a single process.
+    
+    int_num_worker_processes : int = 100, # the max number of worker processes for writing output BAM files
     """
     # create the output folder
     os.makedirs( path_folder_output, exist_ok = True )
@@ -9655,7 +9715,17 @@ def SplitBAMs( dict__path_file_bam_input__to__dict_cb_to_name_clus : dict, path_
     ''' run 'SplitBAM' for individual BAM files '''
     for path_file_bam_input in dict__path_file_bam_input__to__dict_cb_to_name_clus : # run 'SplitBAM' for each input BAM file separately
         str_uuid_file_bam_input = bk.UUID( ) # retrieve UUID of the input bam file
-        pipelines.submit_work( SplitBAM, kwargs = { 'path_file_bam_input' : path_file_bam_input, 'path_folder_output' : f'{path_folder_output}temp_{str_uuid_file_bam_input}/', 'dict_cb_to_name_clus' : dict__path_file_bam_input__to__dict_cb_to_name_clus[ path_file_bam_input ], 'name_tag_cb' : name_tag_cb } )
+        pipelines.submit_work( 
+            SplitBAM, 
+            kwargs = { 
+                'path_file_bam_input' : path_file_bam_input, 
+                'path_folder_output' : f'{path_folder_output}temp_{str_uuid_file_bam_input}/', 
+                'dict_cb_to_name_clus' : dict__path_file_bam_input__to__dict_cb_to_name_clus[ path_file_bam_input ], 
+                'name_tag_cb' : name_tag_cb, 
+                'int_max_num_files_for_each_process' : int_max_num_files_for_each_process, 
+                'int_num_worker_processes' : int_num_worker_processes,
+            },
+        )
                     
     # wait all pipelines to be completed
     pipelines.wait_all()
@@ -9829,14 +9899,21 @@ def DeduplicateBAM(
     # delete the temporary folder
     shutil.rmtree( path_folder_temp )
     
-def FilterInternalPolyAPrimedReadFromBAM( path_file_bam_input : str, path_folder_output : str, int_min_length_internal_polyA_tract : int = 8, name_tag_ia : str = 'IA' ) :
-    """ # 2023-10-11 19:56:11 
+def FilterInternalPolyAPrimedReadFromBAM( 
+    path_file_bam_input : str, 
+    path_folder_output : str, 
+    int_min_length_internal_polyA_tract : int = 8, 
+    name_tag_ia : str = 'IA',
+    flag_skip_output_internal_polyA_primed_reads : bool = False,
+) :
+    """ # 2023-11-05 17:05:58 
     Filter internal PolyA primed reads from BAM file
     
     path_file_bam_input : str # an input Barcoded BAM file to filter internal-polyA-region primed reads
     path_folder_output : str # the output folder where splitted Barcoded BAM files will be exported
     int_min_length_internal_polyA_tract : int = 8 # minimum length of an internal poly A/T tract to classify a read as 'internal poly A/T tract'
     name_tag_ia : str = 'IA' # name of the SAM tag containing the length of internal polyA tract. 
+    flag_skip_output_internal_polyA_primed_reads : bool = False, # if True, does not output
     
     """
     # import packages
@@ -9852,7 +9929,9 @@ def FilterInternalPolyAPrimedReadFromBAM( path_file_bam_input : str, path_folder
     with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
         sam_header = samfile.header
 
-    l_name_file = [ 'internal_polyA_primed_reads', 'without_internal_polyA_primed_reads' ] # define the name of the files
+    l_name_file = [ 'without_internal_polyA_primed_reads' ] # define the name of the files
+    if not flag_skip_output_internal_polyA_primed_reads : # create an output file containing internal polyA primed reads
+        l_name_file += [ 'internal_polyA_primed_reads' ]
     def _write_bam_of_name_file( p_in, p_out ) :
         ''' # 2023-09-07 21:38:10 
         for writing bam file for each 'name_file'
@@ -9909,8 +9988,11 @@ def FilterInternalPolyAPrimedReadFromBAM( path_file_bam_input : str, path_folder
         for r in samfile.fetch( ) :
             dict_tags = dict( r.get_tags( ) ) # retrieve tags of the read
             if name_tag_ia in dict_tags :
-                str_r = r.tostring( ) # convert samtools record to a string
-                _write_record( 'internal_polyA_primed_reads' if dict_tags[ name_tag_ia ] >= int_min_length_internal_polyA_tract else 'without_internal_polyA_primed_reads', str_r ) # write the record
+                flag_internal_polyA_primed_reads = dict_tags[ name_tag_ia ] >= int_min_length_internal_polyA_tract # retrieve a flag indicating 'internal_polyA_primed_reads'
+                if flag_internal_polyA_primed_reads and flag_skip_output_internal_polyA_primed_reads : # skip writing internal polyA primed reads if 'flag_skip_output_internal_polyA_primed_reads' is True
+                    continue
+                str_r = r.tostring( ) # convert samtools record to a string                
+                _write_record( 'internal_polyA_primed_reads' if flag_internal_polyA_primed_reads else 'without_internal_polyA_primed_reads', str_r ) # write the record
                 
     # flush remaining records
     for name_file in l_name_file :
