@@ -10007,6 +10007,107 @@ def FilterInternalPolyAPrimedReadFromBAM(
         p.recv( ) # receive a signal indicating the worker has dismissed itself
     # pipeline completed
     return
+
+def StrandSpecificBAM( 
+    path_file_bam_input : str, 
+    path_folder_output : str, 
+) :
+    """ # 2023-12-13 14:32:55 
+    Split a given BAM file into two BAM file containing forward (+) strand and reverse (-) strand reads, respectively.
+    
+    path_file_bam_input : str # an input Barcoded BAM file to split into BAM files containing forward (+) strand and reverse (-) strand reads.
+    path_folder_output : str # the output folder where splitted BAM files will be exported. The name of the output BAM files will be 'forward_reads.bam' and 'reverse_reads.bam'.
+    """
+    # import packages
+    import multiprocessing as mp
+    import pysam
+    import os
+    # define functions
+    def _check_binary_flags( flags : int, int_bit_flag_position : int ) :
+        """ # 2023-12-13 15:47:10 
+        check a flag in the binary flags at the given position
+        """
+        return ( flags & ( 1 << int_bit_flag_position ) ) > 0 
+
+    # create the output folder
+    os.makedirs( path_folder_output, exist_ok = True )
+    
+    # read the header of the input BAM file    
+    with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
+        sam_header = samfile.header
+
+    l_name_file = [ 'forward_reads', 'reverse_reads' ] # define the name of the files
+    def _write_bam_of_name_file( p_in, p_out ) :
+        ''' # 2023-09-07 21:38:10 
+        for writing bam file for each 'name_file'
+        '''
+        name_file = p_in.recv( ) # retrieve the name of file
+        path_file_bam = f'{path_folder_output}{name_file}.bam'
+        with pysam.AlignmentFile( path_file_bam, 'wb', header = sam_header ) as newsamfile :
+            while True :
+                batch = p_in.recv( ) # receive a record
+                if batch is None :
+                    break
+                for str_r in batch : # parse the batch
+                    r = pysam.AlignedSegment.fromstring( str_r, sam_header ) # compose a pysam record
+                    newsamfile.write( r )
+        pysam.index( path_file_bam ) # index the given bam file
+        p_out.send( 'completed' ) # indicate the work has been completed
+
+    dict_name_file_p_to_writers = dict( )
+    l_p_from_writers = [ ]
+    l_process = [ ] # list of processes
+    for name_file in l_name_file : # for each 'name_file', recruite a worker
+        pm2w, pw4m = mp.Pipe( )
+        pw2m, pm4w = mp.Pipe( )
+        p = mp.Process( target = _write_bam_of_name_file, args = ( pw4m, pw2m ) )
+        dict_name_file_p_to_writers[ name_file ] = pm2w 
+        l_p_from_writers.append( pm4w )
+        p.start( )
+        pm2w.send( name_file ) # initialize the worker with 'name_file'
+        l_process.append( p ) # collect the process
+
+    # internal setting
+    int_max_num_record_in_a_batch = 100
+    dict_name_file_to_batch = dict( ( name_file, [ ] ) for name_file in l_name_file ) # initialize 'dict_name_file_to_batch'
+
+    def _flush_batch( name_file : str ) :
+        """ # 2023-09-07 22:00:29 
+        flush the batch
+        """
+        batch = dict_name_file_to_batch[ name_file ]
+        if len( batch ) > 0 : # if batch is not empty
+            dict_name_file_p_to_writers[ name_file ].send( batch ) # send the batch to the writer
+            dict_name_file_to_batch[ name_file ] = [ ] # empty the batch    
+
+    def _write_record( name_file : str, str_r : str ) :
+        """ # 2023-09-07 22:00:38 
+        write a record
+        """
+        dict_name_file_to_batch[ name_file ].append( str_r ) # add the record
+        if len( dict_name_file_to_batch[ name_file ] ) >= int_max_num_record_in_a_batch :
+            _flush_batch( name_file ) # flush the batch
+
+    # read file and write the record
+    with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
+        for r in samfile.fetch( ) :
+            flag_is_reverse_complemented = _check_binary_flags( r.flag, 4 )
+            str_r = r.tostring( ) # convert samtools record to a string                
+            _write_record( 'reverse_reads' if flag_is_reverse_complemented else 'forward_reads', str_r ) # write the record
+                
+    # flush remaining records
+    for name_file in l_name_file :
+        _flush_batch( name_file )
+
+    # notify all works in the main process has been completed
+    for name_file in l_name_file :
+        dict_name_file_p_to_writers[ name_file ].send( None )
+
+    # wait for all workers to complete their jobs
+    for p in l_p_from_writers :
+        p.recv( ) # receive a signal indicating the worker has dismissed itself
+    # pipeline completed
+    return
     
 if __name__ == "__main__":
     ourotools()  # run ouro at the top-level environment
