@@ -82,7 +82,7 @@ logging.basicConfig(
     format="%(asctime)s [%(name)s] <%(levelname)s> (%(funcName)s) - %(message)s",
     level=logging.INFO,
 )
-logger = logging.getLogger("ouro-count")
+logger = logging.getLogger("ouro-tools")
 
 # define version
 _version_ = "0.0.3"
@@ -2228,11 +2228,11 @@ def LongFilterNSplit(
     int_max_size_intervening_sequence_between_alignment_end_and_poly_A : int = 20, # max size of the intervening sequence between alignment end position and poly A tract. it will be applied for both internal poly A or external (enzymatically attached) poly A.
     float_min_A_frequency_for_identifying_poly_A : float = 0.75, # the minimum frequency to determine a sequence contains a poly A tract
     int_min_size_intervening_sequence_for_splitting : int = 150, # the minimum length of intervening sequence between alignments for splitting the reads
-    int_max_intron_size_for_determining_chimeric_molecule : int = 200_000, # the maximum allowed intron size for classifying considering the molecule as a intra-chromosomal chimeric read
+    int_max_intron_size_for_determining_chimeric_molecule : int = 200_000, # the maximum allowed intron size for classifying the molecule as a intra-chromosomal chimeric read
     int_max_read_length : int = 20_000, # the maximum read length to analyze. If the speed of the analysis seems to be slower than expected, try lowering this parameter to filter out repeat-containing artifact reads present in long-read sequencing data, which takes a long time to align and filter out based on the alignment profile.
     flag_recover_original_molecule_before_self_circularization_and_digestion : bool = False, # by default, this flag is set to False. However, when Ourn-Enrich was applied and the sequenced molecules are rearranged so that the adaptors are located in the middle, please set this flag to True, which enables a recovery mode to reconstruct the original molecules from the rearranged sequences.
     int_max_coordinate_difference_at_predicted_cut_site_for_recovering_original_molecule_before_self_circularization_and_digestion : int = 30, # the max coordinate difference at the predicted cut site for recovering original molecule before self-circularization. this argument is only active when 'flag_recover_original_molecule_before_self_circularization' is True
-    int_num_reads_to_analyze : int = 0, # by default, analyze all reads in the fastq file. However, for rapidly assess the quality of given fastq file, only a subset (fastq reads, subsampled sequentially from the start of the input FASTQ file) of reads can be analyzed by given an non-zero integer number to this argument.
+    int_num_reads_to_analyze : int = 0, # by default, analyze all reads in the fastq file. However, to rapidly assess the quality of given fastq file, only a subset (fastq reads, subsampled sequentially from the start of the input FASTQ file) of reads can be analyzed by given an non-zero integer number to this argument.
     am_genome = None, # mappy aligner for genome (optional. if given, will override 'path_file_minimap_index_genome' argument)
     l_am_unwanted : Union[ None, List ] = None, # mappy aligner for unwanted sequences (optional. if given, will override 'l_path_file_minimap_index_unwanted' argument)
 ) -> None :
@@ -2253,11 +2253,11 @@ def LongFilterNSplit(
     int_size_window_for_searching_poly_a_tail : int = 16, # the size of the window from the end of the alignment to search for poly A tail.
     int_max_size_intervening_sequence_between_alignment_end_and_poly_A : int = 20, # max size of the intervening sequence between alignment end position and poly A tract. it will be applied for both internal poly A or external (enzymatically attached) poly A.
     float_min_A_frequency_for_identifying_poly_A : float = 0.75, # the minimum frequency to determine a sequence contains a poly A tract
-    int_max_intron_size_for_determining_chimeric_molecule : int = 200000, # the maximum allowed intron size for classifying considering the molecule as a intra-chromosomal chimeric read
+    int_max_intron_size_for_determining_chimeric_molecule : int = 200000, # the maximum allowed intron size for classifying the molecule as a intra-chromosomal chimeric read
     int_max_read_length : int = 30_000, # the maximum read length to analyze. If the speed of the analysis seems to be slower than expected, try lowering this parameter to filter out repeat-containing artifact reads present in long-read sequencing data, which takes a long time to align and filter out based on the alignment profile.
     flag_recover_original_molecule_before_self_circularization_and_digestion : bool = False, # by default, this flag is set to False. However, when Ourn-Enrich was applied and the sequenced molecules are rearranged so that the adaptors are located in the middle, please set this flag to True, which enables a recovery mode to reconstruct the original molecules from the rearranged sequences.
     int_max_coordinate_difference_at_predicted_cut_site_for_recovering_original_molecule_before_self_circularization_and_digestion : int = 30, # the max coordinate difference at the predicted cut site for recovering original molecule before self-circularization. this argument is only active when 'flag_recover_original_molecule_before_self_circularization_and_digestion' is True
-    int_num_reads_to_analyze : int = 0, # by default, analyze all reads in the fastq file. However, for rapidly assess the quality of given fastq file, only a subset (fastq reads, subsampled sequentially from the start of the input FASTQ file) of reads can be analyzed by given an non-zero integer number to this argument.
+    int_num_reads_to_analyze : int = 0, # by default, analyze all reads in the fastq file. However, to rapidly assess the quality of given fastq file, only a subset (fastq reads, subsampled sequentially from the start of the input FASTQ file) of reads can be analyzed by given an non-zero integer number to this argument.
     am_genome = None, # mappy aligner for genome (optional. if given, will override 'path_file_minimap_index_genome' argument)
     int_min_size_intervening_sequence_for_splitting : int = 150, # the minimum length of intervening sequence between alignments for splitting the reads
     l_am_unwanted : Union[ None, List ] = None, # mappy aligner for unwanted sequences (optional. if given, will override 'l_path_file_minimap_index_unwanted' argument)
@@ -4675,6 +4675,1711 @@ def LongExtractBarcodeFromBAM(
     logger.info(f"Completed.")
     return 
 
+def LongSurvey5pSiteFromBAM(
+    flag_usage_from_command_line_interface: bool = False,
+    l_path_folder_input: Union[list, None] = None, # path to the output folders of the 'ourotools.LongExtractBarcodeFromBAM' module
+    n_threads: int = 32,
+    int_num_samples_analyzed_concurrently : int = 2, # the number of samples that can be analyzed concurrently to reduce bottlenecks due to processing of very large chunks.
+    float_memory_in_GiB: float = 50,
+    verbose: bool = True,
+    int_max_distance_from_5p_to_survey_in_base_pairs : int = 5, # the maximum number of base pairs to analyze before/after 5' alignment site
+    l_seqname_to_skip : list = [ 'MT' ], # the list of names of the chromosomes of the reference genome to skip the analysis. By default, reads aligned to the mitochondrial genomes will be skipped.
+    int_min_length_internal_polyA_tract : int = 8, 
+    name_tag_cb : str = 'CB', 
+    name_tag_umi : str = 'UB',
+    name_tag_ia : str = 'IA',
+    flag_include_internal_polyA_primed_reads : bool = False,
+) -> None :
+    """# 2023-12-19 23:17:54 
+    Ouro-Tools LongSurvey5pSiteFromBAM, a pipeline for surveying 5' sites of a BAM file containing strand-specific long-read RNA-sequencing data that were prepared from reverse-transcription reaction using MMLV-like RT enzymes.
+
+    l_path_folder_input: Union[list, None] = None, # path to the output folders of the 'ourotools.LongExtractBarcodeFromBAM' module
+    n_threads: int = 32,
+    int_num_samples_analyzed_concurrently : int = 2, # the number of samples that can be analyzed concurrently to reduce bottlenecks due to processing of very large chunks.
+    float_memory_in_GiB: float = 50,
+    verbose: bool = True,
+    int_max_distance_from_5p_to_survey_in_base_pairs : int = 5, # the maximum number of base pairs to analyze before/after 5' alignment site
+    l_seqname_to_skip : list = [ 'MT' ], # the list of names of the chromosomes of the reference genome to skip the analysis. By default, reads aligned to the mitochondrial genomes will be skipped.
+    int_min_length_internal_polyA_tract : int = 8 # minimum length of an internal poly A/T tract to classify a read as 'internal poly A/T tract'
+    name_tag_cb : str = 'CB', # name of the SAM tag containing cell barcode (corrected)
+    name_tag_umi : str = 'UB', # name of the SAM tag containing UMI (corrected)
+    name_tag_ia : str = 'IA' # name of the SAM tag containing the length of internal polyA tract. 
+    flag_include_internal_polyA_primed_reads : bool = False, # if True, internal polyA primed reads will be included in the analysis
+
+    returns
+    """
+    """
+    Parse arguments
+    """
+    if flag_usage_from_command_line_interface:  # parse arguments
+        """parse arguments when the function was called from the command-line interface"""
+        # {  } # unused arguments
+        # command line arguments
+        parser = argparse.ArgumentParser(
+            description=str_description,
+            usage="ourotools LongSurvey5pSiteFromBAM",
+            formatter_class=argparse.RawTextHelpFormatter,
+        )
+        parser.add_argument("LongSurvey5pSiteFromBAM")
+
+        arg_grp_general = parser.add_argument_group("General")
+        arg_grp_general.add_argument(
+            "-i",
+            "--l_path_folder_input",
+            help="path to the output folders of the 'ourotools.LongExtractBarcodeFromBAM' module",
+            nargs="*",
+        )
+        arg_grp_general.add_argument(
+            "-t",
+            "--n_threads",
+            help="(default: 32) the number of processors to use concurrently.",
+            default=32,
+            type=int,
+        )
+        arg_grp_general.add_argument(
+            "-s",
+            "--int_num_samples_analyzed_concurrently",
+            help="(default: 2) the number of samples that can be analyzed concurrently.",
+            default=2,
+            type=int,
+        )
+        arg_grp_general.add_argument(
+            "-m",
+            "--float_memory_in_GiB",
+            help="(default: 50) the maximum memory usage of the pipeline in GiB",
+            default=50,
+            type=float,
+        )
+        arg_grp_general.add_argument(
+            "-v", 
+            "--verbose", 
+            help="turn on verbose mode", 
+            action="store_true"
+        )
+        arg_grp_survey = parser.add_argument_group("Surveying 5' site information")
+        arg_grp_survey.add_argument(
+            "-w", 
+            "--int_max_distance_from_5p_to_survey_in_base_pairs", 
+            help="(default: 5) maximum number of base pairs to analyze before/after 5' alignment site", 
+            default=5,
+            type=int,
+        )
+        arg_grp_survey.add_argument(
+            "--l_seqname_to_skip",
+            help="(default: [ 'MT' ]) the list of names of the chromosomes of the reference genome to skip the analysis. By default, reads aligned to the mitochondrial genomes will be skipped.",
+            default=["MT"],
+            nargs="*",
+        )
+        arg_grp_survey.add_argument(
+            "-l", 
+            "--int_min_length_internal_polyA_tract", 
+            help="(default: 8) minimum length of an internal poly A/T tract to classify a read as 'internal poly A/T tract'.", 
+            default=8,
+            type=int,
+        )
+        arg_grp_survey.add_argument(
+            "-A",
+            "--name_tag_ia",
+            help="(default: IA) name of the SAM tag containing the length of internal polyA tract.",
+            default="IA",
+        )
+        arg_grp_survey.add_argument(
+            "-I", 
+            "--flag_include_internal_polyA_primed_reads", 
+            help="turn on verbose mode", 
+            action="store_true"
+        )
+
+        args = parser.parse_args()
+
+        l_path_folder_input = args.l_path_folder_input
+        n_threads = args.n_threads
+        int_num_samples_analyzed_concurrently = args.int_num_samples_analyzed_concurrently
+        float_memory_in_GiB = args.float_memory_in_GiB
+        verbose = args.verbose
+        int_max_distance_from_5p_to_survey_in_base_pairs = args.int_max_distance_from_5p_to_survey_in_base_pairs
+        l_seqname_to_skip = args.l_seqname_to_skip
+        int_min_length_internal_polyA_tract = args.int_min_length_internal_polyA_tract
+        name_tag_ia = args.name_tag_ia
+        flag_include_internal_polyA_primed_reads = args.flag_include_internal_polyA_primed_reads
+
+    """
+    Start of the pipeline
+    """
+    logger.info(str_description)
+    logger.info(
+        "Ouro-Tools LongSurvey5pSiteFromBAM, a pipeline for surveying 5' sites of a BAM file containing strand-specific long-read RNA-sequencing data that were prepared from reverse-transcription reaction using MMLV-like RT enzymes."
+    )
+    logger.info(f"Started.")
+
+    """ handle special cases and invalid inputs """
+    if l_path_folder_input is None : # when both the minimap2 aligner and index path are not given
+        logger.error(
+            "Required argument(s) is missing. to view help message, type -h or --help"
+        )
+        return -1
+
+    """ process required input directories """
+    l_path_folder_input = list( e + '/' if e[ -1 ] != '/' else e for e in list( os.path.abspath( e ) for e in l_path_folder_input ) )
+
+    """ validate input directory  """
+    l_path_folder_input_valid = [ ]
+    for path_folder_input in l_path_folder_input :
+        flag_valid_input = True # initialize the flag
+        for path_file_input in [
+            f"{path_folder_input}barcoded.bam",
+            f"{path_folder_input}barcoded.bam.bai",
+        ] :
+            if not os.path.exists( path_file_input ) :
+                logger.warn( f"'{path_file_input}' does not exists, the input folder '{path_folder_input}' will be skipped." )
+                flag_valid_input = False # skip the current input folder
+                break
+        if flag_valid_input :
+            l_path_folder_input_valid.append( path_folder_input ) # add the folder to the list of valid input folders
+    l_path_folder_input = l_path_folder_input_valid # set 'l_path_folder_input'
+    
+    # process arguments
+    set_seqname_to_skip = set(l_seqname_to_skip)
+    int_window_size = int_max_distance_from_5p_to_survey_in_base_pairs + 1 # retrieve the window size to analyze
+    
+    """ 
+    Fixed Settings
+    """
+    # internal settings
+    int_highest_mapq = 60
+
+    """
+    Exit early when no samples is anlayzed
+    """
+    # if no samples will be analyzed, return
+    if len(l_path_folder_input) == 0:
+        logger.error(f"no valid input folders were given, exiting")
+        return
+
+    """
+    Initiate pipelines for off-loading works
+    """
+    pipelines = bk.Offload_Works(
+        None
+    )  # no limit for the number of works that can be submitted.
+
+    int_num_samples_analyzed_concurrently = min(
+        len(l_path_folder_input), int_num_samples_analyzed_concurrently
+    )  # if the number of samples are smaller than 'int_num_samples_analyzed_concurrently', adjust 'int_num_samples_analyzed_concurrently' so that it matches the number of samples
+
+    n_threads = int(
+        np.ceil(n_threads / int_num_samples_analyzed_concurrently)
+    )  # divide the number of processes that can be used by each pipeline by the number of pipelines that will be run concurrently.
+    
+    """
+    Pipeline specific functions and variables
+    """
+    
+    str_G = 'G'
+    def find_consecutive_G( 
+        seq : str, 
+        flag_from_3p : bool = True,
+    ) :
+        """
+        find the length of consecutive G from either end.
+        seq : str, # sequence
+        flag_from_3p : bool = True, # if True, search from the 3' end. if False, search from the 5' end.
+        # 2023-12-15 23:24:33 
+        """
+        len_seq = len( seq )
+        if flag_from_3p :
+            for idx in range( 1, len_seq + 1 ) :
+                if seq[ len_seq - idx ] != str_G :
+                    return idx - 1
+        else :
+            for idx in range( len_seq ) :
+                if seq[ idx ] != str_G :
+                    return idx
+        return len_seq # handle the case when all bases are G
+
+    def _check_binary_flags( flags : int, int_bit_flag_position : int ) :
+        """ # 2023-08-08 22:47:02 
+        check a flag in the binary flags at the given position
+        """
+        return ( flags & ( 1 << int_bit_flag_position ) ) > 0 
+        
+    def run_pipeline():
+        """# 2023-10-03 20:00:57 
+        analyze a pipeline for a given list of samples
+        """
+        # retrieve id of the pipeline
+        str_uuid_pipeline = bk.UUID()
+        logger.info(
+            f"[Pipeline Start] Forked Pipeline (id={str_uuid_pipeline}) Started."
+        )
+
+        """
+        Initiate workers for off-loading works
+        """
+        workers = bk.Offload_Works(
+            None
+        )  # no limit for the number of works that can be submitted.
+
+        """
+        Run pipeline for each sample
+        """
+        for path_folder_input in l_path_folder_input :  # retrieve input for the current sample
+            # define the output folder
+            path_folder_output = f"{path_folder_input}5pSite/"
+            path_file_bam_input = f"{path_folder_input}barcoded.bam"
+            
+            """
+            define a function to release a lock
+            """
+            def release_lock():
+                """# 2023-01-14 20:36:17
+                release the lock file
+                """
+                path_file_lock = (
+                    f"{path_folder_output}ourotools.lock"
+                )
+
+                # check the existence of output files for the output folder of each input file of the current sample
+                flag_all_output_files_exist = True  # initialize the flag
+                
+                if not os.path.exists(
+                    f"{path_folder_output}pipeline_completed.txt"
+                ):
+                    flag_all_output_files_exist = False
+
+                # check the existence of the lock file
+                if (
+                    os.path.exists(path_file_lock) and flag_all_output_files_exist
+                ):  # if all output files exist and the lock file exists
+                    # check whether the lock file has been created by the current pipeline
+                    with open(path_file_lock, "rt") as file_lock:
+                        str_uuid_pipeline_lock = file_lock.read() # retrieve uuid of lock
+                        flag_lock_acquired = str_uuid_pipeline_lock == str_uuid_pipeline
+                    if (
+                        flag_lock_acquired
+                    ):  # if the lock file has been created by the current pipeline, delete the lock file
+                        os.remove(path_file_lock)
+                        # lock has been released
+                        if verbose:
+                            logger.warning(
+                                f"[{path_folder_output}] The forked pipeline (id={str_uuid_pipeline}) released the lock"
+                            )
+                    else :
+                        # lock has been released
+                        if verbose:
+                            logger.warning(
+                                f"[{path_folder_output}] The lock belongs to the forked pipeline (id={str_uuid_pipeline_lock}), and the lock was not released."
+                            )
+                else:
+                    if verbose:
+                        logger.warning(
+                            f"[{path_folder_output}] The forked pipeline (id={str_uuid_pipeline}) attempted to release the lock, but some output files are missing, and the lock will not be released, yet."
+                        )
+
+            """
+            Run pipeline for each sample
+            """
+            """
+            create a lock
+            """
+            os.makedirs(path_folder_output, exist_ok=True)
+            path_file_lock = (
+                f"{path_folder_output}ourotools.lock"
+            )
+            # check the existence of the lock file
+            if os.path.exists(path_file_lock):
+                logger.warning(
+                    f"[Output folder unavailable] the output folder {path_folder_output} contains a lock file, which appears to be processed by a different process. Therefore, the output folder will be skipped."
+                )
+                continue
+            flag_lock_acquired = False  # initialize 'flag_lock_acquired'
+            try:
+                # create the lock file
+                with open(path_file_lock, "wt") as newfile_lock:
+                    newfile_lock.write(str_uuid_pipeline)
+                # check whether the lock file has been created correctly (check for collision).
+                with open(path_file_lock, "rt") as file_lock:
+                    flag_lock_acquired = file_lock.read() == str_uuid_pipeline
+            except Exception as e:
+                logger.critical(
+                    e, exc_info=True
+                )  # if an exception occurs, print the error message
+            if not flag_lock_acquired:
+                logger.warning(
+                    f"[Output folder unavailable] an attempt to acquire a lock for the output folder {path_folder_output} failed, which appears to be processed by a different process. Therefore, the output folder will be skipped."
+                )
+                continue
+            # lock has been acquired
+
+            """
+            Run pipeline for each input file
+            """
+            path_folder_temp = f"{path_folder_output}temp/"
+
+            """ if the output folder already exists """
+            if os.path.exists(path_folder_output):
+                """check whether the pipeline has been completed"""
+                if os.path.exists( f"{path_folder_output}pipeline_completed.txt" ) :  # intermediate files should not exists, while all output files should exist
+                    logger.info(
+                        f"[Output folder Already Exists] the output folder {path_folder_output} contains valid output files. Therefore, the output folder will be skipped."
+                    )
+                    release_lock( ) # release the lock
+                    continue  # skip if the pipeline has been completed for the output folder
+                else:
+                    """if required output files does not exist or the an intermediate file exists, remove the entire output folder, and rerun the pipeline"""
+                    if (
+                        len(glob.glob(f"{path_folder_output}*/")) > 0
+                    ):  # detect a folder inside the output folder and report the presence of the existing folders.
+                        logger.info(
+                            f"[Output folder Already Exists] the output folder {path_folder_output} does not contain valid output files. The output folder will be cleaned and the pipeline will start anew at the folder."
+                        )
+                    # delete the folders
+                    for path_folder in glob.glob(f"{path_folder_output}*/"):
+                        shutil.rmtree(path_folder, ignore_errors = True)
+                    # delete the files, excluding the lock file that has been acquired by the current pipeline
+                    for path_file in glob.glob(f"{path_folder_output}*"):
+                        if (
+                            path_file_lock != path_file
+                        ):  # does not delete the lock file
+                            os.remove(path_file)
+
+            """ create directories """
+            for path_folder in [
+                path_folder_output,
+                path_folder_temp,
+            ]:
+                os.makedirs(path_folder, exist_ok=True)
+
+            """
+            Report program arguments
+            """
+            # record arguments used for the program (metadata)
+            dict_program_setting = {
+                "version": _version_,  # record version
+                # external
+                "flag_usage_from_command_line_interface" : flag_usage_from_command_line_interface,
+                "path_folder_input" : path_folder_input,
+                "path_folder_output" : path_folder_output,
+                "n_threads" : n_threads,
+                "int_num_samples_analyzed_concurrently" : int_num_samples_analyzed_concurrently,
+                "float_memory_in_GiB" : float_memory_in_GiB,
+                'int_max_distance_from_5p_to_survey_in_base_pairs' : int_max_distance_from_5p_to_survey_in_base_pairs,
+                'l_seqname_to_skip' : l_seqname_to_skip,
+                'int_min_length_internal_polyA_tract' : int_min_length_internal_polyA_tract,
+                'name_tag_cb' : name_tag_cb,
+                'name_tag_umi' : name_tag_umi,
+                'name_tag_ia' : name_tag_ia,
+                'flag_include_internal_polyA_primed_reads' : flag_include_internal_polyA_primed_reads,
+                # internal
+                "path_folder_temp": path_folder_temp,
+            }
+            logger.info(
+                f"[Setting] program will be run with the following setting for the input file {path_folder_input} : {str( dict_program_setting )}"
+            )
+
+            """ export program setting """
+            path_file_json_setting_program = (
+                f"{path_folder_output}program_setting.json"
+            )
+            if os.path.exists(path_file_json_setting_program):
+                with open(path_file_json_setting_program, "r") as file:
+                    j = json.load(file)
+                if j != dict_program_setting:
+                    logger.info(
+                        f"[Warning] the current program setting is different from the previous program setting recorded in the pipeline folder. The previous setting will be used."
+                    )
+                    with open(path_file_json_setting_program, "r") as file:
+                        dict_program_setting = json.load(
+                            file
+                        )  # override current program setting with previous program setting
+            with open(path_file_json_setting_program, "w") as newfile:
+                json.dump(dict_program_setting, newfile)
+                
+            """
+            Analyze input file using multiple processes
+            """
+            def process_batch(pipe_receiver, pipe_sender):
+                """
+                # 2022-04-24 01:29:59
+                Requires loading several data objects (using copy-on-write method)
+
+                receives a bookmark file (either file directory of a tsv file or a dataframe)
+                """
+                """
+                initialize the worker 
+                # 2023-08-01 12:19:06 
+                """
+                str_uuid = bk.UUID()  # retrieve id
+                if verbose:
+                    logger.info(f"[Started] start working (worker_id={str_uuid})")
+                
+                """ prepare """
+                str_uuid_for_a_batch = bk.UUID( ) # retrieve id for the specific batch
+                
+                while True:
+                    ins = pipe_receiver.recv()
+                    if ins is None:
+                        break
+                    name_chr = ins  # parse input
+                    
+                    """
+                    define batch-specific function
+                    """
+
+                    # internal settings
+                    int_max_num_bucket_deleted = 100000
+                    
+                    def create_5p_bucket( ) :
+                        """ # 2023-12-19 21:20:22 
+                        generate a bucket of reads containing the same 5p site from the input BAM file
+                        """
+                        ns = dict( ) # create a namespace
+                        ns[ 'int_num_buckets_deleted' ] = 0 # initialize 'int_num_buckets_deleted'
+                        ns[ 'dict_t_id_to_bucket' ] = dict( ) # a dictionary containing batches
+                        reference_name_current = None
+                        reference_start_current = None
+
+                        def _flush_bucket( t_id ) :
+                            """ # 2023-09-19 00:27:31 
+                            """
+                            bucket = ns[ 'dict_t_id_to_bucket' ].pop( t_id )
+                            ns[ 'int_num_buckets_deleted' ] += 1
+                            if ns[ 'int_num_buckets_deleted' ] >= int_max_num_bucket_deleted : # if the number of pop operations exceed the limit, recreate the dictionary
+                                data = ns[ 'dict_t_id_to_bucket' ]
+                                ns[ 'dict_t_id_to_bucket' ] = dict( ( k, data[ k ] ) for k in data )
+                            return bucket
+
+                        def _add_record( t_id, r ) :
+                            """ # 2023-12-19 21:49:25 
+                            """
+                            dict_tags = dict( r.get_tags( ) )
+                            # ignore invalid reads lacking CB/UMI
+                            if name_tag_cb not in dict_tags or name_tag_umi not in dict_tags : 
+                                return
+                            
+                            # ignore 'internal_polyA_primed_reads'
+                            if not flag_include_internal_polyA_primed_reads and name_tag_ia in dict_tags : # exclude internal polyA primed reads
+                                flag_internal_polyA_primed_reads = dict_tags[ name_tag_ia ] >= int_min_length_internal_polyA_tract # retrieve a flag indicating 'internal_polyA_primed_reads'
+                                if flag_internal_polyA_primed_reads : # ignore 'internal_polyA_primed_reads'
+                                    return
+
+                            # retrieve sequences around the 5p site
+                            seq, r_st, r_en, q_st, q_en = r.seq, r.reference_start, r.reference_end, r.qstart, r.qend
+                            flag_plus_strand, pos_5prime_start_or_end = t_id # parse 't_id'
+                            if flag_plus_strand :
+                                seq_5prime_aligned = seq[ q_st : q_st + int_window_size ]
+                                seq_5prime_unaligned = seq[ q_st - int_window_size : q_st ]
+                            else :
+                                seq_5prime_aligned = SEQ.Reverse_Complement( seq[ q_en - int_window_size : q_en ] )
+                                seq_5prime_unaligned = SEQ.Reverse_Complement( seq[ q_en : q_en + int_window_size ] )
+
+                            # add the record to the bucket
+                            if t_id not in ns[ 'dict_t_id_to_bucket' ] : # initialize the bucket for 't_id'
+                                ns[ 'dict_t_id_to_bucket' ][ t_id ] = { 'l_l' : [ ], 't_id' : t_id }
+                            ns[ 'dict_t_id_to_bucket' ][ t_id ][ 'l_l' ].append( [ 
+                                dict_tags[ name_tag_cb ], 
+                                dict_tags[ name_tag_umi ], 
+                                find_consecutive_G( seq_5prime_aligned, flag_from_3p = False ), 
+                                find_consecutive_G( seq_5prime_unaligned, flag_from_3p = True ),
+                            ] )
+
+                        # read file and write the record
+                        with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
+                            for r in samfile.fetch( contig = name_chr ) :
+                                # check whether the read was reverse complemented
+                                flags, reference_name, reference_start, reference_end = r.flag, r.reference_name, r.reference_start, r.reference_end # retrieve read properties
+
+                                ''' process reads for each 'bucket' (reads with the same 5p site) '''
+                                ''' when the position has changed, detect buckets that should be emptied '''
+                                if reference_start_current != reference_start :
+                                    ''' determine whether to empty bucket or not, based on the current position on the sorted BAM file '''
+                                    for t_id in list( ns[ 'dict_t_id_to_bucket' ] ) : # retrieve list of 't_id'
+                                        ''' regardlesss of whether the 5p site is located at the left or the right side of the read, when the current position passes the 5p site, process the bucket '''
+                                        flag_is_reverse_complemented, pos = t_id # parse 't_id'
+                                        if pos < reference_start :
+                                            yield _flush_bucket( t_id )
+                                    reference_start_current = reference_start # update 'reference_start_current'
+
+                                ''' compose 't_id' '''
+                                flag_plus_strand = not _check_binary_flags( flags, 4 ) # retrieve a strand flag
+                                t_id = ( flag_plus_strand, reference_start if flag_plus_strand else reference_end ) # compose 't_id' representing a 5p site
+                                _add_record( t_id, r ) # add record
+
+                        # flush remaining data
+                        for t_id in list( ns[ 'dict_t_id_to_bucket' ] ) : # retrieve list of 't_id'
+                            yield _flush_bucket( t_id )
+
+                    gen_5p_bucket = create_5p_bucket( ) # start the generator
+                    dict_t_id_5p_to_info = dict( ) # initialize the container
+                    while True :
+                        try:
+                            batch = next(gen_5p_bucket)  # retrieve the next batch
+                        except StopIteration:
+                            break
+
+                        t_id = batch[ 't_id' ] # parse 't_id'
+                        flag_plus_strand, pos_5prime_start_or_end = t_id
+                        # compose a dataframe containing read information for the bucket
+                        df = pd.DataFrame( batch[ 'l_l' ], columns = [ 'cb', 'umi', 'int_num_G_aligned', 'int_num_G_unaligned', ] )
+                        if len( df ) > 1 : # if more than two records available, deduplicate for each CB/UMI pair
+                            df = df.groupby( [ 'cb', 'umi' ] ).mean( ).round( ).astype( int ) # retrieve average 'int_num_G_aligned' and 'int_num_G_unaligned' for each CB/UMI pair
+                            df.reset_index( inplace = True )
+                        
+                        # summarize the information for the current 5p site
+                        '''
+                        structure of 'arr_info'
+                        [int_num_G_aligned_avg, 0unrefG_count, 1unrefG_count, 2unrefG_count, ...]
+                        '''
+                        arr_info = np.zeros( int_max_distance_from_5p_to_survey_in_base_pairs + 3, dtype = np.int32 ) # including zero count, the outlier bin, and avg aligned G count # initialize 'arr_info'
+                        
+                        arr_info[ 0 ] = df.int_num_G_aligned.mean( ) # calculate and save 'int_num_G_aligned_avg'
+                        dict_counter = bk.COUNTER( df.int_num_G_unaligned.values ) # count the number of unaligned G bases
+                        for int_num_unrefG in range( 0, int_max_distance_from_5p_to_survey_in_base_pairs + 2 ) : # 'find_consecutive_G' function returns counts of upto 'int_max_distance_from_5p_to_survey_in_base_pairs' + 1 consecutive G bases.
+                            if int_num_unrefG in dict_counter : # if count is available
+                                arr_info[ int_num_unrefG + 1 ] = dict_counter[ int_num_unrefG ] # update 'arr_info'
+                        
+                        dict_t_id_5p_to_info[ t_id ] = arr_info # update 'dict_t_id_5p_to_info'
+
+                    ''' export the result '''
+                    int_num_5p_site_detected = len( dict_t_id_5p_to_info )
+                    if int_num_5p_site_detected > 0 : # when the result is not empty
+                        bk.PICKLE_Write( f"{path_folder_output}dict_t_id_5p_to_info.{name_chr}.pkl", dict_t_id_5p_to_info ) # export the result as a pickle file
+
+                    """ report a batch has been completed """
+                    pipe_sender.send( { 
+                        'int_num_5p_site_detected' : int_num_5p_site_detected,
+                        'name_chr' : name_chr,
+                    } )  # report the number of processed records
+                    """ report the worker has completed a batch """
+                    if verbose:
+                        logger.info(f"[Completed] completed a batch (worker_id={str_uuid})")
+                    
+                """ report the worker has completed all works """
+                if verbose:
+                    logger.info(f"[Completed] all works completed (worker_id={str_uuid})")
+                pipe_sender.send( 'completed' )  
+
+            ns = dict()  # define a namespace
+            ns[ "int_num_5p_site_detected" ] = 0  # initialize the total number of 5p site detected
+
+            def post_process_batch(res):
+                # parse received result
+                name_chr, int_num_5p_site_detected_for_batch = res[ 'name_chr' ], res[ 'int_num_5p_site_detected' ]
+                ns["int_num_5p_site_detected"] += int_num_5p_site_detected_for_batch
+                if verbose : # report
+                    logger.info( f"[{path_file_bam_input}] analysis completed for '{name_chr}' chromosome, {int_num_5p_site_detected_for_batch} 5p sites detected. (total {ns[ 'int_num_5p_site_detected' ]} 5p sites detected)" )
+                
+            """
+            Analyze an input file
+            """
+            if verbose:
+                logger.info(
+                    f"[{path_file_bam_input}] the analysis pipeline will be run with {n_threads} number of threads"
+                )
+            bk.Multiprocessing_Batch_Generator_and_Workers( 
+                gen_batch=iter( set( SAM.Get_contig_names_from_bam_header( path_file_bam_input ) ).difference( set_seqname_to_skip ) ), # analyze the pre-processed BAM file for each chromosome # exclude the chromosomes in the given list of sequence names to exclude in the analysis
+                process_batch=process_batch,
+                post_process_batch=post_process_batch,
+                int_num_threads=n_threads
+                + 2,  # one thread for generating batch, another thread for post-processing of the batch
+                flag_wait_for_a_response_from_worker_after_sending_termination_signal = True, # wait until all worker exists before resuming works in the main process
+            )
+
+            """ 
+            post-processing
+            """
+            # write a flag indicating that the processing has been completed
+            with open( f"{path_folder_output}pipeline_completed.txt", 'w' ) as newfile :
+                newfile.write( 'completed' )
+                
+            shutil.rmtree( path_folder_temp ) # delete the temporary folder
+
+            release_lock()  # release the lock
+
+        # wait all the single-core works offloaded to the workers to be completed.
+        workers.wait_all()
+        logger.info(
+            f"[Pipeline Completion] Forked Pipeline (id={str_uuid_pipeline}) Completed."
+        )
+
+    for _ in range(
+        int_num_samples_analyzed_concurrently
+    ):  # run 'int_num_samples_analyzed_concurrently' number of pipelines
+        pipelines.submit_work(run_pipeline)
+
+    # wait all pipelines to be completed
+    pipelines.wait_all()
+    logger.info(f"Completed.")
+    return 
+
+def LongClassify5pSiteProfiles(
+        # general
+        flag_usage_from_command_line_interface: bool = False,
+        l_path_folder_input : Union[List[str], None] = None, # list of path to the 'dict_arr_dist.pkl' output file of the 'LongExtractBarcodeFromBAM' pipeline for each sample
+        path_folder_output: Union[ str, None ] = None, # path to the output folder of the 'LongClassify5pSiteProfiles' pipeline
+        n_threads : int = 8,
+        float_memory_in_GiB: float = 50,
+        verbose: bool = True,
+        # weight for classifier
+        path_file_dict_weight : Union[ str, dict ] = {
+            'l_label' : [ '0_GGGG', '0_GGG', '-1_GGGG', '-1_GGG', '-2_GGGG', '-2_GGG', 'no_unrefG', ],
+            'mtx' : [ 
+                [0.0, 0.5, 0.5, 1.0, 2.0, -1, -1],
+                [0, -1, -3, 2, -2, -1, -1],
+                [0.0, 0.5, 1.0, 2.0, -2.0, -1.0, -1],
+                [0, -3, 2, -2, -1, -1, -1],
+                [0, 1, 2, -2, -1, -1, -1],
+                [0, 2, -2, -1, -1, -1, -1],
+                [1, -1, -3, -5, -10, -1, -1],
+            ],
+        },
+        # for visualization
+        int_min_total_read_count_for_visualization : int = 30,
+        int_num_5p_sites_to_subsample_for_visualization_for_each_chr : int = 10_000,
+    ) -> None :
+    """# 2023-12-21 21:57:21 
+    
+    # general
+    l_path_folder_input : Union[List[str], None] = None, # list of path to the 'dict_arr_dist.pkl' output file of the 'LongExtractBarcodeFromBAM' pipeline for each sample
+    path_folder_output: Union[ str, None ] = None, # path to the output folder of the 'LongClassify5pSiteProfiles' pipeline
+    n_threads : int = 8,
+    float_memory_in_GiB: float = 50,
+    verbose: bool = True,
+    int_min_total_read_count_for_visualization : int = 30, # min total read count for a 5p site for visualization
+    int_num_5p_sites_to_subsample_for_visualization_for_each_chr : int = 10_000, # number of 5p sites to subsample for visualization for each chromosome
+    # weight for classifier
+    path_file_dict_weight : Union[ str, dict ] = {
+        'l_label' : [ '0_GGGG', '0_GGG', '-1_GGGG', '-1_GGG', '-2_GGGG', '-2_GGG', 'no_unrefG', ],
+        'mtx' : [ 
+            [0.0, 0.5, 0.5, 1.0, 2.0, -1, -1],
+            [0, -1, -3, 2, -2, -1, -1],
+            [0.0, 0.5, 1.0, 2.0, -2.0, -1.0, -1],
+            [0, -3, 2, -2, -1, -1, -1],
+            [0, 1, 2, -2, -1, -1, -1],
+            [0, 2, -2, -1, -1, -1, -1],
+            [1, -1, -3, -5, -10, -1, -1],
+        ], # weight for classifications of 5p sites
+    },
+
+    returns
+    """
+    import plotly.express as px
+    
+    """
+    Parse arguments
+    """
+    if flag_usage_from_command_line_interface:  # parse arguments
+        """parse arguments when the function was called from the command-line interface"""
+        # {  } # unused arguments
+        # command line arguments
+        parser = argparse.ArgumentParser(
+            description=str_description,
+            usage="ourotools LongClassify5pSiteProfiles",
+            formatter_class=argparse.RawTextHelpFormatter,
+        )
+        parser.add_argument("LongClassify5pSiteProfiles")
+
+        arg_grp_general = parser.add_argument_group("General")
+        arg_grp_general.add_argument(
+            "-i",
+            "--l_path_folder_input",
+            help="list of path to the 'dict_arr_dist.pkl' output file of the 'LongExtractBarcodeFromBAM' pipeline for each sample",
+            nargs="*",
+        )
+        arg_grp_general.add_argument(
+            "-o",
+            "--path_folder_output",
+            help="path to the output folder of the 'LongClassify5pSiteProfiles' pipeline",
+        )
+        arg_grp_general.add_argument(
+            "-t",
+            "--n_threads",
+            help="(default: 8) the number of processors to use concurrently.",
+            default=8,
+            type=int,
+        )
+        arg_grp_general.add_argument(
+            "-m",
+            "--float_memory_in_GiB",
+            help="(default: 50) the maximum memory usage of the pipeline in GiB",
+            default=50,
+            type=float,
+        )
+        arg_grp_general.add_argument(
+            "-v", 
+            "--verbose", 
+            help="turn on verbose mode", 
+            action="store_true"
+        )
+
+        arg_grp_classifier = parser.add_argument_group("5p Site Classifier")
+        arg_grp_classifier.add_argument(
+            "-w",
+            "--path_file_dict_weight",
+            help="(optional) the weight matrix in a JSON format file.",
+        )
+
+        arg_grp_vis = parser.add_argument_group("Visualization")
+        arg_grp_vis.add_argument(
+            "-C",
+            "--int_min_total_read_count_for_visualization",
+            help="(default: 30) min total read count for a 5p site for visualization",
+            default=30,
+            type=int,
+        )
+        arg_grp_vis.add_argument(
+            "-s",
+            "--int_num_5p_sites_to_subsample_for_visualization_for_each_chr",
+            help="(default: 10,000) number of 5p sites to subsample for visualization for each chromosome",
+            default=10_000,
+            type=int,
+        )
+
+        args = parser.parse_args()
+
+        l_path_file_distributions = args.l_path_file_distributions
+        path_folder_output = args.path_folder_output
+        n_threads = args.n_threads
+        float_memory_in_GiB = args.float_memory_in_GiB
+        verbose = args.verbose
+        int_min_total_read_count_for_visualization = args.int_min_total_read_count_for_visualization
+        int_num_5p_sites_to_subsample_for_visualization_for_each_chr = args.int_num_5p_sites_to_subsample_for_visualization_for_each_chr
+        # if valid 'path_file_dict_weight' has been given through the argument, read the weight matrix from the JSON format file
+        if isinstance( args.path_file_dict_weight, str ) and os.path.exists( args.path_file_dict_weight ) :
+            with open( args.path_file_dict_weight ) as file :
+                path_file_dict_weight = json.load( file )
+    # rename arguments
+    dict_weight = path_file_dict_weight 
+    
+    ''' process 'dict_weight' argument '''
+    l_name_col_for_5p_site_classification = list( f'float_proportion_of_unaligned_{"G" * int_num_G}' for int_num_G in range( 0, len( dict_weight[ 'mtx' ][ 0 ] ) ) ) # retrieve 'l_name_col_for_5p_site_classification' based on the shape of the scoring matrix
+    l_name_5p_site_class = dict_weight[ 'l_label' ] # retrieve names of the classification labels
+    arr_num_aligned_untemplated_G_for_labels = np.array( list( np.nan if e == 'no_unrefG' else - int( e.split( '_', 1 )[ 0 ] ) for e in dict_weight[ 'l_label' ] ), dtype = object ) # retrieve the number of aligned G bases for each label
+    arr_GGGG_for_labels = np.array( list( e.rsplit( '_', 1 )[ 1 ] == 'GGGG' for e in l_name_5p_site_class ), dtype = bool ) # flag 5p site label indicating GGGG
+
+    """
+    Start of the pipeline
+    """
+    logger.info(str_description)
+    logger.info(
+        "Ouro-Tools LongClassify5pSiteProfiles, a pipeline combining the profiles of 5p sites from multiple samples and classifying the combined profiles of 5p sites, identifying genuine Transcript Start Site (TSS) from long-read RNA-sequencing data generated using a MMLV-like RT enzyme."
+    )
+    logger.info(f"Started.")
+
+    """ handle special cases and invalid inputs """
+    if ( l_path_folder_input is None ) or ( path_folder_output is None ) : # check whether the required input paths were given
+        logger.error(
+            "Required argument(s) is missing. to view help message, type -h or --help"
+        )
+        return -1
+
+
+    """ process required input directories """
+    l_path_folder_input = list( e + '/' if e[ -1 ] != '/' else e for e in list( os.path.abspath( e ) for e in l_path_folder_input ) )
+
+    """ validate input directory  """
+    l_path_folder_input_valid = [ ]
+    for path_folder_input in l_path_folder_input :
+        flag_valid_input = True # initialize the flag
+        for path_file_input in [
+            f"{path_folder_input}5pSite/pipeline_completed.txt",
+        ] :
+            if not os.path.exists( path_file_input ) :
+                logger.warn( f"'{path_file_input}' does not exists, the input folder '{path_folder_input}' will be skipped." )
+                flag_valid_input = False # skip the current input folder
+                break
+        if flag_valid_input :
+            l_path_folder_input_valid.append( path_folder_input ) # add the folder to the list of valid input folders
+    l_path_folder_input = l_path_folder_input_valid # set 'l_path_folder_input'
+
+    """# when a valid list of output folders were given # ensure directories of the output folder ends with '/' characters"""
+    path_folder_output = os.path.abspath(path_folder_output) + "/"
+
+    """ 
+    Fixed Settings
+    """
+    # internal settings
+    int_highest_mapq = 60
+
+    """
+    Exit early when no samples is anlayzed
+    """
+    # if no samples will be analyzed, return
+    if len(l_path_folder_input) == 0:
+        logger.info(f"no input folders were given, exiting")
+        return
+
+    """
+    Pipeline specific functions
+    """
+
+    """
+    run pipeline
+    """
+
+    """
+    internal setting
+    """
+
+    logger.setLevel( logging.INFO ) # reset logging info after importing
+
+    ''' define directories '''
+    path_folder_graph = f"{path_folder_output}graph/"
+    path_folder_graph_noninteractive, path_folder_graph_interactive = f"{path_folder_graph}noninteractive_graph/", f"{path_folder_graph}interactive_graph/"
+
+    # create the output folders
+    for path_folder in [ 
+        path_folder_output, 
+        f"{path_folder_output}5pSite/",
+        path_folder_graph,
+        path_folder_graph_noninteractive, 
+        path_folder_graph_interactive,
+    ] :
+        os.makedirs( path_folder, exist_ok = True )
+
+    ''' survey paths of input files ''' 
+    df_file = pd.concat( list( bk.GLOB_Retrive_Strings_in_Wildcards( f'{path_folder_input}5pSite/dict_t_id_5p_to_info.*.pkl' ) for path_folder_input in l_path_folder_input ) )
+    df_file.columns = [ 'name_chr', 'path_file' ]
+
+    """
+    combine and analyze input files for each chromosome using multiple processes
+    """
+    def process_batch(pipe_receiver, pipe_sender):
+        """
+        # 2022-04-24 01:29:59
+        Requires loading several data objects (using copy-on-write method)
+
+        receives a bookmark file (either file directory of a tsv file or a dataframe)
+        """
+        """
+        initialize the worker 
+        # 2023-08-01 12:19:06 
+        """
+        str_uuid = bk.UUID()  # retrieve id
+        if verbose:
+            logger.info(f"[Started] start working (worker_id={str_uuid})")
+
+        """ prepare """
+        str_uuid_for_a_batch = bk.UUID( ) # retrieve id for the specific batch
+
+        while True:
+            ins = pipe_receiver.recv()
+            if ins is None:
+                break
+            name_chr = ins  # parse input
+
+            """
+            combining profiles for current chromosome
+            """
+            df_file_for_name_chr = bk.PD_Select( df_file, name_chr = name_chr ) # retrieve the list of files for the current chromosome
+
+            dict_t_id_5p_to_info = dict( ) # initialize the container
+            for path_file in df_file_for_name_chr.path_file.values : # for each file
+                dict_t_id_5p_to_info_current_file = bk.PICKLE_Read( path_file ) # read the file
+                for e in dict_t_id_5p_to_info_current_file : # for each entry in the current file
+                    if e in dict_t_id_5p_to_info :
+                        int_num_G_aligned_avg_existing, int_num_G_aligned_avg_new = dict_t_id_5p_to_info[ e ][ 0 ], dict_t_id_5p_to_info_current_file[ e ][ 0 ]
+                        if int_num_G_aligned_avg_existing != int_num_G_aligned_avg_new : # if 'int_num_G_aligned_avg' is different
+                            int_total_count_existing, int_total_count_new = dict_t_id_5p_to_info[ e ][ 1 : ].sum( ), dict_t_id_5p_to_info_current_file[ e ][ 1 : ].sum( ) # retrieve total counts of existing and new records
+                            dict_t_id_5p_to_info[ e ][ 0 ] = int( np.round( ( int_num_G_aligned_avg_existing * int_total_count_existing + int_num_G_aligned_avg_new * int_total_count_new ) / ( int_total_count_existing + int_total_count_new ) ) ) # update 'int_num_G_aligned_avg' using the weighted average of the two records.
+                        dict_t_id_5p_to_info[ e ][ 1 : ] += dict_t_id_5p_to_info_current_file[ e ][ 1 : ] # update the counts
+                    else :
+                        dict_t_id_5p_to_info[ e ] = dict_t_id_5p_to_info_current_file[ e ]
+            ''' export 'dict_t_id_5p_to_info' '''
+            bk.PICKLE_Write( f"{path_folder_output}5pSite/dict_t_id_5p_to_info.{name_chr}.pkl", dict_t_id_5p_to_info )
+
+            ''' convert combined profiles to a dataframe '''
+            # settings
+            dtype_float = np.float16 # using float16 to reduce memory usage
+            dtype_int = np.int32 # using float16 to reduce memory usage
+            int_num_5p_sites = len( dict_t_id_5p_to_info )
+            if int_num_5p_sites == 0 :
+                logger.info( f"no 5p sites were found for '{name_chr}'" )
+            int_max_distance_from_5p_to_survey_in_base_pairs = len( dict_t_id_5p_to_info[ next( dict_t_id_5p_to_info.__iter__( ) ) ] ) - 3 # infer 'int_max_distance_from_5p_to_survey_in_base_pairs' # 3 : including zero count, the outlier bin, and avg aligned G count # initialize 'arr_info'
+            # initialize the numpy data container 
+            arr_t_5p = np.zeros( int_num_5p_sites, dtype = object )
+            arr_info_combined = np.zeros( ( int_num_5p_sites, int_max_distance_from_5p_to_survey_in_base_pairs + 3 ), dtype = dtype_int ) # 3 : including zero count, the outlier bin, and avg aligned G count # initialize 'arr_info'
+            for idx, e in enumerate( dict_t_id_5p_to_info ) :
+                arr_t_5p[ idx ] = e
+                arr_info_combined[ idx ] = dict_t_id_5p_to_info[ e ]
+            arr_total_read_count = arr_info_combined[ :, 1 : ].sum( axis = 1 ).astype( dtype_int ) # calculate the total read count
+            arr_prop = ( arr_info_combined[ :, 1 : ].T / arr_total_read_count ).T.astype( dtype_float ) # calculate the proportions
+
+            # convert to a dataframe
+            df_propG = pd.DataFrame( arr_prop, columns = list( f'float_proportion_of_unaligned_{"G" * int_num_G}' for int_num_G in range( 0, int_max_distance_from_5p_to_survey_in_base_pairs + 2 ) ) ) 
+            df_propG[ 'int_num_reads' ] = arr_total_read_count
+            df_propG[ 'int_num_G_aligned_avg' ] = arr_info_combined[ :, 0 ]
+            df_propG[ 't_5p' ] = arr_t_5p
+
+            ''' classify the 5p sites '''
+            # infer the number of window size from the input scoring matrix
+            if 'mtx' not in dict_weight or len( dict_weight[ 'mtx' ] ) == 0 :
+                raise RuntimeError( f"invalid dict_weight, {dict_weight = }" )
+
+            for arr_weight, name in zip( dict_weight[ 'mtx' ], l_name_5p_site_class ) :
+                df_propG[ name ] = np.matmul( df_propG[ l_name_col_for_5p_site_classification ].values, np.array( arr_weight, dtype = float ).reshape( ( len( arr_weight ), 1 ) ) ).astype( dtype_float )
+            df_propG[ 'int_class' ] = np.argmax( df_propG[ l_name_5p_site_class ].values, axis = 1 ).astype( dtype_int ) # classify the 5p site
+
+            ''' adjust the classification results based on the number of 'int_num_G_aligned_avg' '''
+            # adjust classes based on the 'int_num_G_aligned_avg'
+            int_class_no_unrefG = np.where( pd.isnull( arr_num_aligned_untemplated_G_for_labels ) )[ 0 ][ 0 ] # integer representation of 'no unrefG' classification
+            arr_int_num_G_aligned_avg = df_propG.int_num_G_aligned_avg.values
+            for int_num_G_aligned_avg in df_propG.int_num_G_aligned_avg.unique( ) : # for each 'int_num_G_aligned_avg'
+                mask = arr_int_num_G_aligned_avg == int_num_G_aligned_avg # retrieve mask for current 'int_num_G_aligned_avg'
+
+                # update 'inferred_num_unrefG_aligned_to_genome'
+                arr = df_propG.loc[ mask, 'int_class' ]
+                for int_class in np.where( arr_num_aligned_untemplated_G_for_labels > int_num_G_aligned_avg )[ 0 ] :
+                    arr[ arr == int_class ] = int_class_no_unrefG # 'inferred_num_unrefG_aligned_to_genome' cannot exceed 'int_num_G_aligned_avg', and they will be classified as 'no unrefG' class
+                df_propG.loc[ mask, 'int_class' ] = arr
+                
+            ''' retrieve summary metrics  '''
+            s_total_read_counts_for_each_class_label = df_propG[ [ 'int_class', 'int_num_reads' ] ].groupby( 'int_class' ).sum( ).int_num_reads
+            int_total_read_counts = df_propG.int_num_reads.sum( )
+
+            ''' drop unncessary columns '''
+            df_propG.drop( columns = l_name_5p_site_class, inplace = True ) # drop unnecessary columns
+            df_propG_vis = bk.PD_Threshold( df_propG, int_num_readsa = int_min_total_read_count_for_visualization - 1 ) # retrieve filtered dataframe for visualization
+            df_propG.drop( columns = l_name_col_for_5p_site_classification + [ 'int_num_G_aligned_avg' ], inplace = True ) # drop more unnecessary columns
+
+            """ convert classification result into sets """
+            ''' initialize 'dict_t_5p_classification' container '''
+            # list of flag of labels indicatings GGGG 
+            dict_t_5p_classification = dict( ( e, dict( ) ) for e in set( arr_GGGG_for_labels ) )
+            for flag_GGGG, int_num_aligned_untemplated_Gs in zip( arr_GGGG_for_labels, arr_num_aligned_untemplated_G_for_labels ) :
+                if int_num_aligned_untemplated_Gs not in dict_t_5p_classification[ flag_GGGG ] :
+                    dict_t_5p_classification[ flag_GGGG ][ int_num_aligned_untemplated_Gs ] = set( )
+
+            ''' construct 'dict_t_5p_classification' '''
+            for t_5p, int_class in df_propG[ [ 't_5p', 'int_class' ] ].values :
+                dict_t_5p_classification[ arr_GGGG_for_labels[ int_class ] ][ arr_num_aligned_untemplated_G_for_labels[ int_class ] ].add( t_5p )
+
+            ''' export 'dict_t_5p_classification' '''
+            bk.PICKLE_Write( f"{path_folder_output}5pSite/dict_t_5p_classification.{name_chr}.pkl", dict_t_5p_classification )
+
+            ''' subsample 'df_propG_vis' and save as a file '''
+            df_propG_vis = df_propG_vis if len( df_propG_vis ) <= int_num_5p_sites_to_subsample_for_visualization_for_each_chr else df_propG_vis.sample( int_num_5p_sites_to_subsample_for_visualization_for_each_chr )
+            bk.PICKLE_Write( f"{path_folder_output}5pSite/df_propG_vis.{name_chr}.pkl", df_propG_vis )
+
+            """ report a batch has been completed """
+            pipe_sender.send( { 
+                's_total_read_counts_for_each_class_label' : s_total_read_counts_for_each_class_label,
+                'int_total_read_counts' : int_total_read_counts,
+                'int_num_5p_site_detected' : len( dict_t_id_5p_to_info ),
+                'name_chr' : name_chr,
+            } )  # report the number of processed records
+            """ report the worker has completed a batch """
+            if verbose:
+                logger.info(f"[Completed] completed a batch (worker_id={str_uuid})")
+
+        """ report the worker has completed all works """
+        if verbose:
+            logger.info(f"[Completed] all works completed (worker_id={str_uuid})")
+        pipe_sender.send( 'completed' )  
+
+    ns = {
+        "int_num_5p_site_detected" : 0, # initialize the total number of 5p site detected
+        "l_df_propG_vis" : [ ],
+        'int_total_read_counts' : 0,
+        'dict_name_chr_to_s_total_read_counts_for_each_class_label' : dict( ),
+    }  # define a namespace
+
+    def post_process_batch(res):
+        # parse received result
+        name_chr, int_num_5p_site_detected_for_batch, s_total_read_counts_for_each_class_label_for_batch, int_total_read_counts_for_batch = res[ 'name_chr' ], res[ 'int_num_5p_site_detected' ], res[ 's_total_read_counts_for_each_class_label' ], res[ 'int_total_read_counts' ]
+        
+        ns["int_num_5p_site_detected"] += int_num_5p_site_detected_for_batch
+        ns[ 'int_total_read_counts' ] += int_total_read_counts_for_batch
+        
+        ''' collect 's_total_read_counts_for_each_class_label' '''
+        ns[ 'dict_name_chr_to_s_total_read_counts_for_each_class_label' ][ name_chr ] = s_total_read_counts_for_each_class_label_for_batch
+
+        ''' read and collect 'df_propG_vis' '''
+        df_propG_vis = bk.PICKLE_Read( f"{path_folder_output}5pSite/df_propG_vis.{name_chr}.pkl" )
+        df_propG_vis[ 'name_chr' ] = name_chr # add 'name_chr' column
+        ns[ "l_df_propG_vis" ].append( df_propG_vis )
+        
+        if verbose : # report
+            logger.info( f"[{path_folder_output}] analysis completed for '{name_chr}' chromosome, {int_num_5p_site_detected_for_batch} 5p sites detected. (total {ns[ 'int_num_5p_site_detected' ]} 5p sites detected)" )
+
+    """
+    Analyze an input file
+    """
+    if verbose:
+        logger.info(
+            f"[{path_folder_output}] the analysis pipeline will be run with {n_threads} number of threads"
+        )
+    bk.Multiprocessing_Batch_Generator_and_Workers( 
+        gen_batch=iter( np.sort( df_file.name_chr.unique( ) ) ), # analyze each chromosome
+        process_batch=process_batch,
+        post_process_batch=post_process_batch,
+        int_num_threads=n_threads
+        + 2,  # one thread for generating batch, another thread for post-processing of the batch
+        flag_wait_for_a_response_from_worker_after_sending_termination_signal = True, # wait until all worker exists before resuming works in the main process
+    )
+
+    def draw_graphs( ) :
+        ''' 
+        functions for analyzing collected results and draw graphs
+        # 2023-12-21 21:16:38 
+        '''
+        """ plot non-interactive graphs """
+        ''' compose 'df_read_count_for_each_class_label' '''
+        df_read_count_for_each_class_label = pd.DataFrame( ns[ 'dict_name_chr_to_s_total_read_counts_for_each_class_label' ] ).fillna( 0 ) # compose 'df_read_count_for_each_class_label'
+        # set 'l_name_5p_site_class' as index names 
+        df_read_count_for_each_class_label.sort_index( inplace = True )
+        df_read_count_for_each_class_label.index = l_name_5p_site_class 
+        df_read_count_for_each_class_label.to_csv( f"{path_folder_output}df_read_count_for_each_class_label.tsv.gz", sep = '\t' ) # save as a file
+
+        s = df_read_count_for_each_class_label.sum( axis = 1 ) / df_read_count_for_each_class_label.values.sum( )
+        bk.MPL_basic_configuration( title = "proportion of read counts for each 5' site classification label", x_label = 'proportion of total read counts', show_grid = False )
+        plt.barh( s.index.values, s.values )
+        bk.MPL_SAVE( f"read count proportion for each 5p site class", folder = path_folder_graph_noninteractive, l_format=['.pdf', '.png'] )
+
+        """ plot interactive graphs """
+        # settings
+        name_col_num_aligned_G = 'number of aligned G (max value = 3)' # max value is 3
+
+        ''' compose 'df_propG_vis' '''
+        df_propG_vis = pd.concat( ns[ "l_df_propG_vis" ] )
+        del ns[ "l_df_propG_vis" ]
+
+        # add 'number of aligned G' column
+        arr = df_propG_vis[ 'int_num_G_aligned_avg' ]
+        arr[ arr >= 3 ] = 3 # max value is 3
+        df_propG_vis[ name_col_num_aligned_G ] = arr
+
+        # add id_5p_site column
+        df_propG_vis[ 'id_5p_site' ] = list( name_chr + ':' + str( t_5p[ 1 ] ) + ('.+' if t_5p[ 0 ] else '.-') for name_chr, t_5p in df_propG_vis[ [ 'name_chr', 't_5p', ] ].values )
+        df_propG_vis.to_csv( f"{path_folder_graph}df_propG_vis.tsv.gz", sep = '\t', index = False ) # save as a file (visualization-specific data)
+        
+        l_name_col_hover = [ 'id_5p_site' ] + l_name_col_for_5p_site_classification # list of column names that will be interatively visualized on a graph
+        for idx_class, name_class_5p_site in enumerate( l_name_5p_site_class ) : # for each 5p site class label
+            ''' draw interactive graphs '''
+            int_num_aligned_G_for_label, flag_GGGG_for_label = arr_num_aligned_untemplated_G_for_labels[ idx_class ], arr_GGGG_for_labels[ idx_class ] # retrieve information about the current class label
+            flag_no_unrefG = isinstance( int_num_aligned_G_for_label, float ) # retrieve 'flag_no_unrefG'
+            # compose x and y column names
+            name_col_x = 'float_proportion_of_unaligned_' + ( 'GGG' if flag_no_unrefG else 'G' * ( 3 - int_num_aligned_G_for_label ) ) # handle np.nan
+            name_col_y = 'float_proportion_of_unaligned_' + ( 'GGGG' if flag_no_unrefG else 'G' * ( 4 - int_num_aligned_G_for_label ) ) # handle np.nan
+
+            fig = px.scatter( df_propG_vis[ df_propG_vis.int_class == idx_class ], x = name_col_x, y = name_col_y, size = 'int_num_reads', color = name_col_num_aligned_G, height = 700, width = 900, hover_data = l_name_col_hover )
+            fig.update_traces( dict( marker_line_width = 0, marker_line_color = 'black' ) )
+            fig.update_layout( plot_bgcolor='white', title = f"5p Site profile: '{name_class_5p_site}' ({'valid transcription start site (TSS)' if flag_GGGG_for_label else 'invalid 5p site'}{'' if flag_no_unrefG else ' start at +' + str( int_num_aligned_G_for_label ) })" )
+            fig.update_xaxes( mirror=True, ticks='outside', showline=True, linecolor='black', gridcolor='lightgrey' )
+            fig.update_yaxes( mirror=True, ticks='outside', showline=True, linecolor='black', gridcolor='lightgrey' )
+            fig.write_html( f"{path_folder_graph_interactive}{name_class_5p_site}.profiles.html" ) # save the graph as a file
+    draw_graphs( )
+    
+    logger.info(f"Completed.")
+    return 
+
+def LongAdd5pSiteClassificationResultToBAM(
+    flag_usage_from_command_line_interface: bool = False,
+    path_folder_input_5p_sites : Union[str, None] = None, # path of the input folder containing classified 5p sites (output folder of 'LongClassify5pSiteProfiles')
+    l_path_folder_input_barcodedbam: Union[list, None] = None, # path of the input folder containing classified 5p sites (the output folder of 'LongExtractBarcodeFromBAM' and the input folder of 'LongSurvey5pSiteFromBAM'). The output folder of 'LongExtractBarcodeFromBAM' can be directly used, but some SAM Tags for the 5p site that were surveyed and thus not included in the 'path_folder_input_5p_sites' will be not included in the output BAM.
+    n_threads: int = 32,
+    int_num_samples_analyzed_concurrently : int = 2, # the number of samples that can be analyzed concurrently to reduce bottlenecks due to processing of very large chunks.
+    float_memory_in_GiB: float = 50,
+    verbose: bool = True,
+    int_max_distance_from_5p_to_survey_in_base_pairs : int = 5, # the maximum number of base pairs to analyze before/after 5' alignment site
+    l_seqname_to_skip : list = [ 'MT' ], # the list of names of the chromosomes of the reference genome to skip the analysis. By default, reads aligned to the mitochondrial genomes will be skipped.
+) -> None :
+    """# 2023-12-23 18:52:06 
+    flag_usage_from_command_line_interface: bool = False,
+    path_folder_input_5p_sites : Union[str, None] = None, # path of the input folder containing classified 5p sites (output folder of 'LongClassify5pSiteProfiles')
+    l_path_folder_input_barcodedbam: Union[list, None] = None, # path of the input folder containing classified 5p sites (the output folder of 'LongExtractBarcodeFromBAM' and the input folder of 'LongSurvey5pSiteFromBAM'). The output folder of 'LongExtractBarcodeFromBAM' can be directly used, but some SAM Tags for the 5p site that were surveyed and thus not included in the 'path_folder_input_5p_sites' will be not included in the output BAM.
+    n_threads: int = 32,
+    int_num_samples_analyzed_concurrently : int = 2, # the number of samples that can be analyzed concurrently to reduce bottlenecks due to processing of very large chunks.
+    float_memory_in_GiB: float = 50,
+    verbose: bool = True,
+    int_max_distance_from_5p_to_survey_in_base_pairs : int = 5, # the maximum number of base pairs to analyze before/after 5' alignment site
+    l_seqname_to_skip : list = [ 'MT' ], # the list of names of the chromosomes of the reference genome to skip the analysis. By default, reads aligned to the mitochondrial genomes will be skipped.
+
+    the following SAM Tags will be addded.
+    AG:i = Number of consecutive G bases start from the 5p site (alignment start site) in the aligned region of the read.
+    UG:i = Number of consecutive G bases start from the 5p site (alignment start site) in the unaligned region of the read.
+    VS:i = 1 if the 5p site is classified as a valid Transcript Start Site (TSS). 0 if the 5p site is classified as an invalid TSS and represent 5p sites contributes by PCR/RT artifacts (including 5p degradation products of full-length transcripts).
+    AU:i = Number of untemplated G bases aligned to the genome, inferred from the 5p site classification analysis.
+
+    returns
+    """
+    """
+    Parse arguments
+    """
+    if flag_usage_from_command_line_interface:  # parse arguments
+        """parse arguments when the function was called from the command-line interface"""
+        # {  } # unused arguments
+        # command line arguments
+        parser = argparse.ArgumentParser(
+            description=str_description,
+            usage="ourotools LongAdd5pSiteClassificationResultToBAM",
+            formatter_class=argparse.RawTextHelpFormatter,
+        )
+        parser.add_argument("LongAdd5pSiteClassificationResultToBAM")
+
+        arg_grp_general = parser.add_argument_group("General")
+        arg_grp_general.add_argument(
+            "-p",
+            "--path_folder_input_5p_sites",
+            help="path of the input folder containing classified 5p sites (output folder of 'LongClassify5pSiteProfiles')",
+            type=str,
+        )
+        arg_grp_general.add_argument(
+            "-B",
+            "--l_path_folder_input_barcodedbam",
+            help="path of the input folder containing classified 5p sites (the output folder of 'LongExtractBarcodeFromBAM' and the input folder of 'LongSurvey5pSiteFromBAM'). The output folder of 'LongExtractBarcodeFromBAM' can be directly used, but some SAM Tags for the 5p site that were surveyed and thus not included in the 'path_folder_input_5p_sites' will be not included in the output BAM.",
+            nargs="*",
+        )
+        arg_grp_general.add_argument(
+            "-t",
+            "--n_threads",
+            help="(default: 32) the number of processors to use concurrently.",
+            default=32,
+            type=int,
+        )
+        arg_grp_general.add_argument(
+            "-s",
+            "--int_num_samples_analyzed_concurrently",
+            help="(default: 2) the number of samples that can be analyzed concurrently.",
+            default=2,
+            type=int,
+        )
+        arg_grp_general.add_argument(
+            "-m",
+            "--float_memory_in_GiB",
+            help="(default: 50) the maximum memory usage of the pipeline in GiB",
+            default=50,
+            type=float,
+        )
+        arg_grp_general.add_argument(
+            "-v", 
+            "--verbose", 
+            help="turn on verbose mode", 
+            action="store_true"
+        )
+
+        arg_grp_5p_site = parser.add_argument_group("Extracting 5' site information")
+        arg_grp_5p_site.add_argument(
+            "-w", 
+            "--int_max_distance_from_5p_to_survey_in_base_pairs", 
+            help="(default: 5) maximum number of base pairs to analyze before/after 5' alignment site", 
+            default=5,
+            type=int,
+        )
+        arg_grp_5p_site.add_argument(
+            "--l_seqname_to_skip",
+            help="(default: [ 'MT' ]) the list of names of the chromosomes of the reference genome to skip the analysis. By default, reads aligned to the mitochondrial genomes will be skipped.",
+            default=["MT"],
+            nargs="*",
+        )
+
+        args = parser.parse_args()
+
+        path_folder_input_5p_sites = args.path_folder_input_5p_sites
+        l_path_folder_input_barcodedbam = args.l_path_folder_input_barcodedbam
+        n_threads = args.n_threads
+        int_num_samples_analyzed_concurrently = args.int_num_samples_analyzed_concurrently
+        float_memory_in_GiB = args.float_memory_in_GiB
+        verbose = args.verbose
+        int_max_distance_from_5p_to_survey_in_base_pairs = args.int_max_distance_from_5p_to_survey_in_base_pairs
+        l_seqname_to_skip = args.l_seqname_to_skip
+
+    # rename arguments
+    l_path_folder_input = l_path_folder_input_barcodedbam
+
+    """
+    Start of the pipeline
+    """
+    logger.info(str_description)
+    logger.info(
+        "Ouro-Tools LongAdd5pSiteClassificationResultToBAM, for adding 5p Site Profile SAM Tags to a BAM file."
+    )
+    logger.info(f"Started.")
+
+    """ handle special cases and invalid inputs """
+    if path_folder_input_5p_sites is None or l_path_folder_input is None : # when required inputs are not given
+        logger.error(
+            "Required argument(s) is missing. to view help message, type -h or --help"
+        )
+        return -1
+
+    """ process required input directories """
+    l_path_folder_input = list( e + '/' if e[ -1 ] != '/' else e for e in list( os.path.abspath( e ) for e in l_path_folder_input ) )
+
+    """ 
+    Fixed Settings
+    """
+    # internal settings
+    int_highest_mapq = 60
+    name_folder_pipeline = '5pSiteTagAdded'
+    name_tag_num_aligned_Gs = 'AG'
+    name_tag_num_unaligned_Gs = 'UG'
+    name_tag_flag_valid_TSS = 'VS'
+    name_tag_num_aligned_untemplated_Gs = 'AU'
+
+    """ validate input directory  """
+    l_path_folder_input_valid = [ ]
+    for path_folder_input in l_path_folder_input :
+        flag_valid_input = True # initialize the flag
+        for path_file_input in [
+            f"{path_folder_input}barcoded.bam",
+            f"{path_folder_input}barcoded.bam.bai",
+        ] :
+            if not os.path.exists( path_file_input ) :
+                logger.warn( f"'{path_file_input}' does not exists, the input folder '{path_folder_input}' will be skipped." )
+                flag_valid_input = False # skip the current input folder
+                break
+        if flag_valid_input :
+            l_path_folder_input_valid.append( path_folder_input ) # add the folder to the list of valid input folders
+    l_path_folder_input = l_path_folder_input_valid # set 'l_path_folder_input'
+
+    # process arguments
+    set_seqname_to_skip = set(l_seqname_to_skip)
+    int_window_size = int_max_distance_from_5p_to_survey_in_base_pairs + 1 # retrieve the window size to analyze
+
+    """
+    Exit early when no samples is anlayzed
+    """
+    # if no samples will be analyzed, return
+    if len(l_path_folder_input) == 0:
+        logger.error(f"no valid input folders were given, exiting")
+        return
+
+    """
+    Initiate pipelines for off-loading works
+    """
+    pipelines = bk.Offload_Works(
+        None
+    )  # no limit for the number of works that can be submitted.
+
+    int_num_samples_analyzed_concurrently = min(
+        len(l_path_folder_input), int_num_samples_analyzed_concurrently
+    )  # if the number of samples are smaller than 'int_num_samples_analyzed_concurrently', adjust 'int_num_samples_analyzed_concurrently' so that it matches the number of samples
+
+    n_threads = int(
+        np.ceil(n_threads / int_num_samples_analyzed_concurrently)
+    )  # divide the number of processes that can be used by each pipeline by the number of pipelines that will be run concurrently.
+
+    """
+    Pipeline specific functions and variables
+    """
+
+    str_G = 'G'
+    def find_consecutive_G( 
+        seq : str, 
+        flag_from_3p : bool = True,
+    ) :
+        """
+        find the length of consecutive G from either end.
+        seq : str, # sequence
+        flag_from_3p : bool = True, # if True, search from the 3' end. if False, search from the 5' end.
+        # 2023-12-15 23:24:33 
+        """
+        len_seq = len( seq )
+        if flag_from_3p :
+            for idx in range( 1, len_seq + 1 ) :
+                if seq[ len_seq - idx ] != str_G :
+                    return idx - 1
+        else :
+            for idx in range( len_seq ) :
+                if seq[ idx ] != str_G :
+                    return idx
+        return len_seq # handle the case when all bases are G
+
+    def _check_binary_flags( flags : int, int_bit_flag_position : int ) :
+        """ # 2023-08-08 22:47:02 
+        check a flag in the binary flags at the given position
+        """
+        return ( flags & ( 1 << int_bit_flag_position ) ) > 0 
+
+    def run_pipeline():
+        """# 2023-10-03 20:00:57 
+        analyze a pipeline for a given list of samples
+        """
+        # retrieve id of the pipeline
+        str_uuid_pipeline = bk.UUID()
+        logger.info(
+            f"[Pipeline Start] Forked Pipeline (id={str_uuid_pipeline}) Started."
+        )
+
+        """
+        Initiate workers for off-loading works
+        """
+        workers = bk.Offload_Works(
+            None
+        )  # no limit for the number of works that can be submitted.
+
+        """
+        Run pipeline for each sample
+        """
+        for path_folder_input in l_path_folder_input : # for each input folder
+            # define the output folder
+            path_folder_output = f"{path_folder_input}{name_folder_pipeline}/"
+            """
+            Define a lock
+            """
+            os.makedirs(path_folder_output, exist_ok=True)
+            path_file_lock = (
+                f"{path_folder_output}ourotools.lock"
+            )
+            """
+            Define a function to release the lock
+            """
+            def release_lock():
+                """# 2023-01-14 20:36:17
+                release the lock file
+                """
+                # check the existence of output files for the output folder of each input file of the current sample
+                flag_all_output_files_exist = True  # initialize the flag
+
+                if not os.path.exists(
+                    f"{path_folder_output}pipeline_completed.txt"
+                ):
+                    flag_all_output_files_exist = False
+
+                # check the existence of the lock file
+                if (
+                    os.path.exists(path_file_lock) and flag_all_output_files_exist
+                ):  # if all output files exist and the lock file exists
+                    # check whether the lock file has been created by the current pipeline
+                    with open(path_file_lock, "rt") as file_lock:
+                        str_uuid_pipeline_lock = file_lock.read() # retrieve uuid of lock
+                        flag_lock_acquired = str_uuid_pipeline_lock == str_uuid_pipeline
+                    if (
+                        flag_lock_acquired
+                    ):  # if the lock file has been created by the current pipeline, delete the lock file
+                        os.remove(path_file_lock)
+                        # lock has been released
+                        if verbose:
+                            logger.warning(
+                                f"[{path_folder_output}] The forked pipeline (id={str_uuid_pipeline}) released the lock"
+                            )
+                    else :
+                        # lock has been released
+                        if verbose:
+                            logger.warning(
+                                f"[{path_folder_output}] The lock belongs to the forked pipeline (id={str_uuid_pipeline_lock}), and the lock was not released."
+                            )
+                else:
+                    if verbose:
+                        logger.warning(
+                            f"[{path_folder_output}] The forked pipeline (id={str_uuid_pipeline}) attempted to release the lock, but some output files are missing, and the lock will not be released, yet."
+                        )
+
+            """
+            Run pipeline for each sample
+            """
+            # check the existence of the lock file
+            if os.path.exists(path_file_lock):
+                logger.warning(
+                    f"[Output folder unavailable] the output folder {path_folder_output} contains a lock file, which appears to be processed by a different process. Therefore, the output folder will be skipped."
+                )
+                continue
+            flag_lock_acquired = False  # initialize 'flag_lock_acquired'
+            try:
+                # create the lock file
+                with open(path_file_lock, "wt") as newfile_lock:
+                    newfile_lock.write(str_uuid_pipeline)
+                # check whether the lock file has been created correctly (check for collision).
+                with open(path_file_lock, "rt") as file_lock:
+                    flag_lock_acquired = file_lock.read() == str_uuid_pipeline
+            except Exception as e:
+                logger.critical(
+                    e, exc_info=True
+                )  # if an exception occurs, print the error message
+            if not flag_lock_acquired:
+                logger.warning(
+                    f"[Output folder unavailable] an attempt to acquire a lock for the output folder {path_folder_output} failed, which appears to be processed by a different process. Therefore, the output folder will be skipped."
+                )
+                continue
+            # lock has been acquired
+
+            """
+            Run pipeline for each input file
+            """
+            path_folder_temp = f"{path_folder_output}temp/"
+            path_folder_graph = f"{path_folder_output}graph/"
+
+            """ if the output folder already exists """
+            if os.path.exists(path_folder_output):
+                """check whether the pipeline has been completed"""
+                if os.path.exists( f"{path_folder_output}pipeline_completed.txt" ) :  # intermediate files should not exists, while all output files should exist
+                    logger.info(
+                        f"[Output folder Already Exists] the output folder {path_folder_output} contains valid output files. Therefore, the output folder will be skipped."
+                    )
+                    release_lock( ) # release the lock
+                    continue  # skip if the pipeline has been completed for the output folder
+                else:
+                    """if required output files does not exist or the an intermediate file exists, remove the entire output folder, and rerun the pipeline"""
+                    if (
+                        len(glob.glob(f"{path_folder_output}*/")) > 0
+                    ):  # detect a folder inside the output folder and report the presence of the existing folders.
+                        logger.info(
+                            f"[Output folder Already Exists] the output folder {path_folder_output} does not contain valid output files. The output folder will be cleaned and the pipeline will start anew at the folder."
+                        )
+                    # delete the folders
+                    for path_folder in glob.glob(f"{path_folder_output}*/"):
+                        shutil.rmtree(path_folder, ignore_errors = True)
+                    # delete the files, excluding the lock file that has been acquired by the current pipeline
+                    for path_file in glob.glob(f"{path_folder_output}*"):
+                        if (
+                            path_file_lock != path_file
+                        ):  # does not delete the lock file
+                            os.remove(path_file)
+
+            """ create directories """
+            for path_folder in [
+                path_folder_output,
+                path_folder_temp,
+                path_folder_graph,
+            ]:
+                os.makedirs(path_folder, exist_ok=True)
+
+            """
+            Report program arguments
+            """
+            # retrieve 'path_file_bam_input'
+            path_file_bam_input = f"{path_folder_input}barcoded.bam"
+
+            # record arguments used for the program (metadata)
+            dict_program_setting = {
+                "version": _version_,  # record version
+                # external
+                "flag_usage_from_command_line_interface" : flag_usage_from_command_line_interface,
+                'path_folder_input_5p_sites' : path_folder_input_5p_sites,
+                'path_folder_input_barcodedbam' : path_folder_input,
+                'n_threads' : n_threads,
+                'int_num_samples_analyzed_concurrently' : int_num_samples_analyzed_concurrently,
+                'int_num_base_pairs_in_a_batch' : int_num_base_pairs_in_a_batch,
+                'float_memory_in_GiB' : float_memory_in_GiB,
+                'verbose' : verbose,
+                'int_max_distance_from_5p_to_survey_in_base_pairs' : int_max_distance_from_5p_to_survey_in_base_pairs,
+                'l_seqname_to_skip' : l_seqname_to_skip,
+                # internal
+                'path_folder_output' : path_folder_output,
+                "path_folder_temp": path_folder_temp,
+                "path_folder_graph": path_folder_graph,
+                'int_window_size' : int_window_size,
+                'int_highest_mapq' : int_highest_mapq,
+                'path_file_bam_input' : path_file_bam_input,
+            }
+            logger.info(
+                f"[Setting] program will be run with the following setting for the input file {path_file_bam_input} : {str( dict_program_setting )}"
+            )
+
+            """ export program setting """
+            path_file_json_setting_program = (
+                f"{path_folder_output}program_setting.json"
+            )
+            if os.path.exists(path_file_json_setting_program):
+                with open(path_file_json_setting_program, "r") as file:
+                    j = json.load(file)
+                if j != dict_program_setting:
+                    logger.info(
+                        f"[Warning] the current program setting is different from the previous program setting recorded in the pipeline folder. The previous setting will be used."
+                    )
+                    with open(path_file_json_setting_program, "r") as file:
+                        dict_program_setting = json.load(
+                            file
+                        )  # override current program setting with previous program setting
+            with open(path_file_json_setting_program, "w") as newfile:
+                json.dump(dict_program_setting, newfile)
+
+            """
+            Analyze input file using multiple processes
+            """
+            def process_batch(pipe_receiver, pipe_sender):
+                """
+                # 2022-04-24 01:29:59
+                Requires loading several data objects (using copy-on-write method)
+
+                receives a bookmark file (either file directory of a tsv file or a dataframe)
+                """
+                """
+                initialize the worker 
+                # 2023-08-01 12:19:06 
+                """
+                str_uuid = bk.UUID()  # retrieve id
+                if verbose:
+                    logger.info(f"[Started] start working (worker_id={str_uuid})")
+
+                """ prepare """
+                str_uuid_for_a_batch = bk.UUID( ) # retrieve id for the specific batch
+
+                """ open output files """
+                path_file_bam_output = f"{path_folder_temp}{str_uuid}.barcoded.bam"
+                with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
+                    newsamfile = pysam.AlignmentFile( path_file_bam_output, 'wb', template = samfile ) # open the new samfile, based on the input BAM file
+
+                while True:
+                    ins = pipe_receiver.recv()
+                    if ins is None:
+                        break
+                    name_chr = ins  # parse input
+
+                    ''' initialize the summary metrics '''
+                    int_num_reads_analyzed = 0
+                    int_num_reads_analyzed_with_5p_site_classification_result = 0
+
+                    ''' read the classification results of the 5p sites '''
+                    path_file_5p_sites = f"{path_folder_input_5p_sites}5pSite/dict_t_5p_classification.{name_chr}.pkl" # retrieve a path of the file containing the classified 5p site profiles for the current chromosome
+                    flag_5p_site_classification_available = os.path.exists( path_file_5p_sites ) # retrieve 'flag_5p_site_classification_available'
+                    if flag_5p_site_classification_available : # read the pickle file
+                        dict_t_5p_classification = bk.PICKLE_Read( path_file_5p_sites )
+
+                        ''' define a function for retrieving 5p site classification result '''
+                        def get_classification_result( t_id_5p ) :
+                            ''' 
+                            # 2023-12-23 16:56:01 
+                            '''
+                            for flag_GGGG in dict_t_5p_classification :
+                                _dict_data = dict_t_5p_classification[ flag_GGGG ]
+                                for int_num_aligned_untemplated_Gs in _dict_data :
+                                    if t_id_5p in _dict_data[ int_num_aligned_untemplated_Gs ] :
+                                        return flag_GGGG, int_num_aligned_untemplated_Gs
+                            return None, None # if t_id_5p has not been found, return None, None
+
+                    # read file and write the record
+                    with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
+                        for r in samfile.fetch( contig = name_chr ) :
+                            # retrieve read properties
+                            flags, seq, r_st, r_en, q_st, q_en = r.flag, r.seq, r.reference_start, r.reference_end, r.qstart, r.qend 
+
+                            ''' compose 't_id_5p' '''
+                            flag_plus_strand = not _check_binary_flags( flags, 4 ) # retrieve a strand flag # check whether the read was reverse complemented
+                            t_id_5p = ( flag_plus_strand, r_st if flag_plus_strand else r_en ) # compose 't_id_5p' representing a 5p site                        
+
+                            ''' count the number of aligned and unaligned G bases '''
+                            # retrieve sequences around the 5p site
+                            if flag_plus_strand :
+                                seq_5prime_aligned = seq[ q_st : q_st + int_window_size ]
+                                seq_5prime_unaligned = seq[ q_st - int_window_size : q_st ]
+                            else :
+                                seq_5prime_aligned = SEQ.Reverse_Complement( seq[ q_en - int_window_size : q_en ] )
+                                seq_5prime_unaligned = SEQ.Reverse_Complement( seq[ q_en : q_en + int_window_size ] )
+                            # count the number of aligned and unaligned G bases
+                            int_num_aligned_Gs = find_consecutive_G( seq_5prime_aligned, flag_from_3p = False ) 
+                            int_num_unaligned_Gs = find_consecutive_G( seq_5prime_unaligned, flag_from_3p = True )
+
+                            ''' add new tags  '''
+                            l_tags = r.get_tags( with_value_type = True ) # initialize l_tags using existing tags (unfortunately, it is not possible to simply add tags to existing tags)
+                            l_tags.extend( [ ( name_tag_num_aligned_Gs, int_num_aligned_Gs, 'i' ), ( name_tag_num_unaligned_Gs, int_num_unaligned_Gs, 'i' ) ] ) # add tags indicating the number of aligned/unaligned G bases.
+                            int_num_reads_analyzed += 1 # update the summary metric
+
+                            ''' add new tags containing 5p site classification result '''
+                            if flag_5p_site_classification_available :
+                                flag_GGGG, int_num_aligned_untemplated_Gs = get_classification_result( t_id_5p )
+                                if flag_GGGG is not None : # if a classification result is available for the current 't_id_5p'
+                                    l_tags.extend( [ 
+                                        ( name_tag_flag_valid_TSS, int( flag_GGGG ), 'i' ), 
+                                        ( name_tag_num_aligned_untemplated_Gs, -1 if isinstance( int_num_aligned_untemplated_Gs, float ) else int_num_aligned_untemplated_Gs, 'i' ) # add -1 if int_num_aligned_untemplated_Gs == np.nan (no unref G/untemplated G)
+                                    ] ) # add tags indicating the number of aligned/unaligned G bases.
+                                    int_num_reads_analyzed_with_5p_site_classification_result += 1 # update the summary metric
+
+                            r.set_tags( l_tags ) 
+
+                            ''' write the SAM record '''
+                            newsamfile.write( r ) 
+
+                    """ report a batch has been completed """
+                    pipe_sender.send( { 
+                        'int_num_reads_analyzed' : int_num_reads_analyzed,
+                        'int_num_reads_analyzed_with_5p_site_classification_result' : int_num_reads_analyzed_with_5p_site_classification_result,
+                        'name_chr' : name_chr,
+                    } )  # report the number of processed records
+                    """ report the worker has completed a batch """
+                    if verbose:
+                        logger.info(f"[Completed] completed a batch (worker_id={str_uuid})")
+
+                """ close output files """
+                newsamfile.close( )
+                # sort the output sam file
+                pysam.index( path_file_bam_output ) # index the resulting BAM file
+
+                """ report the worker has completed all the works """
+                if verbose:
+                    logger.info(f"[Completed] all works completed (worker_id={str_uuid})")
+                pipe_sender.send( 'completed' )  
+
+            ns = {
+                'int_num_reads_analyzed' : 0,
+                'int_num_reads_analyzed_with_5p_site_classification_result' : 0,
+            }  # define a namespace
+
+            def post_process_batch(res):
+                # parse received result
+                name_chr, int_num_reads_analyzed_for_a_batch, int_num_reads_analyzed_with_5p_site_classification_result_for_a_batch = res[ 'name_chr' ], res[ 'int_num_reads_analyzed' ], res[ 'int_num_reads_analyzed_with_5p_site_classification_result' ]
+                ns["int_num_reads_analyzed"] += int_num_reads_analyzed_for_a_batch
+                ns["int_num_reads_analyzed_with_5p_site_classification_result"] += int_num_reads_analyzed_with_5p_site_classification_result_for_a_batch
+                if verbose : # report
+                    if int_num_reads_analyzed_for_a_batch > 0 : # skip reporting when zero reads were analyzed.
+                        logger.info( f"[{path_file_bam_input}] analysis completed for '{name_chr}' chromosome, {int_num_reads_analyzed_for_a_batch} reads analyzed, {int_num_reads_analyzed_with_5p_site_classification_result_for_a_batch} reads ({np.round( int_num_reads_analyzed_with_5p_site_classification_result_for_a_batch / int_num_reads_analyzed_for_a_batch * 100, 1 ) if int_num_reads_analyzed_for_a_batch > 0 else np.nan}%) matched with input 5p sites " )
+
+            """
+            Analyze an input file
+            """
+            if verbose:
+                logger.info(
+                    f"[{path_file_bam_input}] the analysis pipeline will be run with {n_threads} number of threads"
+                )
+            bk.Multiprocessing_Batch_Generator_and_Workers( 
+                gen_batch=iter( set( SAM.Get_contig_names_from_bam_header( path_file_bam_input ) ).difference( set_seqname_to_skip ) ), # analyze the pre-processed BAM file for each chromosome # exclude the chromosomes in the given list of sequence names to exclude in the analysis
+                process_batch=process_batch,
+                post_process_batch=post_process_batch,
+                int_num_threads=n_threads
+                + 2,  # one thread for generating batch, another thread for post-processing of the batch
+                flag_wait_for_a_response_from_worker_after_sending_termination_signal = True, # wait until all worker exists before resuming works in the main process
+            )
+
+            """ 
+            post-processing
+            """
+
+            def post_processing():  # off-loading a single-core work
+                logger.info(
+                    f"[{path_folder_input}] post-processing started"
+                )
+
+                # combine results into a single output file (initial read analysis)
+                """ combine results into a single output BAM file """
+                l_path_file = glob.glob( f"{path_folder_temp}*.barcoded.bam" ) # retrieve a list of BAM files to combine
+                pysam.merge( '--threads', str( min( n_threads, 10 ) ), '-c', '-p', f"{path_folder_output}barcoded.bam", * l_path_file ) # merge output BAM files
+                for path_file in l_path_file : # delete the temporary files
+                    os.remove( path_file )
+                pysam.index( f"{path_folder_output}barcoded.bam" ) # index the input BAM file
+
+                # write a flag indicating that the processing has been completed
+                with open( f"{path_folder_output}pipeline_completed.txt", 'w' ) as newfile :
+                    newfile.write( 'completed' )
+
+                # delete the temporary files
+                shutil.rmtree( path_folder_temp, ignore_errors = True )
+
+                release_lock()  # release the lock
+                logger.info(
+                    f"[{path_folder_input}] post-processing completed"
+                )
+
+            workers.submit_work(post_processing)
+
+            release_lock()  # release the lock
+
+        # wait all the single-core works offloaded to the workers to be completed.
+        workers.wait_all()
+        logger.info(
+            f"[Pipeline Completion] Forked Pipeline (id={str_uuid_pipeline}) Completed."
+        )
+
+    for _ in range(
+        int_num_samples_analyzed_concurrently
+    ):  # run 'int_num_samples_analyzed_concurrently' number of pipelines
+        pipelines.submit_work(run_pipeline)
+
+    # wait all pipelines to be completed
+    pipelines.wait_all()
+    logger.info(f"Completed.")
+    return 
+
 def LongCreateReferenceSizeDistribution(
     flag_usage_from_command_line_interface: bool = False,
     l_path_file_distributions: Union[List[str], None] = None, # list of path to the 'dict_arr_dist.pkl' output file of the 'LongExtractBarcodeFromBAM' pipeline for each sample
@@ -5211,6 +6916,14 @@ def LongExportNormalizedCountMatrix(
     int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment : int = 10, # Rather than aligning an entire sequence of the read, exclude soft clipped regions and align the portion of read that was aligned to the genome. Since this portion of read should be perfectly match the transcript without softclipping if the read was indeed originated from the transcript, during realignment, alignments with extensive softclipping longer than the given threshold will be filtered out. Additionally, alignment to transcript with insertion and deletion longer than this length will be filtered out, too. To disable this behavior, set this value to negative values (e.g., -1).
     int_max_distance_from_transcript_start_and_end_for_tss_and_tes_matching_during_realignment : int = 100, # the maximum distance (in base pairs, bp) from the transcript start or end coordinates for a read to be classified as a specific transcript. Currently, only TES matching is supported, due to 5' frequent degradation events. This argument will be only effective if 'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' is True.
     str_mappy_aligner_preset_for_realignment : str = 'map-ont', # minimap2 presets for re-alignment analysis: 'sr' for single-end short read data; 'map-pb' for PacBio long read data; 'map-ont' for Oxford Nanopore long read data. Please avoid using the 'splice' preset, since re-alignment to transcripts should not contain 'splicing', or large deletions.
+    flag_skip_full_length_based_feature_counting: bool = False,
+    str_name_bam_tag_num_aligned_Gs : str = 'AG',
+    str_name_bam_tag_num_unaligned_Gs : str = 'UG',
+    str_name_bam_tag_flag_valid_TSS : str = 'VS',
+    str_name_bam_tag_num_aligned_untemplated_Gs : str = 'AU',
+    flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification : bool = False,
+    flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification : bool = False,
+    flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification : bool = False,
     dict_num_manager_processes_for_each_data_object: dict = {
         'dict_it_promoter' : 0,
         'dict_t_splice_junc_to_info_genome' : 0,
@@ -9760,8 +11473,8 @@ def DeduplicateBAM(
     
     path_file_bam_input : str, # an input Barcoded BAM file to split
     path_folder_output : str, # the output folder where de-duplicated BAM file will be exported
-    name_tag_cb : str = 'CB', 
-    name_tag_umi : str = 'UB',
+    name_tag_cb : str = 'CB', # name of the SAM tag containing cell barcode (corrected)
+    name_tag_umi : str = 'UB', # name of the SAM tag containing UMI (corrected)
     name_tag_length : str = 'LE', # length of molecule aligned to the genome
     int_num_processes : int = 8, # number of processes to use for processing each chunk
     int_num_threads_for_sorting_bam : int = 5, # the number of threads for sorting the BAM file 
