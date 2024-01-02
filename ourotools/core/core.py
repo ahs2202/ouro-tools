@@ -85,9 +85,9 @@ logging.basicConfig(
 logger = logging.getLogger("ouro-tools")
 
 # define version
-_version_ = "0.0.3"
+_version_ = "0.1.1"
 _ourotools_version_ = _version_
-_last_modified_time_ = "2023-11-03 23:33:12"
+_last_modified_time_ = "2023-12-31 17:34:09"
 
 str_release_note = [
     """
@@ -165,9 +165,9 @@ A comprehensive toolkit for quality control and analysis of single-cell long-rea
 """
 
 str_documentation = """
+# 2023-12-31 17:35:02 a first implementation of the core concepts of the ouro-tools completed, including chimeric molecule detection & polyA tailing identification (while exporting versatile, single-cell long-read specific QC metrics), validating 3' and 5' ends of cDNA molecules (using molecular signatures specific to biologically genuine 3' and 5' ends of cDNA), and exporting a size-distribution-normalized isoform count matrix of full-length molecules with validated 3' and 5' ends (TES/TSS matching).
 
-
-documentation_date = '2023-07-30 15:57:49'
+documentation_date = '2023-12-31 17:35:07 '
 """
 
 def _get_random_integer(int_num_possible_integers: int):
@@ -6150,7 +6150,6 @@ def LongAdd5pSiteClassificationResultToBAM(
                 'path_folder_input_barcodedbam' : path_folder_input,
                 'n_threads' : n_threads,
                 'int_num_samples_analyzed_concurrently' : int_num_samples_analyzed_concurrently,
-                'int_num_base_pairs_in_a_batch' : int_num_base_pairs_in_a_batch,
                 'float_memory_in_GiB' : float_memory_in_GiB,
                 'verbose' : verbose,
                 'int_max_distance_from_5p_to_survey_in_base_pairs' : int_max_distance_from_5p_to_survey_in_base_pairs,
@@ -6903,7 +6902,7 @@ def LongExportNormalizedCountMatrix(
     int_num_samples_analyzed_concurrently: int = 2,
     flag_does_not_collect_variant_information: bool = False,
     flag_skip_intron_retention_counting: bool = False,
-    flag_skip_internal_polyA_filtered_feature_counting: bool = False,
+    flag_skip_full_length_feature_counting: bool = False, # export features that only accounts reads that were classified as full-length
     int_min_length_intron_for_detecting_intron_retention_event: int = 10,
     flag_output_variant_information_with_annotations: bool = False,
     int_min_num_of_reads_for_filtering_genomic_variant: int = 10,
@@ -6911,19 +6910,21 @@ def LongExportNormalizedCountMatrix(
     path_file_vcf_for_filtering_variant: Union[str, None] = None,
     int_min_count_features_for_filtering_barcodes: int = 50,
     int_length_of_polya_to_append_to_transcript_sequence_during_realignment : int = 50, # during re-alignment analysis for unique transcript assignment, append poly A sequence of given length at the 3' end of transcript sequences, which aids identification of the correct isoform from which the read is likely originated.
-    flag_enforce_transcript_end_site_matching_for_long_read_during_realignment : bool = False, # should only be used when (1) all read contains poly A sequences (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it also use internal-polyA-tract priming information (the length of the internal poly A tract, recorded as a BAM record tag with the tag name 'str_name_bam_tag_internal_polya_length' for all reads), and does not perform TES matching if the read appear to be primed by internal-polyA-tract. To enable this behavior, 'int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment' should be set to non-negative values, and alignments to transcripts should be filtered based on the softclipping status of the alignment.
-    str_name_bam_tag_internal_polya_length : str = 'IA', # the name of the BAM record tag that contains the length of internal poly A tract. The tag should be available for all reads if 'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' is set to True, and TES matching mode is active.
+    flag_enforce_transcript_start_site_matching_for_long_read_during_realignment : bool = False, # should only be used when (1) all read contains unreferenced Gs sequences at 5' end originating from the template switching activity of RT enzymes (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it use the unreferenced G information (the length of unreferenced G at the 5' end), and does not perform TSS matching if the read appear to have invalid 5' end (false positive TSS). To enable this behavior, 'int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment' should be set to non-negative values.
+    flag_enforce_transcript_end_site_matching_for_long_read_during_realignment : bool = False, # should only be used when (1) all read contains poly A sequences (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it also use internal-polyA-tract priming information (the length of the internal poly A tract, recorded as a BAM record tag with the tag name 'str_name_bam_tag_length_of_internal_polyA' for all reads), and does not perform TES matching if the read appear to be primed by internal-polyA-tract. To enable this behavior, 'int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment' should be set to non-negative values.
     int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment : int = 10, # Rather than aligning an entire sequence of the read, exclude soft clipped regions and align the portion of read that was aligned to the genome. Since this portion of read should be perfectly match the transcript without softclipping if the read was indeed originated from the transcript, during realignment, alignments with extensive softclipping longer than the given threshold will be filtered out. Additionally, alignment to transcript with insertion and deletion longer than this length will be filtered out, too. To disable this behavior, set this value to negative values (e.g., -1).
-    int_max_distance_from_transcript_start_and_end_for_tss_and_tes_matching_during_realignment : int = 100, # the maximum distance (in base pairs, bp) from the transcript start or end coordinates for a read to be classified as a specific transcript. Currently, only TES matching is supported, due to 5' frequent degradation events. This argument will be only effective if 'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' is True.
+    int_max_distance_from_transcript_start_for_tss_matching_during_realignment : int = 25, # the maximum distance (in base pairs, bp) from the transcript start coordinates for a read to be assigned to a specific transcript. This argument will be only effective if 'flag_enforce_transcript_start_site_matching_for_long_read_during_realignment' is True.
+    int_max_distance_from_transcript_end_for_tes_matching_during_realignment : int = 100, # the maximum distance (in base pairs, bp) from the transcript end coordinates for a read to be assigned to a specific transcript. This argument will be only effective if 'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' is True.
     str_mappy_aligner_preset_for_realignment : str = 'map-ont', # minimap2 presets for re-alignment analysis: 'sr' for single-end short read data; 'map-pb' for PacBio long read data; 'map-ont' for Oxford Nanopore long read data. Please avoid using the 'splice' preset, since re-alignment to transcripts should not contain 'splicing', or large deletions.
-    flag_skip_full_length_based_feature_counting: bool = False,
-    str_name_bam_tag_num_aligned_Gs : str = 'AG',
-    str_name_bam_tag_num_unaligned_Gs : str = 'UG',
-    str_name_bam_tag_flag_valid_TSS : str = 'VS',
-    str_name_bam_tag_num_aligned_untemplated_Gs : str = 'AU',
-    flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification : bool = False,
-    flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification : bool = False,
-    flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification : bool = False,
+    int_min_length_internal_polyA_tract : int = 8, # minimum length of an internal poly A/T tract to classify a read as a internal poly A/T tract primed read with an invalid 3' site.
+    str_name_bam_tag_length_of_internal_polyA : str = 'IA', # the name of the BAM record tag that contains the length of internal poly A tract. The tag should be available for all reads if 'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' is set to True, and TES matching mode is active.
+    str_name_bam_tag_num_aligned_Gs : str = 'AG', # name of the SAM tag containing the number of consecutive Gs that start froms 5' site toward the aligned portion of the read.
+    str_name_bam_tag_num_unaligned_Gs : str = 'UG', # name of the SAM tag containing the number of consecutive Gs that start froms 5' site toward the unaligned portion of the read.
+    str_name_bam_tag_flag_valid_TSS : str = 'VS', # name of the SAM tag containing a flag indicating the 5' site is a valid transcript start site.
+    str_name_bam_tag_num_aligned_untemplated_Gs : str = 'AU', # name of the SAM tag containing the number of aligned consecutive Gs from 5' site that were actually untemplated Gs added to the end of the 5' site (the offset between the actual TSS and the alignment end site).
+    flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification : bool = False, # if True, a read with four unaligned Gs at 5' site will be considered as having a valid 5' site
+    flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification : bool = False, # if True, a read with four untemplated Gs at 5' site will be considered as having a valid 5' site. The number of untemplated Gs is calculated from the number of unreferenced Gs and the number of aligned untemplated Gs.
+    flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification : bool = False, # if True, a read with 5' site marked as a valid TSS will be considered as having a valid 5' site. (when the 'str_name_bam_tag_flag_valid_TSS' tag is True)
     dict_num_manager_processes_for_each_data_object: dict = {
         'dict_it_promoter' : 0,
         'dict_t_splice_junc_to_info_genome' : 0,
@@ -6938,7 +6939,7 @@ def LongExportNormalizedCountMatrix(
     l_seqname_to_skip: list = ["MT"],
     flag_no_strand_specificity : bool = False,
 ) -> dict:
-    """# 2023-11-03 17:30:23 
+    """# 2024-01-01 20:03:22 
     perform secondary analysis of cell-ranger output (barcoded BAM)
 
     l_str_mode_scarab_count : list[ Literal[ "gex5prime-single-end", 'gex5prime-paired-end', "gex3prime-single-end", 'gex3prime', 'gex', 'gex5prime', 'atac', 'multiome' ] ] = [ 'gex3prime' ], # list of scarab_count operation mode
@@ -6953,7 +6954,6 @@ def LongExportNormalizedCountMatrix(
     int_min_count_features_for_filtering_barcodes : int = 50, # the minimum number of features for filtering barcodes.
     int_num_samples_analyzed_concurrently : int = 2, # the number of samples that can be analyzed concurrently to reduce bottlenecks due to processing of very large chunks.
     l_seqname_to_skip : list = [ 'MT' ], # the list of names of the chromosomes of the reference genome to skip the analysis. By default, reads aligned to the mitochondrial genomes will be skipped. Because gene boundaries of the mitochondrial genome-encoded genes are often overlapping, an entire mitochondrial genome often assigned as a single chunk, creating a huge bottleneck in the analysis pipeline.
-    flag_skip_internal_polyA_filtered_feature_counting: bool = False, # skip exporting counts excluding internal polyA primed reads (if it is set to False, in addition to the default counting mode, internal polyA primed-read filtered reads will be counted for most of the features).
     flag_skip_intron_retention_counting: bool = False, # skip exporting counts of intron retention events
     int_min_length_intron_for_detecting_intron_retention_event: int = 10, # the minimum length of intron to be present in a read in order to detect an intron retention event in the read.
     dict_num_manager_processes_for_each_data_object : dict = {
@@ -6972,14 +6972,27 @@ def LongExportNormalizedCountMatrix(
     l_name_distribution : Union[ List[ str ], str, None ] = None, # the name of each sample that was used to build the reference distribution. the distribution of each sample and pre-calculated correction ratios will be retrieved from the data stored in the reference distribution folder using the given names.
     l_str_l_t_distribution_range_of_interest : Union[ List[ str ], str, None ] = None, # define a range of distribution of interest for exporting normalized count matrix. a list of string for setting the size distrubution ranges of interest for exporting normalized count matrix. if 'raw' is given, no size-based normalization will be performed, and raw counts of all molecules will be exported. example arguments are the followings: 'raw,50-5000,1000-3500' for exporting raw count and size-normalized count matrices for molecules of 50-5000bp and 1000-3500bp (total three output matrices). if only one argument is given, the argument will be applied to all samples.
 
+    ------ for full-length read classification -------
+    flag_skip_full_length_feature_counting: bool = False, # export features that only accounts reads that were classified as full-length
+    int_min_length_internal_polyA_tract : int = 8 # minimum length of an internal poly A/T tract to classify a read as a internal poly A/T tract primed read with an invalid 3' site.
+    str_name_bam_tag_length_of_internal_polyA : str = 'IA' # the name of the BAM record tag that contains the length of internal poly A tract. The tag should be available for all reads if 'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' is set to True, and TES matching mode is active.
+    str_name_bam_tag_num_aligned_Gs : str = 'AG', # name of the SAM tag containing the number of consecutive Gs that start froms 5' site toward the aligned portion of the read.
+    str_name_bam_tag_num_unaligned_Gs : str = 'UG', # name of the SAM tag containing the number of consecutive Gs that start froms 5' site toward the unaligned portion of the read.
+    str_name_bam_tag_flag_valid_TSS : str = 'VS', # name of the SAM tag containing a flag indicating the 5' site is a valid transcript start site.
+    str_name_bam_tag_num_aligned_untemplated_Gs : str = 'AU', # name of the SAM tag containing the number of aligned consecutive Gs from 5' site that were actually untemplated Gs added to the end of the 5' site (the offset between the actual TSS and the alignment end site).
+    flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification : bool = False, # if True, a read with four unaligned Gs at 5' site will be considered as having a valid 5' site
+    flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification : bool = False, # if True, a read with four untemplated Gs at 5' site will be considered as having a valid 5' site. The number of untemplated Gs is calculated from the number of unreferenced Gs and the number of aligned untemplated Gs.
+    flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification : bool = False, # if True, a read with 5' site marked as a valid TSS will be considered as having a valid 5' site. (when the 'str_name_bam_tag_flag_valid_TSS' tag is True)
+
     ------ for re-alignment -------
+    str_mappy_aligner_preset_for_realignment : str = 'sr', # minimap2 presets for re-alignment analysis: 'sr' for single-end short read data; 'map-pb' for PacBio long read data; 'map-ont' for Oxford Nanopore long read data. Please avoid using the 'splice' preset, since re-alignment to transcripts should not contain 'splicing', or large deletions.
     int_min_mapq_minimap2_tx_assignment : int = 0, # (default = 0, meaning no filtering). a value between 0~60. Minimum mapping quality required for assigning reads to a unique isoform using minimap2 realignment.
     int_length_of_polya_to_append_to_transcript_sequence_during_realignment : int = 50, # during re-alignment analysis for unique transcript assignment, append poly A sequence of given length at the 3' end of transcript sequences, which aids identification of the correct isoform from which the read is likely originated.
-    flag_enforce_transcript_end_site_matching_for_long_read_during_realignment : bool = False, # hould only be used when (1) all read contains poly A sequences (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it also use internal-polyA-tract priming information (the length of the internal poly A tract, recorded as a BAM record tag with the tag name 'str_name_bam_tag_internal_polya_length' for all reads), and does not perform TES matching if the read appear to be primed by internal-polyA-tract. To enable this behavior, 'int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment' should be set to non-negative values, and alignments to transcripts should be filtered based on the softclipping status of the alignment.
+    flag_enforce_transcript_start_site_matching_for_long_read_during_realignment : bool = False, # should only be used when (1) all read contains unreferenced Gs sequences at 5' end originating from the template switching activity of RT enzymes (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it use the unreferenced G information (the length of unreferenced G at the 5' end), and does not perform TSS matching if the read appear to have invalid 5' end (false positive TSS). To enable this behavior, 'int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment' should be set to non-negative values.
+    flag_enforce_transcript_end_site_matching_for_long_read_during_realignment : bool = False, # should only be used when (1) all read contains poly A sequences (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it also use internal-polyA-tract priming information (the length of the internal poly A tract, recorded as a BAM record tag with the tag name 'str_name_bam_tag_length_of_internal_polyA' for all reads), and does not perform TES matching if the read appear to be primed by internal-polyA-tract. To enable this behavior, 'int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment' should be set to non-negative values.
+    int_max_distance_from_transcript_start_for_tss_matching_during_realignment : int = 25, # the maximum distance (in base pairs, bp) from the transcript start coordinates for a read to be assigned to a specific transcript. This argument will be only effective if 'flag_enforce_transcript_start_site_matching_for_long_read_during_realignment' is True.
+    int_max_distance_from_transcript_end_for_tes_matching_during_realignment : int = 100, # the maximum distance (in base pairs, bp) from the transcript end coordinates for a read to be assigned to a specific transcript. This argument will be only effective if 'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' is True.
     int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment : int = 10, # Rather than aligning an entire sequence of the read, exclude soft clipped regions and align the portion of read that was aligned to the genome. Since this portion of read should be perfectly match the transcript without softclipping if the read was indeed originated from the transcript, during realignment, alignments with extensive softclipping longer than the given threshold will be filtered out. Additionally, alignment to transcript with insertion and deletion longer than this length will be filtered out, too. To disable this behavior, set this value to negative values (e.g., -1).
-    str_name_bam_tag_internal_polya_length : str = 'IA', # the name of the BAM record tag that contains the length of internal poly A tract. The tag should be available for all reads if 'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' is set to True, and TES matching mode is active.
-    int_max_distance_from_transcript_start_and_end_for_tss_and_tes_matching_during_realignment : int = 100, # the maximum distance (in base pairs, bp) from the transcript start or end coordinates for a read to be classified as a specific transcript. Currently, only TES matching is supported, due to 5' frequent degradation events. This argument will be only effective if 'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' is True.
-    str_mappy_aligner_preset_for_realignment : str = 'sr', # minimap2 presets for re-alignment analysis: 'sr' for single-end short read data; 'map-pb' for PacBio long read data; 'map-ont' for Oxford Nanopore long read data. Please avoid using the 'splice' preset, since re-alignment to transcripts should not contain 'splicing', or large deletions.
     
     # the number of manager processes to use for each data object that will be shared across the forked processes. If 0 is given, no manager process will be used. Instead, the object will be directly accessed in the forked process, incurring memory bloating.
     # generally, it is better to use more number of manager processes for data object that are more frequently accessed. If increasing the number of manager processes does not improve performance, considering not using the manager process and accessing the object directly.
@@ -7161,10 +7174,16 @@ def LongExportNormalizedCountMatrix(
             type=int,
         )
         
-        arg_grp_isoform_realignment = parser.add_argument_group("Isoform assignment - Realignment")
+        arg_grp_isoform_realignment = parser.add_argument_group("Isoform assignment (Re-alignment to transcripts)")
         arg_grp_isoform_realignment.add_argument(
-            "--int_max_distance_from_transcript_start_and_end_for_tss_and_tes_matching_during_realignment",
-            help="(Default: 100) The maximum distance (in base pairs, bp) from the transcript start or end coordinates for a read to be classified as a specific transcript. Currently, only TES matching is supported, due to 5' frequent degradation events. This argument will be only effective if 'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' is True.",
+            "--int_max_distance_from_transcript_start_for_tss_matching_during_realignment",
+            help="(Default: 25) # The maximum distance (in base pairs, bp) from the transcript start coordinates for a read to be assigned to a specific transcript. This argument will be only effective if 'flag_enforce_transcript_start_site_matching_for_long_read_during_realignment' is True.",
+            default=25,
+            type=int,
+        )    
+        arg_grp_isoform_realignment.add_argument(
+            "--int_max_distance_from_transcript_end_for_tes_matching_during_realignment",
+            help="(Default: 100) # The maximum distance (in base pairs, bp) from the transcript end coordinates for a read to be assigned to a specific transcript. This argument will be only effective if 'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' is True.",
             default=100,
             type=int,
         )    
@@ -7180,8 +7199,13 @@ def LongExportNormalizedCountMatrix(
             type=int,
         )
         arg_grp_isoform_realignment.add_argument(
+            "--flag_enforce_transcript_start_site_matching_for_long_read_during_realignment",
+            help="(Default: False) Should only be used when (1) all read contains unreferenced Gs sequences at 5' end originating from the template switching activity of RT enzymes (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it use the unreferenced G information (the length of unreferenced G at the 5' end), and does not perform TSS matching if the read appear to have invalid 5' end (false positive TSS). To enable this behavior, 'int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment' should be set to non-negative values.",
+            action="store_true",
+        )
+        arg_grp_isoform_realignment.add_argument(
             "--flag_enforce_transcript_end_site_matching_for_long_read_during_realignment",
-            help="(Default: False) Should only be used when (1) all read contains poly A sequences (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it also use internal-polyA-tract priming information (the length of the internal poly A tract, recorded as a BAM record tag with the tag name 'str_name_bam_tag_internal_polya_length' for all reads), and does not perform TES matching if the read appear to be primed by internal-polyA-tract. To enable this behavior, 'int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment' should be set to non-negative values, and alignments to transcripts should be filtered based on the softclipping status of the alignment.",
+            help="(Default: False) Should only be used when (1) all read contains poly A sequences (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it also use internal-polyA-tract priming information (the length of the internal poly A tract, recorded as a BAM record tag with the tag name 'str_name_bam_tag_length_of_internal_polyA' for all reads), and does not perform TES matching if the read appear to be primed by internal-polyA-tract. To enable this behavior, 'int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment' should be set to non-negative values, and alignments to transcripts should be filtered based on the softclipping status of the alignment.",
             action="store_true",
         )
         arg_grp_isoform_realignment.add_argument(
@@ -7189,13 +7213,61 @@ def LongExportNormalizedCountMatrix(
             help="(Default: 10) Rather than aligning an entire sequence of the read, exclude soft clipped regions and align the portion of read that was aligned to the genome. Since this portion of read should be perfectly match the transcript without softclipping if the read was indeed originated from the transcript, during realignment, alignments with extensive softclipping longer than the given threshold will be filtered out. Additionally, alignment to transcript with insertion and deletion longer than this length will be filtered out, too. To disable this behavior, set this value to negative values (e.g., -1).",
             default=10,
             type=int,
-        )    
-        arg_grp_isoform_realignment.add_argument(
-            "--str_name_bam_tag_internal_polya_length",
+        )            
+        
+        arg_grp_full_length = parser.add_argument_group( "Read classification (Full-Length)" )
+        arg_grp_full_length.add_argument(
+            "--str_name_bam_tag_length_of_internal_polyA",
             help="(Default: 'IA') The name of the BAM record tag that contains the length of internal poly A tract. The tag should be available for all reads if 'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' is set to True, and TES matching mode is active.",
             default = "IA",
         )    
-
+        arg_grp_full_length.add_argument(
+            "--str_name_bam_tag_num_aligned_Gs",
+            help="(Default: 'AG') name of the SAM tag containing the number of consecutive Gs that start froms 5' site toward the aligned portion of the read.",
+            default = 'AG',
+        )    
+        arg_grp_full_length.add_argument(
+            "--str_name_bam_tag_num_unaligned_Gs",
+            help="(Default: 'UG') name of the SAM tag containing the number of consecutive Gs that start froms 5' site toward the unaligned portion of the read.",
+            default = 'UG',
+        )    
+        arg_grp_full_length.add_argument(
+            "--str_name_bam_tag_flag_valid_TSS",
+            help="(Default: 'VS') name of the SAM tag containing a flag indicating the 5' site is a valid transcript start site.",
+            default = 'VS',
+        )  
+        arg_grp_full_length.add_argument(
+            "--str_name_bam_tag_num_aligned_untemplated_Gs",
+            help="(Default: 'AU') name of the SAM tag containing the number of aligned consecutive Gs from 5' site that were actually untemplated Gs added to the end of the 5' site (the offset between the actual TSS and the alignment end site).",
+            default = 'AU',
+        )  
+        arg_grp_full_length.add_argument(
+            "--int_min_length_internal_polyA_tract",
+            help="minimum length of an internal poly A/T tract to classify a read as a internal poly A/T tract primed read with an invalid 3' site.",
+            default=8,
+            type=int,
+        )
+        arg_grp_full_length.add_argument(
+            "--flag_skip_full_length_feature_counting",
+            help="skip exporting counts of features that only accounts the reads that were classified as 'full-length'. (if this flag is set to False, which is the default, in addition to the default set of features, an additional set of features will be added for considering only the valid full-length reads).",
+            action="store_true",
+        )
+        arg_grp_full_length.add_argument(
+            "--flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification",
+            help="if True, a read with four unaligned Gs at 5' site will be considered as having a valid 5' site",
+            action="store_true",
+        )
+        arg_grp_full_length.add_argument(
+            "--flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification",
+            help="if True, a read with four untemplated Gs at 5' site will be considered as having a valid 5' site. The number of untemplated Gs is calculated from the number of unreferenced Gs and the number of aligned untemplated Gs.",
+            action="store_true",
+        )
+        arg_grp_full_length.add_argument(
+            "--flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification",
+            help="if True, a read with 5' site marked as a valid TSS will be considered as having a valid 5' site. (when the 'str_name_bam_tag_flag_valid_TSS' tag is True)",
+            action="store_true",
+        )
+        
         # regulatory elements
         arg_grp_annotation_reg = parser.add_argument_group(
             "Annotation - Regulatory Elements"
@@ -7399,12 +7471,6 @@ def LongExportNormalizedCountMatrix(
         )
         
         arg_grp_bam_processing.add_argument(
-            "--flag_skip_internal_polyA_filtered_feature_counting",
-            help="(Default: False) skip exporting counts excluding internal polyA primed reads (if it is set to False, in addition to the default counting mode, internal polyA primed-read filtered reads will be counted for most of the features).",
-            action="store_true",
-        )
-        
-        arg_grp_bam_processing.add_argument(
             "--int_min_length_intron_for_detecting_intron_retention_event",
             help="(Default: 10). The minimum length of intron to be present in a read in order to detect an intron retention event in the read.",
             default=10,
@@ -7597,13 +7663,26 @@ def LongExportNormalizedCountMatrix(
         l_name_distribution = args.l_name_distribution
         l_str_l_t_distribution_range_of_interest = args.l_str_l_t_distribution_range_of_interest
         
-        int_length_of_polya_to_append_to_transcript_sequence_during_realignment = args.int_length_of_polya_to_append_to_transcript_sequence_during_realignment
+        int_max_distance_from_transcript_start_for_tss_matching_during_realignment = args.int_max_distance_from_transcript_start_for_tss_matching_during_realignment
+        int_max_distance_from_transcript_end_for_tes_matching_during_realignment = args.int_max_distance_from_transcript_end_for_tes_matching_during_realignment
+        flag_enforce_transcript_start_site_matching_for_long_read_during_realignment = args.flag_enforce_transcript_start_site_matching_for_long_read_during_realignment
         flag_enforce_transcript_end_site_matching_for_long_read_during_realignment = args.flag_enforce_transcript_end_site_matching_for_long_read_during_realignment
+        
         int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment = args.int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment
-        str_name_bam_tag_internal_polya_length = args.str_name_bam_tag_internal_polya_length
+        
+        flag_skip_full_length_feature_counting = args.flag_skip_full_length_feature_counting
+        int_min_length_internal_polyA_tract = args.int_min_length_internal_polyA_tract
+        str_name_bam_tag_length_of_internal_polyA = args.str_name_bam_tag_length_of_internal_polyA
+        str_name_bam_tag_num_aligned_Gs = args.str_name_bam_tag_num_aligned_Gs
+        str_name_bam_tag_num_unaligned_Gs = args.str_name_bam_tag_num_unaligned_Gs
+        str_name_bam_tag_flag_valid_TSS = args.str_name_bam_tag_flag_valid_TSS
+        str_name_bam_tag_num_aligned_untemplated_Gs = args.str_name_bam_tag_num_aligned_untemplated_Gs
+        flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification = args.flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification
+        flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification = args.flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification
+        flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification = args.flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification
+
         str_mappy_aligner_preset_for_realignment = args.str_mappy_aligner_preset_for_realignment
         int_length_of_polya_to_append_to_transcript_sequence_during_realignment = args.int_length_of_polya_to_append_to_transcript_sequence_during_realignment
-        flag_skip_internal_polyA_filtered_feature_counting = args.flag_skip_internal_polyA_filtered_feature_counting
 
     """
     Start of the Scarab-Count Program
@@ -7779,6 +7858,44 @@ def LongExportNormalizedCountMatrix(
 
     # process arguments
     set_seqname_to_skip = set(l_seqname_to_skip)
+    
+    # internal settings and functions
+    def _identify_valid_3p( dict_tags ) :
+        """
+        identify valid 3p based on the tags
+        # 2023-12-30 14:55:14 
+        """
+        flag_valid_3p = False # default 'flag_valid_3p'
+        if str_name_bam_tag_length_of_internal_polyA in dict_tags :
+            flag_internal_polyA_primed_reads = dict_tags[ str_name_bam_tag_length_of_internal_polyA ] >= int_min_length_internal_polyA_tract # retrieve a flag indicating 'internal_polyA_primed_reads'
+            flag_valid_3p = not flag_internal_polyA_primed_reads # update 'flag_valid_3p'
+        return flag_valid_3p
+    
+    flag_includes_unrefGGGGG_or_longer_unrefGs = True # a flag indicating whether to include molecules with 5 unrefGs or larger number of unrefGs.
+    def _identify_valid_5p_based_on_number_of_unrefGs( int_num_unrefGs ) :
+        """
+        identify valid 5p based on the number of untemplated Gs
+        # 2023-12-30 14:49:34 
+        """
+        return int_num_unrefGs >= 4 if flag_includes_unrefGGGGG_or_longer_unrefGs else int_num_unrefGs == 4
+    
+    def _identify_valid_5p( dict_tags ) :
+        """
+        identify valid 5p based on the tags
+        # 2023-12-30 14:49:43 
+        """
+        ''' identify valid 5p '''
+        flag_valid_5p = False # default 'flag_valid_5p'
+        if not flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification :
+            if str_name_bam_tag_flag_valid_TSS in dict_tags :
+                flag_valid_5p = dict_tags[ str_name_bam_tag_flag_valid_TSS ] > 0 # update 'flag_valid_5p'
+        if not flag_valid_5p and not flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification :
+            if str_name_bam_tag_num_aligned_Gs in dict_tags :
+                flag_valid_5p = _identify_valid_5p_based_on_number_of_unrefGs( dict_tags[ str_name_bam_tag_num_aligned_Gs ] ) # update 'flag_valid_5p'
+        if not flag_valid_5p and not flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification : 
+            if str_name_bam_tag_num_unaligned_Gs in dict_tags and str_name_bam_tag_num_aligned_untemplated_Gs in dict_tags :
+                flag_valid_5p = _identify_valid_5p_based_on_number_of_unrefGs( dict_tags[ str_name_bam_tag_num_unaligned_Gs ] + dict_tags[ str_name_bam_tag_num_aligned_untemplated_Gs ] ) # update 'flag_valid_5p'
+        return flag_valid_5p
 
     """
     read reference distribution
@@ -8213,10 +8330,21 @@ def LongExportNormalizedCountMatrix(
                     'l_name_distribution' : l_name_distribution,
                     'l_str_l_t_distribution_range_of_interest' : l_str_l_t_distribution_range_of_interest,
                     'int_length_of_polya_to_append_to_transcript_sequence_during_realignment' : int_length_of_polya_to_append_to_transcript_sequence_during_realignment,
+                    'flag_enforce_transcript_start_site_matching_for_long_read_during_realignment' : flag_enforce_transcript_start_site_matching_for_long_read_during_realignment,
                     'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' : flag_enforce_transcript_end_site_matching_for_long_read_during_realignment,
+                    'int_max_distance_from_transcript_start_for_tss_matching_during_realignment' : int_max_distance_from_transcript_start_for_tss_matching_during_realignment,
+                    'int_max_distance_from_transcript_end_for_tes_matching_during_realignment' : int_max_distance_from_transcript_end_for_tes_matching_during_realignment,
                     'int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment' : int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment,
-                    'str_name_bam_tag_internal_polya_length' : str_name_bam_tag_internal_polya_length,
-                    'flag_skip_internal_polyA_filtered_feature_counting' : flag_skip_internal_polyA_filtered_feature_counting,
+                    'flag_skip_full_length_feature_counting' : flag_skip_full_length_feature_counting,
+                    'int_min_length_internal_polyA_tract' : int_min_length_internal_polyA_tract,
+                    'str_name_bam_tag_length_of_internal_polyA' : str_name_bam_tag_length_of_internal_polyA,
+                    'str_name_bam_tag_num_aligned_Gs' : str_name_bam_tag_num_aligned_Gs,
+                    'str_name_bam_tag_num_unaligned_Gs' : str_name_bam_tag_num_unaligned_Gs,
+                    'str_name_bam_tag_flag_valid_TSS' : str_name_bam_tag_flag_valid_TSS,
+                    'str_name_bam_tag_num_aligned_untemplated_Gs' : str_name_bam_tag_num_aligned_untemplated_Gs,
+                    'flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification' : flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification,
+                    'flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification' : flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification,
+                    'flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification' : flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification,
                     # internal
                     "path_folder_temp": path_folder_temp,
                     "path_folder_graph": path_folder_graph,
@@ -8296,7 +8424,7 @@ def LongExportNormalizedCountMatrix(
                 flag_is_mode_scarab_count_atac = str_mode_scarab_count == "atac"
                 flag_is_5prime, flag_is_paired_end = None, None  # initialize the fiags
                 # retrieve a flag indiciating whether to export filter excluding internal polyA primed reads
-                flag_export_internal_polyA_filtered_count_as_a_separate_feature = not ( flag_is_mode_scarab_count_atac or flag_skip_internal_polyA_filtered_feature_counting )
+                flag_export_full_length_only_count_as_a_separate_feature = not ( flag_is_mode_scarab_count_atac or flag_skip_full_length_feature_counting )
                 if not flag_is_mode_scarab_count_atac:
                     flag_is_5prime = "gex5prime" in str_mode_scarab_count
                     flag_is_paired_end = "paired-end" in str_mode_scarab_count
@@ -8392,7 +8520,7 @@ def LongExportNormalizedCountMatrix(
                         "id_tx_assigned_by_minimap2",
                         "l_name_variant",
                         'int_total_aligned_length',
-                        'flag_internal_polya_tract_primed',
+                        'flag_full_length_with_valid_3p_and_5p_ends',
                     ]
                     # a list of names of columns for collecting information about the current alignment just for counting (only essential information to reduce memory footprint)
                     l_col_for_counting = [
@@ -8408,7 +8536,7 @@ def LongExportNormalizedCountMatrix(
                         "id_tx_assigned_by_minimap2",
                         "l_name_variant",
                         'int_total_aligned_length',
-                        'flag_internal_polya_tract_primed',
+                        'flag_full_length_with_valid_3p_and_5p_ends',
                     ]
                     # a list of names of columns that will be added as BAM tags to the output BAM file # should be a contiguous subset of 'l_col'
                     l_name_col_newanno = l_col[ -14 : ]
@@ -8432,7 +8560,7 @@ def LongExportNormalizedCountMatrix(
                     "id_tx_assigned_by_minimap2": ("XT", "Z"),
                     "l_name_variant": ("XV", "Z"),
                     'int_total_aligned_length' : ( 'YA', 'i' ),
-                    'flag_internal_polya_tract_primed' : ( 'ZI', 'i' ),
+                    'flag_full_length_with_valid_3p_and_5p_ends' : ( 'ZF', 'i' ),
                 }
                 l_index_col_for_counting = list(
                     l_col.index(col) for col in l_col_for_counting
@@ -8501,7 +8629,7 @@ def LongExportNormalizedCountMatrix(
                 """ define internal functions and parameters """
                 int_max_n_removed_elements = 10000  # maximum number of removed elements that can exist in a dictionary storing analyzed reads (avoid a 'memory leakeage')
                 seq_polya_sequence_to_append_to_tx = 'A' * int_length_of_polya_to_append_to_transcript_sequence_during_realignment # retrieve poly A sequence to append
-                int_max_distance_from_transcript_end_for_tes_matching_during_realignment = int_max_distance_from_transcript_start_and_end_for_tss_and_tes_matching_during_realignment + int_length_of_polya_to_append_to_transcript_sequence_during_realignment # retrieve 'int_max_distance_from_transcript_end_for_tes_matching_during_realignment', by adding the length of poly A tract sequence added to the end of transcript
+                int_max_distance_from_transcript_end_for_tes_matching_during_realignment_including_appended_polya_seq = int_max_distance_from_transcript_end_for_tes_matching_during_realignment + int_length_of_polya_to_append_to_transcript_sequence_during_realignment # retrieve 'int_max_distance_from_transcript_end_for_tes_matching_during_realignment', by adding the length of poly A tract sequence added to the end of transcript
                 
                 def __Get_Genomic_Region__(int_pos, int_bp_for_bins=int_bp_for_bins):
                     """get start and end coordinates (0-based) of the genomic region of the current position (0-based)"""
@@ -8807,7 +8935,7 @@ def LongExportNormalizedCountMatrix(
                         df = df[ l_col_df_count ]  # reorder columns
                         return df # return the resulting dataframe containing count data
                     
-                    l_col_for_composing_df_count = [ ] if flag_is_mode_scarab_count_atac else [ 'flag_internal_polya_tract_primed' ] # define a additional list of columns for composing 'df_count'
+                    l_col_for_composing_df_count = [ ] if flag_is_mode_scarab_count_atac else [ 'flag_full_length_with_valid_3p_and_5p_ends' ] # define a additional list of columns for composing 'df_count'
                     def _process_gene_and_isoform_data( id_anno : str, dict_data : dict ):
                         """ # 2023-08-28 16:25:33 
                         Flush data for gene and isoform
@@ -8929,7 +9057,7 @@ def LongExportNormalizedCountMatrix(
                                 df_count = df[ l_col_for_identifying_unique_molecules + [ "read_count", "int_total_aligned_length" ] + l_col_for_composing_df_count ] # subset the data
                                 ''' create normalized count matrix '''
                                 for t_distribution_range_of_interest in l_t_distribution_range_of_interest : # for each 't_distribution_range_of_interest', compose output
-                                    for _suffix, _df_count in zip( [ '', '|excluding_internal_polyA_primed' ] if flag_export_internal_polyA_filtered_count_as_a_separate_feature else [ '' ], [ df_count, df_count[ df_count.flag_internal_polya_tract_primed == False ] ] if flag_export_internal_polyA_filtered_count_as_a_separate_feature else [ df_count ] ) : # exclude internal poly A primed reads during counting
+                                    for _suffix, _df_count in zip( [ '', '|full_length_with_valid_3p_and_5p_ends' ] if flag_export_full_length_only_count_as_a_separate_feature else [ '' ], [ df_count, df_count[ df_count.flag_full_length_with_valid_3p_and_5p_ends == True ] ] if flag_export_full_length_only_count_as_a_separate_feature else [ df_count ] ) : # only includes full-length reads during counting for full-length features
                                         if len( _df_count ) == 0 : # ignore empty dataframe
                                             continue
                                         _apply_size_distribution_correction_and_export_count_matrix( 
@@ -9016,7 +9144,7 @@ def LongExportNormalizedCountMatrix(
                                     return name_anno + "|tx_name=" + df["id_tx_assigned"].apply( mapping ) + "|tx_id=" + df["id_tx_assigned"]
                                 ''' create normalized count matrix '''
                                 for t_distribution_range_of_interest in l_t_distribution_range_of_interest : # for each 't_distribution_range_of_interest', compose output
-                                    for _suffix, _df_count in zip( [ '', '|excluding_internal_polyA_primed' ] if flag_export_internal_polyA_filtered_count_as_a_separate_feature else [ '' ], [ df_tx_count, df_tx_count[ df_tx_count.flag_internal_polya_tract_primed == False ] ] if flag_export_internal_polyA_filtered_count_as_a_separate_feature else [ df_tx_count ] ) : # exclude internal poly A primed reads during counting
+                                    for _suffix, _df_count in zip( [ '', '|full_length_with_valid_3p_and_5p_ends' ] if flag_export_full_length_only_count_as_a_separate_feature else [ '' ], [ df_tx_count, df_tx_count[ df_tx_count.flag_full_length_with_valid_3p_and_5p_ends == True ] ] if flag_export_full_length_only_count_as_a_separate_feature else [ df_tx_count ] ) : # only includes full-length reads during counting for full-length features
                                         if len( _df_count ) == 0 : # ignore empty dataframe
                                             continue
                                         _apply_size_distribution_correction_and_export_count_matrix( 
@@ -9371,7 +9499,7 @@ def LongExportNormalizedCountMatrix(
                                     df_count = df[ l_col_for_identifying_unique_molecules + [ "read_count", "int_total_aligned_length" ] + l_col_for_composing_df_count ] # subset the data
                                     ''' create normalized count matrix '''
                                     for t_distribution_range_of_interest in l_t_distribution_range_of_interest : # for each 't_distribution_range_of_interest', compose output
-                                        for _suffix, _df_count in zip( [ '', '|excluding_internal_polyA_primed' ] if flag_export_internal_polyA_filtered_count_as_a_separate_feature else [ '' ], [ df_count, df_count[ df_count.flag_internal_polya_tract_primed == False ] ] if flag_export_internal_polyA_filtered_count_as_a_separate_feature else [ df_count ] ) : # exclude internal poly A primed reads during counting
+                                        for _suffix, _df_count in zip( [ '', '|full_length_with_valid_3p_and_5p_ends' ] if flag_export_full_length_only_count_as_a_separate_feature else [ '' ], [ df_count, df_count[ df_count.flag_full_length_with_valid_3p_and_5p_ends == True ] ] if flag_export_full_length_only_count_as_a_separate_feature else [ df_count ] ) : # only includes full-length reads during counting for full-length features
                                             if len( _df_count ) == 0 : # ignore empty dataframe
                                                 continue
                                             _apply_size_distribution_correction_and_export_count_matrix( 
@@ -9796,8 +9924,15 @@ def LongExportNormalizedCountMatrix(
                                 # retrieve a dictionary of SAM tags
                                 dict_tags = dict(r.tags)
                                 
-                                # retrieve useful flags
-                                flag_internal_polya_tract_primed = dict_tags[ str_name_bam_tag_internal_polya_length ] > 0 if str_name_bam_tag_internal_polya_length in dict_tags else False # if 'str_name_bam_tag_internal_polya_length' tag is available, classify the alignment as internal-polyA-tract-primed read if the detected length of the internal polyA tract is longer than 0. if the tag is not available, assume all read is not primed by internal polyA-tract
+                                # retrieve flags for full-length classification of long-reads
+                                ''' identify valid 3p using tags '''
+                                flag_valid_3p = _identify_valid_3p( dict_tags )
+
+                                ''' identify valid 5p using tags '''
+                                flag_valid_5p = _identify_valid_5p( dict_tags )
+                                
+                                ''' classify full-length reads '''
+                                flag_full_length_with_valid_3p_and_5p_ends = flag_valid_3p and flag_valid_5p # a full-length molecule is defined as a molecule having both valid 3p and 5p ends.
 
                                 # initialize the dictionary of sam tags
                                 for key in [
@@ -9805,7 +9940,6 @@ def LongExportNormalizedCountMatrix(
                                     str_name_bam_tag_cb_uncorrected,
                                     str_name_bam_tag_umi_corrected,
                                     str_name_bam_tag_umi_uncorrected,
-                                    str_name_bam_tag_internal_polya_length,
                                     "TX",
                                     "AN",
                                     "GX",
@@ -10211,10 +10345,14 @@ def LongExportNormalizedCountMatrix(
                                                 ''' filter alignments with extensive softclipping, insertions, and deletions '''
                                                 l_aln_to_tx = list( hit for hit in l_aln_to_tx if ( max( hit.q_st, len_seq_excluding_soft_clipping - hit.q_en ) <= int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment ) and _mappy_detect_structural_difference( hit.cigar ) ) # filter alignments to the transcript if the length of the softclipping, insertions, and deletions exceed the limit
                                             
-                                            if flag_enforce_transcript_end_site_matching_for_long_read_during_realignment and not flag_internal_polya_tract_primed :
-                                                ''' filter transcript alignments by enforcing transcript end site (TES) matching. transcript alignment with the distance between the alignment end position and the actual end of the transcript larger than the threshold will be filtered, if the read is not internal-polyA-primed. '''
-                                                l_aln_to_tx = list( hit for hit in l_aln_to_tx if ( hit.ctg_len - hit.r_en ) <= int_max_distance_from_transcript_end_for_tes_matching_during_realignment ) # filter alignments with transcript end site (TES) matching, and retain transcript alignment 
-                                                
+                                            if flag_enforce_transcript_start_site_matching_for_long_read_during_realignment and flag_valid_5p : # only enforce TSS matching if the molecule has a valid 5p end
+                                                ''' filter transcript alignments by enforcing transcript start site (TSS) matching. transcript alignment with the distance between the alignment start position and the actual start of the transcript larger than the threshold will be filtered, if the read has a valid 5p end.'''
+                                                l_aln_to_tx = list( hit for hit in l_aln_to_tx if hit.r_st <= int_max_distance_from_transcript_start_for_tss_matching_during_realignment ) # filter alignments with transcript end site (TES) matching, and retain transcript alignment 
+
+                                            if flag_enforce_transcript_end_site_matching_for_long_read_during_realignment and flag_valid_3p : # only enforce TES matching if the molecule has a valid 3p end
+                                                ''' filter transcript alignments by enforcing transcript end site (TES) matching. transcript alignment with the distance between the alignment end position and the actual end of the transcript larger than the threshold will be filtered, if the read has a valid 3p end (not internal-polyA-primed). '''
+                                                l_aln_to_tx = list( hit for hit in l_aln_to_tx if ( hit.ctg_len - hit.r_en ) <= int_max_distance_from_transcript_end_for_tes_matching_during_realignment_including_appended_polya_seq ) # filter alignments with transcript end site (TES) matching, and retain transcript alignment 
+                                                    
                                             dict_assignment_to_score = dict( ( ( hit.ctg, hit.r_st, hit.r_en ), hit.mlen + hit.mapq ) for hit in l_aln_to_tx if hit.mapq >= int_min_mapq_minimap2_tx_assignment ) # filter with mapping quality, # retrieve tx assignment - score mapping, where score is calculated as matched-length + mapping quality, since 'mapping quality' can be 0 value despite its longer aligned length.
                                             if len( dict_assignment_to_score ) > 0 : # if at least one transcript alignment is available
                                                 id_tx_assigned_by_minimap2, start_in_transcript, end_in_transcript = _argmax( dict_assignment_to_score ) # find the transcript alignment with the best score (if more than two best scores are available, select one without specific criteria, for now)
@@ -10773,7 +10911,7 @@ def LongExportNormalizedCountMatrix(
                                         id_tx_assigned_by_minimap2,
                                         str_l_var,
                                         int_total_aligned_length,
-                                        flag_internal_polya_tract_primed,
+                                        flag_full_length_with_valid_3p_and_5p_ends,
                                     ]  # refstart in 1-based coordinate # use 'str_umi_uncorrected' if 'str_umi_corrected' does not exist
                                 l_data_for_counting = list(
                                     l_data[index_col]
@@ -11071,7 +11209,7 @@ def LongExportNormalizedCountMatrix(
                                 "id_tx_assigned_by_minimap2",
                                 "l_name_variant",
                                 'int_total_aligned_length',
-                                'flag_internal_polya_tract_primed',
+                                'flag_full_length_with_valid_3p_and_5p_ends',
                             ]
                             
                         bk.OS_FILE_Combine_Files_in_order(
@@ -11706,6 +11844,188 @@ def FilterInternalPolyAPrimedReadFromBAM(
                     continue
                 str_r = r.tostring( ) # convert samtools record to a string                
                 _write_record( 'internal_polyA_primed_reads' if flag_internal_polyA_primed_reads else 'without_internal_polyA_primed_reads', str_r ) # write the record
+                
+    # flush remaining records
+    for name_file in l_name_file :
+        _flush_batch( name_file )
+
+    # notify all works in the main process has been completed
+    for name_file in l_name_file :
+        dict_name_file_p_to_writers[ name_file ].send( None )
+
+    # wait for all workers to complete their jobs
+    for p in l_p_from_writers :
+        p.recv( ) # receive a signal indicating the worker has dismissed itself
+    # pipeline completed
+    return
+
+def FilterArtifactReadFromBAM( 
+    path_file_bam_input : str, 
+    path_folder_output : str, 
+    int_min_length_internal_polyA_tract : int = 8, 
+    str_name_bam_tag_length_of_internal_polyA : str = 'IA',
+    str_name_bam_tag_num_aligned_Gs : str = 'AG',
+    str_name_bam_tag_num_unaligned_Gs : str = 'UG',
+    str_name_bam_tag_flag_valid_TSS : str = 'VS',
+    str_name_bam_tag_num_aligned_untemplated_Gs : str = 'AU',
+    flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification : bool = False,
+    flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification : bool = False,
+    flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification : bool = False,
+    flag_skip_output_artifact_reads : bool = False,
+    int_max_num_record_in_a_batch : int = 100,
+) :
+    """ # 2023-12-30 10:45:24 
+    Filter reverse transcription (RT) or PCR reaction-derived artifact reads from BAM file.
+    These artifact reads can be classified as 
+    
+    path_file_bam_input : str # an input Barcoded BAM file to filter artifact reads
+    path_folder_output : str # the output folder where splitted Barcoded BAM files will be exported
+    int_min_length_internal_polyA_tract : int = 8 # minimum length of an internal poly A/T tract to classify a read as a internal poly A/T tract primed read with an invalid 3' site.
+    str_name_bam_tag_length_of_internal_polyA : str = 'IA' # name of the SAM tag containing the length of internal polyA tract. 
+    str_name_bam_tag_num_aligned_Gs : str = 'AG', # name of the SAM tag containing the number of consecutive Gs that start froms 5' site toward the aligned portion of the read.
+    str_name_bam_tag_num_unaligned_Gs : str = 'UG', # name of the SAM tag containing the number of consecutive Gs that start froms 5' site toward the unaligned portion of the read.
+    str_name_bam_tag_flag_valid_TSS : str = 'VS', # name of the SAM tag containing a flag indicating the 5' site is a valid transcript start site.
+    str_name_bam_tag_num_aligned_untemplated_Gs : str = 'AU', # name of the SAM tag containing the number of aligned consecutive Gs from 5' site that were actually untemplated Gs added to the end of the 5' site (the offset between the actual TSS and the alignment end site).
+    flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification : bool = False, # if True, a read with four unaligned Gs at 5' site will be considered as having a valid 5' site
+    flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification : bool = False, # if True, a read with four untemplated Gs at 5' site will be considered as having a valid 5' site. The number of untemplated Gs is calculated from the number of unreferenced Gs and the number of aligned untemplated Gs.
+    flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification : bool = False, # if True, a read with 5' site marked as a valid TSS will be considered as having a valid 5' site. (when the 'str_name_bam_tag_flag_valid_TSS' tag is True)
+    flag_skip_output_artifact_reads : bool = False, # if True, does not output a BAM file containing artifact reads 
+    int_max_num_record_in_a_batch : int = 100, # the maximum number of SAM records that will be written to each BAM file for each batch. It is recommended to reduce this number if a deadlock occurs during the run (a deadlock from multiprocessing.Pipe) 
+    """
+    # import packages
+    import multiprocessing as mp
+    import pysam
+    import os
+    # define functions
+
+    # create the output folder
+    os.makedirs( path_folder_output, exist_ok = True )
+    
+    """
+    initialize processes writing the output BAM files
+    """
+    # read the header of the input BAM file    
+    with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
+        sam_header = samfile.header
+
+    l_name_file = [ 'valid_3p_valid_5p' ] # define the name of the files
+    if not flag_skip_output_artifact_reads : # create an output file containing artifact reads
+        l_name_file += [ 'valid_3p_invalid_5p', 'invalid_3p_valid_5p', 'invalid_3p_invalid_5p' ]
+    def _write_bam_of_name_file( p_in, p_out ) :
+        ''' # 2023-09-07 21:38:10 
+        for writing bam file for each 'name_file'
+        '''
+        name_file = p_in.recv( ) # retrieve the name of file
+        path_file_bam = f'{path_folder_output}{name_file}.bam'
+        with pysam.AlignmentFile( path_file_bam, 'wb', header = sam_header ) as newsamfile :
+            while True :
+                batch = p_in.recv( ) # receive a record
+                if batch is None :
+                    break
+                for str_r in batch : # parse the batch
+                    r = pysam.AlignedSegment.fromstring( str_r, sam_header ) # compose a pysam record
+                    newsamfile.write( r )
+        pysam.index( path_file_bam ) # index the given bam file
+        p_out.send( 'completed' ) # indicate the work has been completed
+
+    dict_name_file_p_to_writers = dict( )
+    l_p_from_writers = [ ]
+    l_process = [ ] # list of processes
+    for name_file in l_name_file : # for each 'name_file', recruite a worker
+        pm2w, pw4m = mp.Pipe( )
+        pw2m, pm4w = mp.Pipe( )
+        p = mp.Process( target = _write_bam_of_name_file, args = ( pw4m, pw2m ) )
+        dict_name_file_p_to_writers[ name_file ] = pm2w 
+        l_p_from_writers.append( pm4w )
+        p.start( )
+        pm2w.send( name_file ) # initialize the worker with 'name_file'
+        l_process.append( p ) # collect the process
+
+    """
+    iterate over the input BAM file and distribute records across the process writing output BAM files
+    """
+    # initialize
+    dict_name_file_to_batch = dict( ( name_file, [ ] ) for name_file in l_name_file ) # initialize 'dict_name_file_to_batch'
+    
+    # internal settings and functions
+    def _identify_valid_3p( dict_tags ) :
+        """
+        identify valid 3p based on the tags
+        # 2023-12-30 14:55:14 
+        """
+        flag_valid_3p = False # default 'flag_valid_3p'
+        if str_name_bam_tag_length_of_internal_polyA in dict_tags :
+            flag_internal_polyA_primed_reads = dict_tags[ str_name_bam_tag_length_of_internal_polyA ] >= int_min_length_internal_polyA_tract # retrieve a flag indicating 'internal_polyA_primed_reads'
+            flag_valid_3p = not flag_internal_polyA_primed_reads # update 'flag_valid_3p'
+        return flag_valid_3p
+    
+    flag_includes_unrefGGGGG_or_longer_unrefGs = True # a flag indicating whether to include molecules with 5 unrefGs or larger number of unrefGs.
+    def _identify_valid_5p_based_on_number_of_unrefGs( int_num_unrefGs ) :
+        """
+        identify valid 5p based on the number of untemplated Gs
+        # 2023-12-30 14:49:34 
+        """
+        return int_num_unrefGs >= 4 if flag_includes_unrefGGGGG_or_longer_unrefGs else int_num_unrefGs == 4
+    
+    def _identify_valid_5p( dict_tags ) :
+        """
+        identify valid 5p based on the tags
+        # 2023-12-30 14:49:43 
+        """
+        ''' identify valid 5p '''
+        flag_valid_5p = False # default 'flag_valid_5p'
+        if not flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification :
+            if str_name_bam_tag_flag_valid_TSS in dict_tags :
+                flag_valid_5p = dict_tags[ str_name_bam_tag_flag_valid_TSS ] > 0 # update 'flag_valid_5p'
+        if not flag_valid_5p and not flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification :
+            if str_name_bam_tag_num_aligned_Gs in dict_tags :
+                flag_valid_5p = _identify_valid_5p_based_on_number_of_unrefGs( dict_tags[ str_name_bam_tag_num_aligned_Gs ] ) # update 'flag_valid_5p'
+        if not flag_valid_5p and not flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification : 
+            if str_name_bam_tag_num_unaligned_Gs in dict_tags and str_name_bam_tag_num_aligned_untemplated_Gs in dict_tags :
+                flag_valid_5p = _identify_valid_5p_based_on_number_of_unrefGs( dict_tags[ str_name_bam_tag_num_unaligned_Gs ] + dict_tags[ str_name_bam_tag_num_aligned_untemplated_Gs ] ) # update 'flag_valid_5p'
+        return flag_valid_5p
+
+    def _flush_batch( name_file : str ) :
+        """ # 2023-09-07 22:00:29 
+        flush the batch
+        """
+        batch = dict_name_file_to_batch[ name_file ]
+        if len( batch ) > 0 : # if batch is not empty
+            dict_name_file_p_to_writers[ name_file ].send( batch ) # send the batch to the writer
+            dict_name_file_to_batch[ name_file ] = [ ] # empty the batch    
+
+    def _write_record( name_file : str, str_r : str ) :
+        """ # 2023-09-07 22:00:38 
+        write a record
+        """
+        dict_name_file_to_batch[ name_file ].append( str_r ) # add the record
+        if len( dict_name_file_to_batch[ name_file ] ) >= int_max_num_record_in_a_batch :
+            _flush_batch( name_file ) # flush the batch
+
+    # read file and write the record
+    with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
+        for r in samfile.fetch( ) :
+            dict_tags = dict( r.get_tags( ) ) # retrieve tags of the read
+            
+            ''' identify valid 3p using tags '''
+            flag_valid_3p = _identify_valid_3p( dict_tags )
+                
+            ''' identify valid 5p using tags '''
+            flag_valid_5p = _identify_valid_5p( dict_tags )
+                    
+            ''' distribute reads '''
+            str_r = r.tostring( ) # convert samtools record to a string
+            
+            if flag_valid_3p and flag_valid_5p : 
+                _write_record( 'valid_3p_valid_5p', str_r ) # write the record
+            elif not flag_skip_output_artifact_reads :
+                if not flag_valid_3p and not flag_valid_5p :
+                    name_file_bam = 'invalid_3p_invalid_5p'
+                elif not flag_valid_3p :
+                    name_file_bam = 'invalid_3p_valid_5p'
+                elif not flag_valid_5p :
+                    name_file_bam = 'valid_3p_invalid_5p'
+                _write_record( name_file_bam, str_r ) # write the record
                 
     # flush remaining records
     for name_file in l_name_file :
