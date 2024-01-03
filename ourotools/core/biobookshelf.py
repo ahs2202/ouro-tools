@@ -1882,6 +1882,78 @@ class Offload_Works:
             self._dict_res = dict( ) # initialize the internal container for saving results
             return dict_result
 
+def Workers( 
+    func, 
+    * args,
+    int_num_workers_for_Workers : int = 8, 
+    ** kwargs,
+) :
+    """
+    func, # a function to run across workers
+    * args, # arguments to the function
+    int_num_workers_for_Workers : int = 8, # number of workers for the current function ('Workers')
+    ** kwargs, # keyworded arguments to the function
+    
+    For the arguments or keyworded arguments that are unique to individual runs, Python List should be used to list the arguments for each run. If the original argument is Python List, the argument should be wrapped inside another Python List, repeated N times where N is the total number of runs.
+    
+    For example, the following usage is possible,
+    >>> def func( d, e, a = 0, b = 1, c = 3 ) :
+    >>>     print( f"{d + e + a + b + c = }" )
+    >>> Workers( func, [ 10, 20, 30, 40, 50 ], 30, int_num_workers_for_Workers = 8, a = [ 1, 2, 3, 4, 5, 6, 7, 8 ], b = 10, c = [ 7, 8, 9, 10, 11, 12, 13 ] )
+    d + e + a + b + c = 58d + e + a + b + c = 70d + e + a + b + c = 94d + e + a + b + c = 106d + e + a + b + c = 82
+    
+    # 2024-01-03 17:33:49 
+    """
+    def _gen_arguments( args_workers, kwargs_workers ) :
+        """
+        generate arguments with given args and kwargs
+        # 2024-01-03 16:23:42 
+        """
+        ''' survey the number of independent runs '''
+        l_int_num_runs = [ ] 
+        for arg_workers in args_workers : # survey 'args_workers'
+            if isinstance( arg_workers, list ) : 
+                l_int_num_runs.append( len( arg_workers ) )
+        for k in kwargs_workers : # survey 'kwargs_workers'
+            kwarg_workers = kwargs_workers[ k ] # retrieve the argument
+            if isinstance( kwarg_workers, list ) : 
+                l_int_num_runs.append( len( kwarg_workers ) )
+        int_num_runs = np.min( l_int_num_runs ) # determin the number of runs (minimum of the length of arguments)
+        
+        ''' generate arguments for individual runs '''
+        for idx_run in range( int_num_runs ) : # for 'idx_run'
+            ''' compose arguments for a run '''
+            args_run, kwargs_run = [ ], dict( )
+            for arg_workers in args_workers : # compose 'args_run'
+                args_run.append( arg_workers[ idx_run ] if isinstance( arg_workers, list ) else arg_workers )
+                
+            for k in list( kwargs_workers ) : # modify 'kwargs_workers'
+                kwarg_workers = kwargs_workers[ k ] # retrieve the argument
+                kwargs_run[ k ] = kwarg_workers[ idx_run ] if isinstance( kwarg_workers, list ) else kwarg_workers
+            yield args_run, kwargs_run # yield generated arguments and key-worded arguments
+
+    def _run_func( p_i, p_o ) :
+        """
+        run the given function with given arguments
+        # 2024-01-03 16:23:42 
+        """
+        while True :
+            ins = p_i.recv( )
+            if ins is None :
+                break
+            args, kwargs = ins # parse the input
+
+            # run function
+            func( * args, ** kwargs, ) 
+            p_o.send( 'completed' ) # notify the work has been completed
+        p_o.send( 'completed' ) # notify all works have been completed
+
+    Multiprocessing_Batch_Generator_and_Workers(
+        gen_batch = _gen_arguments( args, kwargs ), # generate arguments
+        process_batch = _run_func,
+        int_num_threads = int_num_workers_for_Workers + 2,
+        flag_wait_for_a_response_from_worker_after_sending_termination_signal = True,
+    )
 
 def OS_Run(
     l_args,

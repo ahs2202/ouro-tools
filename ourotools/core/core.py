@@ -87,7 +87,7 @@ logger = logging.getLogger("ouro-tools")
 # define version
 _version_ = "0.1.1"
 _ourotools_version_ = _version_
-_last_modified_time_ = "2023-12-31 17:34:09"
+_last_modified_time_ = "2024-01-03 12:27:57"
 
 str_release_note = [
     """
@@ -4514,9 +4514,9 @@ def LongExtractBarcodeFromBAM(
 
                     """ report a batch has been completed """
                     pipe_sender.send( { 
-                        'int_total_num_records_for_a_batch' : ns[ 'int_total_num_records_processed' ], # record the actual number of records processed for the batch
+                        'int_total_num_records_processed' : ns[ 'int_total_num_records_processed' ], # record the actual number of records processed for the batch
                         'dict_arr_dist' : ns[ 'dict_arr_dist' ], # return results
-                        'dict_arr_len_single_cell_level' : ns[ 'dict_arr_dist_single_cell_level' ], 
+                        'dict_arr_dist_single_cell_level' : ns[ 'dict_arr_dist_single_cell_level' ], 
                     } )  # report the number of processed records
 
                 """ close output files """
@@ -4539,13 +4539,13 @@ def LongExtractBarcodeFromBAM(
             name_type_dist_to_collect_single_cell_level = 'aligned_to_genome__R1__valid_CB__UMI_deduplicated' # the name of the type of the distribution to collect at the single-cell level
             def post_process_batch(res):
                 # update data using the received result
-                ns["int_num_read_currently_processed"] += res[ 'int_total_num_records_for_a_batch' ]
+                ns["int_num_read_currently_processed"] += res[ 'int_total_num_records_processed' ]
                 logger.info( f"[{path_file_bam_input}] total {ns[ 'int_num_read_currently_processed' ]} number of reads has been processed." ) # report
                 
                 # combine distributions (bulk)
                 ns[ 'dict_arr_dist' ] = _combine_dictionary_of_size_distributions( dict_arr_dist_existing = ns[ 'dict_arr_dist' ], dict_arr_dist_new = res[ 'dict_arr_dist' ] ) # combine and update the global distributions (bulk-level)
                 # combine distributions (single-cell)
-                ns[ 'dict_arr_dist_single_cell_level' ] = _combine_dictionary_of_size_distributions( dict_arr_dist_existing = ns[ 'dict_arr_dist_single_cell_level' ], dict_arr_dist_new = res[ 'dict_arr_len_single_cell_level' ] ) # update the container
+                ns[ 'dict_arr_dist_single_cell_level' ] = _combine_dictionary_of_size_distributions( dict_arr_dist_existing = ns[ 'dict_arr_dist_single_cell_level' ], dict_arr_dist_new = res[ 'dict_arr_dist_single_cell_level' ] ) # update the container
                     
                 logger.info( f"[{path_file_bam_input}] total {np.sum(ns[ 'dict_arr_dist' ][ 'aligned_to_genome' ])} number of reads has been processed. (recalculation using 'dict_arr_dist')" ) # report
                     
@@ -4675,6 +4675,528 @@ def LongExtractBarcodeFromBAM(
     logger.info(f"Completed.")
     return 
 
+def LongSummarizeSizeDistributions(
+    flag_usage_from_command_line_interface: bool = False,
+    path_file_bam_input : Union[ str, None ] = None, # an input Barcoded BAM file to summarize size distributions.
+    path_folder_output :  Union[ str, None ] = None, # an output folder where summarized size distributions will be written.
+    name_file_bam : Union[ str, None ] = None, # an (optional) output file name for graph titles. By default, name of the BAM file inferred from 'path_file_bam_input' will be used.
+    name_tag_cb : str = 'CB', # corrected cell barcode
+    name_tag_umi : str = 'UB', # UMI sequence
+    name_tag_length : str = 'LE', # the total length of genomic regions that are actually covered by the read, excluding spliced introns (the sum of exons).
+    name_tag_r1_num_errors : str = 'XR', # the number of errors for identification of R1 adaptor (marks the 3' end of the original cDNA molecule for 10x GEX 3' products, where cell barcode and UMI sequences can be found). -1 indicates that the adaptor was not identified.
+    name_tag_tso_num_errors : str = 'XT', # the number of errors for identification of TSO adaptor (marks the 5' end of the original cDNA molecule). -1 indicates that the adaptor was not identified.
+    name_tag_internal_polyA : str = 'IA', # the length of detected internal poly(A) priming region in the genomic alignment. 
+    int_size_bin_in_base_pairs_for_collecting_size_distributions_at_single_cell_level : int = 50, # the size of the bin (in base pairs) for collecting size distributions at the single-cell level
+    n_threads : int = 8, # number of threads to use
+    verbose : bool = True,
+) -> None :
+    """
+    path_file_bam_input : Union[ str, None ] = None, # an input Barcoded BAM file to summarize size distributions.
+    path_folder_output :  Union[ str, None ] = None, # an output folder where summarized size distributions will be written.
+    name_file_bam : Union[ str, None ] = None, # an (optional) output file name for graph titles. By default, name of the BAM file inferred from 'path_file_bam_input' will be used.
+    name_tag_cb : str = 'CB', # corrected cell barcode
+    name_tag_umi : str = 'UB', # UMI sequence
+    name_tag_length : str = 'LE', # the total length of genomic regions that are actually covered by the read, excluding spliced introns (the sum of exons).
+    name_tag_r1_num_errors : str = 'XR', # the number of errors for identification of R1 adaptor (marks the 3' end of the original cDNA molecule for 10x GEX 3' products, where cell barcode and UMI sequences can be found). -1 indicates that the adaptor was not identified.
+    name_tag_tso_num_errors : str = 'XT', # the number of errors for identification of TSO adaptor (marks the 5' end of the original cDNA molecule). -1 indicates that the adaptor was not identified.
+    name_tag_internal_polyA : str = 'IA', # the length of detected internal poly(A) priming region in the genomic alignment. 
+    int_size_bin_in_base_pairs_for_collecting_size_distributions_at_single_cell_level : int = 50, # the size of the bin (in base pairs) for collecting size distributions at the single-cell level
+    n_threads : int = 8, # number of threads to use
+    
+    # 2024-01-03 20:36:21 
+    """
+    import plotly.express as px
+    
+    """
+    Parse arguments
+    """
+    if flag_usage_from_command_line_interface:  # parse arguments
+        """parse arguments when the function was called from the command-line interface"""
+        # {  } # unused arguments
+        # command line arguments
+        parser = argparse.ArgumentParser(
+            description=str_description,
+            usage="ourotools LongSummarizeSizeDistributions",
+            formatter_class=argparse.RawTextHelpFormatter,
+        )
+        parser.add_argument("LongSummarizeSizeDistributions")
+
+        arg_grp_general = parser.add_argument_group("General")
+        arg_grp_general.add_argument(
+            "-i",
+            "--path_file_bam_input",
+            help="an input Barcoded BAM file to summarize size distributions.",
+        )
+        arg_grp_general.add_argument(
+            "-o",
+            "--path_folder_output",
+            help="an output folder where summarized size distributions will be written.",
+        )
+        arg_grp_general.add_argument(
+            "-n",
+            "--name_file_bam",
+            help="an (optional) output file name for graph titles. By default, name of the BAM file inferred from 'path_file_bam_input' will be used.",
+        )
+        arg_grp_general.add_argument(
+            "-t",
+            "--n_threads",
+            help="(default: 8) the number of processors to use concurrently.",
+            default=8,
+            type=int,
+        )
+        arg_grp_general.add_argument(
+            "-v", 
+            "--verbose", 
+            help="turn on verbose mode", 
+            action="store_true"
+        )
+        arg_grp_tags = parser.add_argument_group("Input SAM Tag Names")
+        arg_grp_tags.add_argument(
+            "--name_tag_cb",
+            help = "Name of the SAM tag containing the corrected cell barcode.",
+            default = 'CB',
+        )
+        arg_grp_tags.add_argument(
+            "--name_tag_umi",
+            help = "Name of the SAM tag containing the corrected UMI sequence.",
+            default = 'UB',
+        )
+        arg_grp_tags.add_argument(
+            "--name_tag_length",
+            help = "Name of the SAM tag containing the total length of genomic regions that are actually covered by the read, excluding spliced introns (the sum of exons).",
+            default = 'LE',
+        )
+        arg_grp_tags.add_argument(
+            "--name_tag_r1_num_errors",
+            help = "Name of the SAM tag containing the number of errors for identification of R1 adaptor (marks the 3' end of the original cDNA molecule for 10x GEX 3' products, where cell barcode and UMI sequences can be found). -1 indicates that the adaptor was not identified.",
+            default = 'XR',
+        )
+        arg_grp_tags.add_argument(
+            "--name_tag_tso_num_errors",
+            help = "Name of the SAM tag containing the number of errors for identification of TSO adaptor (marks the 5' end of the original cDNA molecule). -1 indicates that the adaptor was not identified.",
+            default = 'XT',
+        )
+        arg_grp_tags.add_argument(
+            "--name_tag_internal_polyA",
+            help = "Name of the SAM tag containing the length of detected internal poly(A) priming region in the genomic alignment.",
+            default = 'IA',
+        )
+        
+        arg_grp_size_dist = parser.add_argument_group("Size Distributions")
+        arg_grp_size_dist.add_argument(
+            "-b",
+            "--int_size_bin_in_base_pairs_for_collecting_size_distributions_at_single_cell_level",
+            help="(default: 50) the size of the bins of the single cell-level size distributions in base pairs",
+            default=50,
+            type=int,
+        )
+        
+        args = parser.parse_args()
+
+        name_tag_cb = args.name_tag_cb
+        name_tag_umi = args.name_tag_umi
+        name_tag_length = args.name_tag_length
+        name_tag_r1_num_errors = args.name_tag_r1_num_errors
+        name_tag_tso_num_errors = args.name_tag_tso_num_errors
+        name_tag_internal_polyA = args.name_tag_internal_polyA
+        n_threads = args.n_threads
+        verbose = args.verbose
+        path_file_bam_input = args.path_file_bam_input
+        path_folder_output = args.path_folder_output
+        name_file_bam = args.name_file_bam
+        int_size_bin_in_base_pairs_for_collecting_size_distributions_at_single_cell_level = args.int_size_bin_in_base_pairs_for_collecting_size_distributions_at_single_cell_level
+
+    """
+    Start of the pipeline
+    """
+    logger.info(str_description)
+    logger.info(
+        "Ouro-Tools LongSummarizeSizeDistributions, a pipeline for summarizing various size distributions of the input raeds of a given BAM file based on existing SAM Tags. (size distributions will be exported using the same format of the size distribution outputs of the 'LongExtractBarcodeFromBAM')"
+    )
+    logger.info(f"Started.")
+
+    """ handle special cases and invalid inputs """
+    if ( path_file_bam_input is None ) or ( path_folder_output is None ) : # check whether the required input paths were given
+        logger.error(
+            "Required argument(s) is missing. to view help message, type -h or --help"
+        )
+        return -1
+
+    """ process required input directories """
+    path_file_bam_input = os.path.abspath( path_file_bam_input )
+
+    """ ensure that the output folder ends with '/' characters"""
+    path_folder_output = os.path.abspath(path_folder_output) + "/"
+    
+    """ set default values """
+    if name_file_bam is None :
+        name_file_bam = path_file_bam_input.rsplit( '/', 1 )[ 1 ]
+
+    """ Fixed Settings """
+    # internal settings
+    int_highest_mapq = 60
+
+    ''' define directories '''
+    path_folder_temp = f'{path_folder_output}temp/'
+    path_folder_graph = f"{path_folder_output}graph/"
+    path_folder_graph_noninteractive, path_folder_graph_interactive = f"{path_folder_graph}noninteractive_graph/", f"{path_folder_graph}interactive_graph/"
+
+    # create the output folders
+    for path_folder in [ 
+        path_folder_output, 
+        path_folder_graph,
+        path_folder_graph_noninteractive, 
+        path_folder_graph_interactive,
+    ] :
+        os.makedirs( path_folder, exist_ok = True )
+        
+    """ Report program arguments """
+    # record arguments used for the program (metadata)
+    dict_program_setting = {
+        "version": _version_,  # record version
+        # external
+        "flag_usage_from_command_line_interface" : flag_usage_from_command_line_interface,
+        "path_file_bam_input" : path_file_bam_input,
+        "path_folder_output" : path_folder_output,
+        "n_threads" : n_threads,
+        "int_size_bin_in_base_pairs_for_collecting_size_distributions_at_single_cell_level" : int_size_bin_in_base_pairs_for_collecting_size_distributions_at_single_cell_level,
+        # internal
+        "path_folder_graph": path_folder_graph,
+    }
+    logger.info(
+        f"[Setting] program will be run with the following setting for the input file {path_file_bam_input} : {str( dict_program_setting )}"
+    )
+
+    """ export program setting """
+    path_file_json_setting_program = f"{path_folder_output}program_setting.json"
+    with open(path_file_json_setting_program, "w") as newfile:
+        json.dump(dict_program_setting, newfile)
+
+    """ initialize """
+    logger.setLevel( logging.INFO ) # reset logging info after importing
+
+    l_name_type_dist = [
+        'aligned_to_genome', # 0
+
+        'aligned_to_genome__R1__TSO', # 1
+        'aligned_to_genome__no_R1__TSO', # 2
+        'aligned_to_genome__R1__no_TSO', # 3
+        'aligned_to_genome__no_R1__no_TSO', # 4
+
+        'aligned_to_genome__R1__no_valid_CB', # 5
+        'aligned_to_genome__R1__valid_CB', # 6
+        'aligned_to_genome__R1__valid_CB__internal_polyA', # 7
+        'aligned_to_genome__R1__valid_CB__no_internal_polyA', # 8
+
+        'aligned_to_genome__R1__valid_CB__UMI_deduplicated', # 9
+
+        'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__1', # 10
+        'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__2to3', # 11
+        'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__4to7', # 12
+        'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__8to15', # 13
+        'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__16to31', # 14
+        'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__32to63', # 15
+        'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__64to127', # 16
+        'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__128to255', # 17
+        'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__256to511', # 18
+        'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__512to1023', # 19
+        'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__above1024', # 20
+    ] # list of distribution types
+    def _initialize_dict_arr_dist( ) :
+        """ # 2023-08-13 21:32:17 
+        initialize 'dict_arr_dist'
+        different from, LongFilterNSplit, length of molecule is calculated as the total length of the genomic regions actually covered by the aligned read (the total length of the exons covered by the read.)
+        """
+        return dict( (e, None) for e in l_name_type_dist )
+
+    ''' run pipeline '''
+    # read the header of the input BAM file    
+    with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
+        sam_header = samfile.header
+
+    # internal settings
+    int_max_num_bucket_deleted = 100_000
+
+    def _check_binary_flags( flags : int, int_bit_flag_position : int ) :
+        """ # 2023-08-08 22:47:02 
+        check a flag in the binary flags at the given position
+        """
+        return ( flags & ( 1 << int_bit_flag_position ) ) > 0 
+
+    def process_batch( p_in, p_out ) :
+        """ # 2023-09-15 20:32:17 
+        """
+        str_uuid_process = bk.UUID( ) # create uuid of the process
+        while True :
+            ins = p_in.recv( ) 
+            if ins is None :
+                break
+            name_chr = ins # parse input
+
+            ''' initialize '''
+            int_length_cb = None
+            ns = { 
+                'name_chr' : name_chr,
+                'int_total_num_records_processed' : 0,
+                'dict_arr_dist' : _initialize_dict_arr_dist( ), # initialize 'dict_arr_dist'
+                'dict_arr_dist_single_cell_level' : dict( ),
+            } # create a namespace for the current batch
+            
+            ''' define batch-specific function '''
+            def generate_bucket( ) :
+                """ # 2023-09-15 20:31:45 
+                generate batch from the input BAM file
+                """
+                ns = dict( ) # create a namespace
+                ns[ 'int_num_buckets_deleted' ] = 0 # initialize 'int_num_buckets_deleted'
+                ns[ 'dict_t_id_to_bucket' ] = dict( ) # a dictionary containing batches
+                reference_name_current = None
+                reference_start_current = None
+
+                def _flush_bucket( t_id ) :
+                    """ # 2023-09-19 00:27:31 
+                    """
+                    bucket = ns[ 'dict_t_id_to_bucket' ].pop( t_id )
+                    ns[ 'int_num_buckets_deleted' ] += 1
+                    if ns[ 'int_num_buckets_deleted' ] >= int_max_num_bucket_deleted : # if the number of pop operations exceed the limit, recreate the dictionary
+                        data = ns[ 'dict_t_id_to_bucket' ]
+                        ns[ 'dict_t_id_to_bucket' ] = dict( ( k, data[ k ] ) for k in data )
+                    return bucket
+
+                def _add_record( t_id, r ) :
+                    """ # 2023-09-19 00:27:25 
+                    """
+                    dict_tags = dict( r.get_tags( ) )
+                    if name_tag_length not in dict_tags or name_tag_r1_num_errors not in dict_tags or name_tag_tso_num_errors not in dict_tags : # ignore invalid reads
+                        return
+
+                    if t_id not in ns[ 'dict_t_id_to_bucket' ] : # initialize the bucket for 't_id'
+                        ns[ 'dict_t_id_to_bucket' ][ t_id ] = [ ]
+                    ns[ 'dict_t_id_to_bucket' ][ t_id ].append( dict_tags )
+
+                # read file and write the record
+                with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
+                    for r in samfile.fetch( reference = name_chr ) : # fetch reads of the current 'name_chr'
+                        # check whether the read was reverse complemented
+                        flags, reference_name, reference_start, reference_end = r.flag, r.reference_name, r.reference_start, r.reference_end # retrieve read properties
+
+                        ''' process reads for each 'bucket' (reads with the same poly CB-UMI attachment sites) '''
+                        ''' when the contig has changed, empty all buckets '''
+                        if reference_name_current != reference_name :
+                            for t_id in list( ns[ 'dict_t_id_to_bucket' ] ) : # retrieve list of 't_id'
+                                yield _flush_bucket( t_id )
+                            reference_name_current = reference_name # update 'reference_name_current'
+
+                        ''' when the position has changed, detect buckets that should be emptied '''
+                        if reference_start_current != reference_start :
+                            ''' determine whether to empty bucket or not, based on the current position on the sorted BAM file '''
+                            for t_id in list( ns[ 'dict_t_id_to_bucket' ] ) : # retrieve list of 't_id'
+                                ''' regardlesss of whether CB-UMI attachment site is located at the left or the right side of the read, when the current position passes the poly A site, process the bucket '''
+                                flag_is_reverse_complemented, pos = t_id # parse 't_id'
+                                if pos < reference_start :
+                                    yield _flush_bucket( t_id )
+                            reference_start_current = reference_start # update 'reference_start_current'
+
+                        ''' compose 't_id' '''
+                        flag_is_reverse_complemented = _check_binary_flags( flags, 4 ) # retrieve a flag indicating whether the read has been reverse-complemented
+                        t_id = ( flag_is_reverse_complemented, reference_start if flag_is_reverse_complemented else reference_end ) # compose 't_id'
+                        _add_record( t_id, r ) # add record
+
+                # flush remaining data
+                for t_id in list( ns[ 'dict_t_id_to_bucket' ] ) : # retrieve list of 't_id'
+                    yield _flush_bucket( t_id )
+                    
+            ''' process each bucket '''
+            gen_bucket = generate_bucket( )
+            while True :
+                try :
+                    l_dict_tags = next( gen_bucket )  # retrieve the next barcode
+                except StopIteration :
+                    break
+
+                # initialize 
+                l_l_len = list( [ ] for _ in range( len( l_name_type_dist ) ) ) # each list represents the list of lengths for each type of distribution in the same order
+                dict_arr_len_single_cell_level = dict( )
+                
+                ''' identify duplicated molecules '''
+                # compose a dataframe containing reads for the bucket
+                l_cb_umi = list( dict_tags[ name_tag_cb ] + dict_tags[ name_tag_umi ] if ( name_tag_cb in dict_tags and name_tag_umi in dict_tags ) else np.nan for dict_tags in l_dict_tags ) # compose a list of cb-umi pairs # invalid cb-umi pair will be marked with np.nan
+                dict_counter_cb_umi = bk.COUNTER( l_cb_umi, ignore_float = True ) # count cb_umi pairs # ignore counting np.nan values
+                l_num_duplicated_umis = list( dict_counter_cb_umi[ cb_umi ] if cb_umi in dict_counter_cb_umi else None for cb_umi in l_cb_umi ) # mark invalid values with None
+
+                ''' classify read and collect molecule size (before deduplication) '''
+                dict_cb_umi_to_max_length = dict( ) # mapping for recording max molecule size for each unique cb-umi pair (since the smaller molecules with a UMI are likely fragments of the larger molecule with the same UMIs)
+                for dict_tags, seq_cb_umi, int_num_duplicated_umis in zip( l_dict_tags, l_cb_umi, l_num_duplicated_umis ) :
+                    int_molecule_size = dict_tags[ name_tag_length ] # molecule size excluding adaptors (only genomic regions covered by the read are counted)
+                    l_l_len[ 0 ].append( int_molecule_size ) # 'aligned_to_genome', # 0
+
+                    # retrieve flags for classifications
+                    flag_R1 = dict_tags[ name_tag_r1_num_errors ] > -1
+                    flag_TSO = dict_tags[ name_tag_tso_num_errors ] > -1
+                    if flag_R1 and flag_TSO : 
+                        l_l_len[ 1 ].append( int_molecule_size ) # 'aligned_to_genome__R1__TSO', # 1 
+                    elif flag_TSO : 
+                        l_l_len[ 2 ].append( int_molecule_size ) # 'aligned_to_genome__no_R1__TSO', # 2 
+                    elif flag_R1 : 
+                        l_l_len[ 3 ].append( int_molecule_size ) # 'aligned_to_genome__R1__no_TSO', # 3 
+                    else : 
+                        l_l_len[ 4 ].append( int_molecule_size ) # 'aligned_to_genome__no_R1__no_TSO', # 4 
+
+                    if flag_R1 : # only when R1 adaptor was found
+                        flag_valid_CB = isinstance( seq_cb_umi, str ) # retrieve a flag indicating a valid cell barcode has been detected
+
+                        if not flag_valid_CB : 
+                            l_l_len[ 5 ].append( int_molecule_size ) # 'aligned_to_genome__R1__no_valid_CB', # 5
+                        else : # if valid CB was detected
+                            if int_length_cb is None : # infer 'int_length_cb'
+                                int_length_cb = len( dict_tags[ name_tag_cb ] )
+                            l_l_len[ 6 ].append( int_molecule_size ) # 'aligned_to_genome__R1__valid_CB', # 6
+                            if name_tag_internal_polyA in dict_tags and dict_tags[ name_tag_internal_polyA ] > 0 : # when internal poly(A) tract has been detected (length > 0)
+                                l_l_len[ 7 ].append( int_molecule_size ) # 'aligned_to_genome__R1__valid_CB__internal_polyA', # 7
+                            else :
+                                l_l_len[ 8 ].append( int_molecule_size ) # 'aligned_to_genome__R1__valid_CB__no_internal_polyA', # 8
+                            l_l_len[ min( 10 + math.floor( math.log2( int_num_duplicated_umis ) ), 20 ) ].append( int_molecule_size ) # 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__1', # 10 ~ # 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__above1024', # 20
+                            # collect max molecule size for each unique cb-umi pair
+                            if seq_cb_umi in dict_cb_umi_to_max_length : # if cb-umi pair already exist
+                                if int_molecule_size > dict_cb_umi_to_max_length[ seq_cb_umi ] : # check whether 'int_molecule_size' is larger than the record max molecule size
+                                    dict_cb_umi_to_max_length[ seq_cb_umi ] = int_molecule_size # and update the max molecule size if needed
+                            else :
+                                dict_cb_umi_to_max_length[ seq_cb_umi ] = int_molecule_size # cb-umi pair does not exist, add the current molecule size
+
+                ''' classify read and collect molecule size (after deduplication, bulk-level) '''
+                l_l_len[ 9 ].extend( list( dict_cb_umi_to_max_length.values( ) ) ) # 'aligned_to_genome__R1__valid_CB__UMI_deduplicated', # 9
+
+                ''' classify read and collect molecule size (after deduplication, single-cell level)  '''
+                for cb_umi in dict_cb_umi_to_max_length : # for each cb-umi pair
+                    int_molecule_size = dict_cb_umi_to_max_length[ cb_umi ] # retrieve the molecule size
+                    cb = cb_umi[ : int_length_cb ] # retrieve cell barcode
+                    if cb not in dict_arr_len_single_cell_level : # if the list for the current cell barcode does not exist, initialize the list
+                        dict_arr_len_single_cell_level[ cb ] = [ ]
+                    dict_arr_len_single_cell_level[ cb ].append( math.floor( int_molecule_size / int_size_bin_in_base_pairs_for_collecting_size_distributions_at_single_cell_level ) ) # record molecule size at single-cell level
+
+                dict_arr_len = dict( (n, l) for n, l in zip( l_name_type_dist, l_l_len ) if len( l ) > 0 ) # compose 'dict_arr_len' # include the list only when list is not empty
+                
+                ''' update distributions '''
+                ns[ 'dict_arr_dist_single_cell_level' ] = _batch_update_dictionary_of_size_distributions( dict_arr_dist = ns[ 'dict_arr_dist_single_cell_level' ], dict_l_len = dict_arr_len_single_cell_level ) # update single-cell distributions
+                ns[ 'dict_arr_dist' ] = _batch_update_dictionary_of_size_distributions( dict_arr_dist = ns[ 'dict_arr_dist' ], dict_l_len = dict_arr_len ) # update bulk-level distributions
+                ns[ 'int_total_num_records_processed' ] += len( l_dict_tags ) # update 'int_total_num_records_processed'
+
+            p_out.send( ns ) # set the output
+        p_out.send( 'completed' ) # indicate the work has been completed
+
+    ''' initialize a data structure that will be analyzed in bulk level '''
+    ns = { 'int_num_read_currently_processed' : 0 }  # define a namespace for combining results
+    ns[ 'dict_arr_dist' ] = _initialize_dict_arr_dist( ) # initialize 'dict_arr_dist' (bulk level, as all reads samples belong to the current BAM file are analyzed.)
+    ns[ 'dict_arr_dist_single_cell_level' ] = dict( ) # initialize 'dict_arr_dist_single_cell_level', a summarized (binned) size distribution
+    name_type_dist_to_collect_single_cell_level = 'aligned_to_genome__R1__valid_CB__UMI_deduplicated' # the name of the type of the distribution to collect at the single-cell level
+    def post_process_batch(res):
+        # update data using the received result
+        ns["int_num_read_currently_processed"] += res[ 'int_total_num_records_processed' ]
+        logger.info( f"[{path_file_bam_input}] analysis of '{res[ 'name_chr' ]}' completed,  total {ns[ 'int_num_read_currently_processed' ]} number of reads has been processed." ) # report
+
+        # combine distributions (bulk)
+        ns[ 'dict_arr_dist' ] = _combine_dictionary_of_size_distributions( dict_arr_dist_existing = ns[ 'dict_arr_dist' ], dict_arr_dist_new = res[ 'dict_arr_dist' ] ) # combine and update the global distributions (bulk-level)
+        # combine distributions (single-cell)
+        ns[ 'dict_arr_dist_single_cell_level' ] = _combine_dictionary_of_size_distributions( dict_arr_dist_existing = ns[ 'dict_arr_dist_single_cell_level' ], dict_arr_dist_new = res[ 'dict_arr_dist_single_cell_level' ] ) # update the container
+
+        logger.info( f"[{path_file_bam_input}] analysis of '{res[ 'name_chr' ]}' completed, total {np.sum(ns[ 'dict_arr_dist' ][ 'aligned_to_genome' ])} number of reads has been processed. (a re-calculated result using 'dict_arr_dist')" ) # report
+
+
+    bk.Multiprocessing_Batch_Generator_and_Workers(
+        gen_batch = iter( SAM.Get_contig_names_from_bam_header( path_file_bam_input ) ), # analyze the pre-processed BAM file for each chromosome
+        process_batch=process_batch,
+        post_process_batch=post_process_batch,
+        int_num_threads=n_threads
+        + 2,  # one thread for generating batch, another thread for post-processing of the batch
+        flag_wait_for_a_response_from_worker_after_sending_termination_signal = True, # wait until all worker exists before resuming works in the main process
+    )
+    
+    """ 
+    post-processing
+    """
+    def post_processing( ):  # a single-core work
+        logger.info(
+            f"[{path_file_bam_input}] post-processing started"
+        )
+
+        ''' summarize distributions '''
+        dict_arr_dist = ns[ 'dict_arr_dist' ] # retrieve 'dict_arr_dist'
+        l_l = [ ]
+        for e in dict_arr_dist :
+            arr = dict_arr_dist[ e ]
+            if arr is None :
+                continue
+            arr_bins = np.arange( len( arr ) ) # retrieve bin size of the histograms
+            int_num_reads, int_num_base_pairs = arr.sum( ), ( arr * arr_bins ).sum( )
+            int_avg_length_base_pairs = int_num_base_pairs / int_num_reads
+            float_standard_deviation_length_base_pairs = np.sqrt( np.average((arr_bins - int_avg_length_base_pairs)**2, weights=arr) )
+            l_l.append( [ e, int_num_reads, int_num_base_pairs, int_avg_length_base_pairs, float_standard_deviation_length_base_pairs ] )
+        df_summary_of_distributions = pd.DataFrame( l_l, columns = [ 'name_type_distribution', 'int_num_reads', 'int_num_base_pairs', 'int_avg_length_base_pairs', 'float_standard_deviation_length_base_pairs' ] )
+        df_summary_of_distributions.to_csv( f"{path_folder_output}df_summary_of_distributions.tsv.gz", sep = '\t', index = False ) # export 'df_summary_of_distributions'
+
+        """
+        Draw plots of distributions
+        """
+        # create output folders
+        path_folder_graph_noninteractive, path_folder_graph_interactive = f"{path_folder_graph}noninteractive_graph/", f"{path_folder_graph}interactive_graph/"
+        for path_folder in [ path_folder_graph_noninteractive, path_folder_graph_interactive ] :
+            os.makedirs( path_folder, exist_ok = True )
+
+        ''' draw simple line plots '''
+        # plot settings
+        int_max_molecule_size_plot = 6500
+        for name_cat_dist in _initialize_dict_arr_dist( ) : # for each category
+            if dict_arr_dist[ name_cat_dist ] is not None :
+                len_max_molecule_size_data = len( dict_arr_dist[ name_cat_dist ] ) # retrieve max molecule size 
+                plt.plot( np.arange( min( int_max_molecule_size_plot, len_max_molecule_size_data ) ), dict_arr_dist[ name_cat_dist ] if len_max_molecule_size_data <= int_max_molecule_size_plot else dict_arr_dist[ name_cat_dist ][ : int_max_molecule_size_plot ] )
+                plt.title( f"{name_cat_dist} ({dict_arr_dist[ name_cat_dist ].sum( )} molecules)" )
+                bk.MPL_SAVE( f"{name_cat_dist}.distribution", folder = path_folder_graph_noninteractive, l_format=['.pdf', '.png'] )
+
+        ''' draw interactive stacked bar graphs '''
+        df_bar = _get_df_bar( dict_arr_dist, int_size_bin_in_base_pairs = 50, int_max_size_in_base_pairs = int_max_molecule_size_plot ) # retrieve a dataframe for drawing a bar graph
+        for flag_use_proportion in [ True, False ] :
+            _draw_bar_plot( 
+                df_bar, 
+                [ 'aligned_to_genome__R1__TSO', 'aligned_to_genome__no_R1__TSO',  'aligned_to_genome__R1__no_TSO', 'aligned_to_genome__no_R1__no_TSO', ],
+                title = f"R1 and TSO Adaptor Identification of '{name_file_bam}'",
+                flag_use_proportion = flag_use_proportion,
+                flag_save_figure = True, path_folder_graph = path_folder_graph_interactive,
+            )
+            _draw_bar_plot( 
+                df_bar, 
+                [ 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__1', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__2to3', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__4to7', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__8to15', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__16to31', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__32to63', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__64to127', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__128to255', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__256to511', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__512to1023', 'aligned_to_genome__R1__valid_CB__UMI_duplication_rate__above1024' ],
+                title = f"UMI Duplication Counts of '{name_file_bam}'",
+                flag_use_proportion = flag_use_proportion,
+                flag_save_figure = True, path_folder_graph = path_folder_graph_interactive,
+            )
+            _draw_bar_plot( 
+                df_bar, 
+                ['aligned_to_genome__R1__valid_CB__no_internal_polyA', 'aligned_to_genome__R1__valid_CB__internal_polyA', 'aligned_to_genome__R1__no_valid_CB', 'aligned_to_genome__no_R1__TSO', 'aligned_to_genome__no_R1__no_TSO'],
+                title = f"Internal poly(A) Detection of '{name_file_bam}'",
+                flag_use_proportion = flag_use_proportion,
+                flag_save_figure = True, path_folder_graph = path_folder_graph_interactive,
+            )
+
+        ''' export pickle files '''
+        # write distribution data as pickle files
+        bk.PICKLE_Write( f"{path_folder_output}dict_arr_dist.pkl", dict_arr_dist )
+        bk.PICKLE_Write( f"{path_folder_output}dict_arr_dist_single_cell_level.pkl", ns[ 'dict_arr_dist_single_cell_level' ] )
+
+        # write a flag indicating that the processing has been completed
+        with open( f"{path_folder_output}pipeline_completed.txt", 'w' ) as newfile :
+            newfile.write( 'completed' )
+
+        # delete temporary files
+        shutil.rmtree( path_folder_temp, ignore_errors = True )
+
+        logger.info(
+            f"[{path_file_bam_input}] post-processing completed"
+        )
+    post_processing( ) # perform post-processing
+    
+    logger.info(f"Completed.")
+    return 
+
 def LongSurvey5pSiteFromBAM(
     flag_usage_from_command_line_interface: bool = False,
     l_path_folder_input: Union[list, None] = None, # path to the output folders of the 'ourotools.LongExtractBarcodeFromBAM' module
@@ -4690,7 +5212,7 @@ def LongSurvey5pSiteFromBAM(
     name_tag_ia : str = 'IA',
     flag_include_internal_polyA_primed_reads : bool = False,
 ) -> None :
-    """# 2023-12-19 23:17:54 
+    """# 2024-01-03 22:30:02 
     Ouro-Tools LongSurvey5pSiteFromBAM, a pipeline for surveying 5' sites of a BAM file containing strand-specific long-read RNA-sequencing data that were prepared from reverse-transcription reaction using MMLV-like RT enzymes.
 
     l_path_folder_input: Union[list, None] = None, # path to the output folders of the 'ourotools.LongExtractBarcodeFromBAM' module
@@ -4706,7 +5228,7 @@ def LongSurvey5pSiteFromBAM(
     name_tag_ia : str = 'IA' # name of the SAM tag containing the length of internal polyA tract. 
     flag_include_internal_polyA_primed_reads : bool = False, # if True, internal polyA primed reads will be included in the analysis
 
-    returns
+    * Of note, only reads with corrected CB/UMI sequences (which can be de-duplicated and used for counting) will be included in the analysis.
     """
     """
     Parse arguments
@@ -12141,6 +12663,9 @@ def StrandSpecificBAM(
         p.recv( ) # receive a signal indicating the worker has dismissed itself
     # pipeline completed
     return
+
+# aliases
+Workers = bk.Workers
     
 if __name__ == "__main__":
     ourotools()  # run ouro at the top-level environment
