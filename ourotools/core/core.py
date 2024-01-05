@@ -87,7 +87,7 @@ logger = logging.getLogger("ouro-tools")
 # define version
 _version_ = "0.1.1"
 _ourotools_version_ = _version_
-_last_modified_time_ = "2024-01-03 12:27:57"
+_last_modified_time_ = "2024-01-05 13:55:08"
 
 str_release_note = [
     """
@@ -3283,6 +3283,7 @@ def LongExtractBarcodeFromBAM(
     verbose: bool = True,
 ) -> None :
     """# 2023-10-03 23:35:54 
+    Of note, the output size distribution uses 1-based coordinates.
     
     flag_usage_from_command_line_interface: bool = False, # a flag indicating the usage in the command line
     l_path_file_bam_input: Union[list, None] = None, # list of input BAM files
@@ -4859,6 +4860,13 @@ def LongSummarizeSizeDistributions(
         "path_file_bam_input" : path_file_bam_input,
         "path_folder_output" : path_folder_output,
         "n_threads" : n_threads,
+        "name_file_bam" : name_file_bam,
+        "name_tag_cb" : name_tag_cb,
+        "name_tag_umi" : name_tag_umi,
+        "name_tag_length" : name_tag_length,
+        "name_tag_r1_num_errors" : name_tag_r1_num_errors,
+        "name_tag_tso_num_errors" : name_tag_tso_num_errors,
+        "name_tag_internal_polyA" : name_tag_internal_polyA,
         "int_size_bin_in_base_pairs_for_collecting_size_distributions_at_single_cell_level" : int_size_bin_in_base_pairs_for_collecting_size_distributions_at_single_cell_level,
         # internal
         "path_folder_graph": path_folder_graph,
@@ -6906,39 +6914,69 @@ def LongCreateReferenceSizeDistribution(
     l_path_file_distributions: Union[List[str], None] = None, # list of path to the 'dict_arr_dist.pkl' output file of the 'LongExtractBarcodeFromBAM' pipeline for each sample
     l_name_file_distributions : Union[ None, List[ str ] ] = None, # list of the name representing each 'dict_arr_dist.pkl' output file. Should be unique and non-redundant. if None is given, the absolute, real (soft-link resolved) path of the pickle file will be be used as the name representing the file
     path_folder_output: Union[ str, None ] = None, # path to the output folder of the 'LongCreateReferenceSizeDistribution' pipeline
-    # smoothening process
-    float_sigma_gaussian_filter : float = 8.0, # the standard deviation of the Gaussian filter that will be applied to the base-pair resolution distribution data (histogram with a bin size of 1bp)
     # peak removal
     int_min_total_read_count_for_a_peak : int = 50, # the minimum number of reads in a peak to be considered as a valid peak
     float_min_ratio_read_count_peak_to_baseline : float = 0.05, # the minimum ratio of the number of reads in the peak to the number of reads included in the baseline
     float_min_ratio_peak_height_to_baseline_height : float = 0.5, # the minimum ratio of the peak height to the height of the baseline
     int_size_window_surveying_surrounding_values : int = 4, # the size of the window for estimation of the height of the peak base (since the peak is identified at 50% of its height)
-    int_num_iterative_peak_removal : int = 3, # the number of iterative peak removal process for each distribution
+    int_num_iterative_peak_removal : int = 5, # the number of iterative peak removal process for each distribution
+    # smoothening process using the incremental Gaussian smoothening algorithm
+    float_max_ratio_to_arr_dist_guassian_filter_min_sigma_for_dynamic_gaussian_filter_selection : float = 1.25, # the maximum ratio to the 'baseline' (values to which the Guassian filter with the minimum sigma value was applied) for constraining the sigma value during the dynamic selection process.
+    float_sigma_gaussian_filter_min : float = 4, # the minimum sigma value to generate during the incremental Gaussian smoothening process 
+    float_sigma_gaussian_filter_max : float = 32, # the maximum sigma value to generate during the incremental Gaussian smoothening process
+    int_num_guassian_filters : int = 25, # number of sigma values (standard deviation of the Gaussian filter) to generate for the incremental Gaussian smoothening algorithm
+    flag_use_logspace_to_generate_sigma_values : bool = False, # a flag indicating whether to generate sigma values using log-space or linear-space (if True, use log-space)
+    float_sigma_gaussian_filter_for_final_cleanup : float = 3, # a sigma value for the Guassian filter for the final smoothening process
     # correction ratio calculation & confidence estimation
     float_max_correction_ratio : float = 10.0, # the maximum correction ratio allowed for estimating the confident molecule size ranges for count matrix normalization, where the correction ratio used for adjusting the distribution of the sample to that of the reference distribution is always below the given threshold, 'float_max_correction_ratio'
     t_distribution_range_of_interest : List[ int ] = [ 1000, 3500 ], # define a range of distribution of interest for searching optimal coefficient for calculating normalization ratios
     # generic    
     float_memory_in_GiB: float = 50,
     verbose: bool = True,
+    # visualization
+    int_max_molecule_size_for_visualization : int = 5_000, # the maximum molecule size for visualization (does not affect the analysis)
+    # arguments not available in command lines
+    dict_kw_find_peaks : Union[ None, dict ] = {
+        'rel_height' : 0.5, 
+        'width' : ( 0.5, 35 ), 
+        'prominence' : 1, 
+    }
 ) -> None :
-    """# 2023-08-23 21:27:06 
+    """# 2024-01-05 16:03:03 
+    Applies the incremental Gaussian smoothening algorithm for smoothening the peak-removed size distributions of for each sample.
+    Of note, size distributions uses 1-based coordinates.
+    
+    
     l_path_file_distributions: Union[List[str], None] = None, # list of path to the 'dict_arr_dist.pkl' output file of the 'LongExtractBarcodeFromBAM' pipeline for each sample
     l_name_file_distributions : Union[ None, List[ str ] ] = None, # list of the name representing each 'dict_arr_dist.pkl' output file. Should be unique and non-redundant. if None is given, the absolute, real (soft-link resolved) path of the pickle file will be be used as the name representing the file
     path_folder_output: Union[ str, None ] = None, # path to the output folder of the 'LongCreateReferenceSizeDistribution' pipeline
-    # smoothening process
-    float_sigma_gaussian_filter : float = 8.0, # the standard deviation of the Gaussian filter that will be applied to the base-pair resolution distribution data (histogram with a bin size of 1bp)
     # peak removal
     int_min_total_read_count_for_a_peak : int = 50, # the minimum number of reads in a peak to be considered as a valid peak
     float_min_ratio_read_count_peak_to_baseline : float = 0.05, # the minimum ratio of the number of reads in the peak to the number of reads included in the baseline
     float_min_ratio_peak_height_to_baseline_height : float = 0.5, # the minimum ratio of the peak height to the height of the baseline
     int_size_window_surveying_surrounding_values : int = 4, # the size of the window for estimation of the height of the peak base (since the peak is identified at 50% of its height)
-    int_num_iterative_peak_removal : int = 3, # the number of iterative peak removal process for each distribution
+    int_num_iterative_peak_removal : int = 5, # the number of iterative peak removal process for each distribution
+    # smoothening process using the incremental Gaussian smoothening algorithm
+    float_max_ratio_to_arr_dist_guassian_filter_min_sigma_for_dynamic_gaussian_filter_selection : float = 1.25, # the maximum ratio to the 'baseline' (values to which the Guassian filter with the minimum sigma value was applied) for constraining the sigma value during the dynamic selection process.
+    float_sigma_gaussian_filter_min : float = 4, # the minimum sigma value to generate during the incremental Gaussian smoothening process 
+    float_sigma_gaussian_filter_max : float = 32, # the maximum sigma value to generate during the incremental Gaussian smoothening process
+    int_num_guassian_filters : int = 25, # number of sigma values (standard deviation of the Gaussian filter) to generate for the incremental Gaussian smoothening algorithm
+    flag_use_logspace_to_generate_sigma_values : bool = False, # a flag indicating whether to generate sigma values using log-space or linear-space (if True, use log-space)
+    float_sigma_gaussian_filter_for_final_cleanup : float = 3, # a sigma value for the Guassian filter for the final smoothening process
     # correction ratio calculation & confidence estimation
     float_max_correction_ratio : float = 10.0, # the maximum correction ratio allowed for estimating the confident molecule size ranges for count matrix normalization, where the correction ratio used for adjusting the distribution of the sample to that of the reference distribution is always below the given threshold, 'float_max_correction_ratio'
     t_distribution_range_of_interest : List[ int ] = [ 1000, 3500 ], # define a range of distribution of interest for searching optimal coefficient for calculating normalization ratios
     # generic    
     float_memory_in_GiB: float = 50,
     verbose: bool = True,
+    # visualization
+    int_max_molecule_size_for_visualization : int = 5_000, # the maximum molecule size for visualization (does not affect the analysis)
+    # arguments not available in command lines
+    dict_kw_find_peaks = {
+        'rel_height' : 0.5, 
+        'width' : ( 0.5, 35 ), 
+        'prominence' : 1, 
+    }
     
     returns
     """
@@ -6988,12 +7026,46 @@ def LongCreateReferenceSizeDistribution(
             action="store_true"
         )
         
-        arg_grp_gaussian_filter = parser.add_argument_group("Gaussian Filter")
+        arg_grp_gaussian_filter = parser.add_argument_group("Incremental Gaussian Smoothening Algorithm")
+        arg_grp_gaussian_filter.add_argument(
+            "-c", # constraint for sigma values
+            "--float_max_ratio_to_arr_dist_guassian_filter_min_sigma_for_dynamic_gaussian_filter_selection",
+            help="(default: 1.25) the maximum ratio to the 'baseline' (values to which the Guassian filter with the minimum sigma value was applied) for constraining the sigma value during the dynamic selection process.",
+            default=1.25,
+            type=float,
+        )
         arg_grp_gaussian_filter.add_argument(
             "-S",
-            "--float_sigma_gaussian_filter",
-            help="(default: 8.0) the standard deviation of the Gaussian filter that will be applied to the base-pair resolution distribution data (histogram with a bin size of 1bp).",
-            default=8.0,
+            "--float_sigma_gaussian_filter_min",
+            help="(default: 4) the minimum sigma value to generate during the incremental Gaussian smoothening process ",
+            default=4,
+            type=float,
+        )
+        arg_grp_gaussian_filter.add_argument(
+            "-L",
+            "--float_sigma_gaussian_filter_max",
+            help="(default: 32) the maximum sigma value to generate during the incremental Gaussian smoothening process",
+            default=32,
+            type=float,
+        )
+        arg_grp_gaussian_filter.add_argument(
+            "-N",
+            "--int_num_guassian_filters",
+            help="(default: 25) the number of sigma values (standard deviation of the Gaussian filter) to generate for the incremental Gaussian smoothening algorithm.",
+            default=25,
+            type=int,
+        )
+        arg_grp_gaussian_filter.add_argument(
+            "-G", 
+            "--flag_use_logspace_to_generate_sigma_values", 
+            help="a flag indicating whether to generate sigma values using log-space or linear-space (if True, use log-space)", 
+            action="store_true"
+        )
+        arg_grp_gaussian_filter.add_argument(
+            "-F",
+            "--float_sigma_gaussian_filter_for_final_cleanup",
+            help="(default: 3) a sigma value for the Guassian filter for the final smoothening process",
+            default=3,
             type=float,
         )
         
@@ -7029,25 +7101,18 @@ def LongCreateReferenceSizeDistribution(
         arg_grp_peak_removal.add_argument(
             "-I",
             "--int_num_iterative_peak_removal",
-            help="(default: 3) the number of iterative peak removal process for each distribution.",
-            default=3,
+            help="(default: 5) the number of iterative peak removal process for each distribution.",
+            default=5,
             type=int,
         )
 
-        arg_grp_correction = parser.add_argument_group("Distribution Correction") # correction ratio calculation & confidence estimation
-        arg_grp_correction.add_argument(
-            "-C",
-            "--float_max_correction_ratio",
-            help="(default: 10.0) the maximum correction ratio allowed for estimating the confident molecule size ranges for count matrix normalization, where the correction ratio used for adjusting the distribution of the sample to that of the reference distribution is always below the given threshold, 'float_max_correction_ratio'.",
-            default=10.0,
-            type=float,
-        )
-        arg_grp_correction.add_argument(
-            "-t",
-            "--t_distribution_range_of_interest",
-            help="(default: [ 1000, 3500 ]) define a range of distribution of interest for searching optimal coefficient for calculating normalization ratios.",
-            default=[ 1000, 3500 ],
-            nargs="*",
+        arg_grp_vis = parser.add_argument_group("Visualization") # correction ratio calculation & confidence estimation
+        arg_grp_vis.add_argument(
+            "-V",
+            "--int_max_molecule_size_for_visualization",
+            help="(default: 5,000) the maximum molecule size for visualization (does not affect the analysis).",
+            default=5_000,
+            type=int,
         )
 
         args = parser.parse_args()
@@ -7065,6 +7130,13 @@ def LongCreateReferenceSizeDistribution(
         int_num_iterative_peak_removal = args.int_num_iterative_peak_removal
         float_max_correction_ratio = args.float_max_correction_ratio
         t_distribution_range_of_interest = args.t_distribution_range_of_interest
+        float_max_ratio_to_arr_dist_guassian_filter_min_sigma_for_dynamic_gaussian_filter_selection = args.float_max_ratio_to_arr_dist_guassian_filter_min_sigma_for_dynamic_gaussian_filter_selection
+        float_sigma_gaussian_filter_min = args.float_sigma_gaussian_filter_min
+        float_sigma_gaussian_filter_max = args.float_sigma_gaussian_filter_max
+        int_num_guassian_filters = args.int_num_guassian_filters
+        flag_use_logspace_to_generate_sigma_values = args.flag_use_logspace_to_generate_sigma_values
+        float_sigma_gaussian_filter_for_final_cleanup = args.float_sigma_gaussian_filter_for_final_cleanup
+        int_max_molecule_size_for_visualization = args.int_max_molecule_size_for_visualization
     
     """
     Start of the pipeline
@@ -7107,6 +7179,69 @@ def LongCreateReferenceSizeDistribution(
     if len(l_path_file_distributions) == 0:
         logger.info(f"no output folders were given, exiting")
         return
+    
+    ''' define directories '''
+    path_folder_graph = f"{path_folder_output}graph/"
+    path_folder_graph_noninteractive, path_folder_graph_interactive = f"{path_folder_graph}noninteractive_graph/", f"{path_folder_graph}interactive_graph/"
+
+    # create the output folders
+    for path_folder in [ 
+        path_folder_output, 
+        path_folder_graph,
+        path_folder_graph_noninteractive, 
+        path_folder_graph_interactive,
+    ] :
+        os.makedirs( path_folder, exist_ok = True )
+    
+    """
+    internal setting
+    """
+    name_type_dist_for_creating_reference = 'aligned_to_genome__R1__valid_CB__UMI_deduplicated' # define name of the type of the distribution for creating the reference
+    if dict_kw_find_peaks is None : # use default 'dict_kw_find_peaks'
+        dict_kw_find_peaks = {
+            'rel_height' : 0.5, 
+            'width' : ( 0.5, 35 ), 
+            'prominence' : 1, 
+        }
+    
+    """ Report program arguments """
+    # record arguments used for the program (metadata)
+    dict_program_setting = {
+        "version": _version_,  # record version
+        # external
+        "flag_usage_from_command_line_interface" : flag_usage_from_command_line_interface,
+        'l_path_file_distributions' : l_path_file_distributions,
+        'l_name_file_distributions' : l_name_file_distributions,
+        'path_folder_output' : path_folder_output,
+        'float_max_ratio_to_arr_dist_guassian_filter_min_sigma_for_dynamic_gaussian_filter_selection' : float_max_ratio_to_arr_dist_guassian_filter_min_sigma_for_dynamic_gaussian_filter_selection,
+        'float_sigma_gaussian_filter_min' : float_sigma_gaussian_filter_min,
+        'float_sigma_gaussian_filter_max' : float_sigma_gaussian_filter_max,
+        'int_num_guassian_filters' : int_num_guassian_filters,
+        'flag_use_logspace_to_generate_sigma_values' : flag_use_logspace_to_generate_sigma_values,
+        'float_sigma_gaussian_filter_for_final_cleanup' : float_sigma_gaussian_filter_for_final_cleanup,
+        'int_min_total_read_count_for_a_peak' : int_min_total_read_count_for_a_peak,
+        'float_min_ratio_read_count_peak_to_baseline' : float_min_ratio_read_count_peak_to_baseline,
+        'float_min_ratio_peak_height_to_baseline_height' : float_min_ratio_peak_height_to_baseline_height,
+        'int_size_window_surveying_surrounding_values' : int_size_window_surveying_surrounding_values,
+        'int_num_iterative_peak_removal' : int_num_iterative_peak_removal,
+        'float_max_correction_ratio' : float_max_correction_ratio,
+        't_distribution_range_of_interest' : t_distribution_range_of_interest,
+        'int_max_molecule_size_for_visualization' : int_max_molecule_size_for_visualization,
+        'float_memory_in_GiB' : float_memory_in_GiB,
+        'verbose' : verbose,
+        'name_type_dist_for_creating_reference' : name_type_dist_for_creating_reference,
+        'dict_kw_find_peaks' : dict_kw_find_peaks,
+        # internal
+        "path_folder_graph": path_folder_graph,
+    }
+    logger.info(
+        f"[Setting] program will be run with the following setting for the output folder {path_folder_output} : {str( dict_program_setting )}"
+    )
+
+    """ export program setting """
+    path_file_json_setting_program = f"{path_folder_output}program_setting.json"
+    with open(path_file_json_setting_program, "w") as newfile:
+        json.dump(dict_program_setting, newfile)
         
     """
     Pipeline specific functions
@@ -7115,30 +7250,13 @@ def LongCreateReferenceSizeDistribution(
     """
     run pipeline
     """
-    
-    """
-    internal setting
-    """
     from scipy.ndimage import gaussian_filter
     from scipy.signal import find_peaks
     from scipy import optimize
     import plotly.express as px
+    import plotly.graph_objects as go
     
     logger.setLevel( logging.INFO ) # reset logging info after importing
-
-    name_type_dist_for_creating_reference = 'aligned_to_genome__R1__valid_CB__UMI_deduplicated' # define name of the type of the distribution for creating the reference
-    dict_kw_gaussian_filter = {
-        'sigma' : float_sigma_gaussian_filter, 
-        'output' : float, 
-        'mode' : 'nearest', 
-        'truncate' : 4
-    }
-    dict_kw_find_peaks = {
-        'rel_height' : 0.5, 
-        'width' : ( 0.5, 15 ), 
-        'prominence' : 1, 
-        'threshold' : 1
-    }
 
     ''' read distributions '''
     logger.info(f"reading distributions")
@@ -7219,7 +7337,66 @@ def LongCreateReferenceSizeDistribution(
 
     ''' smoothen the distributions '''
     logger.info(f"smoothening the distributions")
-    l_arr_dist_smoothened = list( gaussian_filter( arr, ** dict_kw_gaussian_filter ) for arr in l_arr_dist_peak_removed ) # smoothen the distributions
+    def _smoothen_distributions( 
+        arr_dist,
+        float_max_ratio_to_arr_dist_guassian_filter_min_sigma_for_dynamic_gaussian_filter_selection : float = 1.25,
+        float_sigma_gaussian_filter_min : float = 4,
+        float_sigma_gaussian_filter_max : float = 32,
+        int_num_guassian_filters : int = 25,
+        flag_use_logspace_to_generate_sigma_values : bool = False,
+        float_sigma_gaussian_filter_for_final_cleanup : float = 3,
+        dict_kw_gaussian_filter : dict = {
+            'output' : float, 
+            'mode' : 'nearest', 
+            'truncate' : 4
+        }
+    ) :
+        """
+        smoothen an input size distribution by applying an incremental Guassian smoothening algorithm
+        # 2024-01-05 00:33:15 
+        """
+        
+        ''' generate sigma values '''
+        l_float_sigma_gaussian_filter = np.logspace( math.log( float_sigma_gaussian_filter_min, 2 ), math.log( float_sigma_gaussian_filter_max, 2 ), base = 2, num = int_num_guassian_filters ) if flag_use_logspace_to_generate_sigma_values else np.linspace( float_sigma_gaussian_filter_min, float_sigma_gaussian_filter_max, num = int_num_guassian_filters ) # generate sigma values
+        
+        ''' apply Guassian filters with multiple sigma values '''
+        int_len_dist = len( arr_dist ) # retrieve the length of the distribution
+        arr_dist_multiple_filters = np.zeros( ( int_num_guassian_filters, int_len_dist ), dtype = float ) # initialize 'arr_dist_multiple_filters', an array that will contain smoothened distributions of various sigma values
+        for idx_filter, float_sigma_gaussian_filter in enumerate( l_float_sigma_gaussian_filter ) :
+            arr_dist_multiple_filters[ idx_filter ] = gaussian_filter( arr_dist, sigma =  float_sigma_gaussian_filter, ** dict_kw_gaussian_filter )
+
+        """
+        Incremental Gaussian Smoothening 
+        """
+        ''' select the most appropriate filter based on the absolute ratio to the 'baseline' (values to which the Gaussian filter with the smallest sigma value was applied) '''
+        arr_ratio = ( arr_dist_multiple_filters / arr_dist_multiple_filters[ 0 ] ).T # transpose so that iteration yield array of individual base positions # calculate the ratio to the values to which the gaussian filter with the smallest sigma value was applied
+        arr_flag_valid = ~ ( np.isnan( arr_ratio ) | np.isinf( arr_ratio ) )
+        arr_flag_appropriate = ( arr_ratio <= float_max_ratio_to_arr_dist_guassian_filter_min_sigma_for_dynamic_gaussian_filter_selection ) & ( arr_ratio >= ( 1 / float_max_ratio_to_arr_dist_guassian_filter_min_sigma_for_dynamic_gaussian_filter_selection ) )
+        arr_idx_filter = np.zeros( int_len_dist, dtype = int ) # initialize 'arr_idx_filter' for storing the selected filter indices
+        for idx_pos in range( int_len_dist ) : 
+            idx_filter_selected = 0 # initialize 'idx_filter_selected' with a default value (0, indicating Guassian filter with the smallest sigma value)
+            for idx_filter in range( int_num_guassian_filters - 1, 0, -1 ) : # prioritize larger sigma values
+                if arr_flag_valid[ idx_pos, idx_filter ] and arr_flag_appropriate[ idx_pos, idx_filter ] : # if appropriate, select the filter
+                    idx_filter_selected = idx_filter
+                    break
+            arr_idx_filter[ idx_pos ] = idx_filter_selected # save the index of the selected filter
+        arr_dist_smoothened = arr_dist_multiple_filters[ arr_idx_filter, np.arange( int_len_dist ) ] # retrieve smoothened distributions 
+        
+        # apply the final smoothening process
+        arr_dist_smoothened = gaussian_filter( arr_dist_smoothened, sigma = float_sigma_gaussian_filter_for_final_cleanup, ** dict_kw_gaussian_filter )
+        return arr_dist_smoothened
+    
+    l_arr_dist_smoothened = list( 
+        _smoothen_distributions( 
+            arr, 
+            float_max_ratio_to_arr_dist_guassian_filter_min_sigma_for_dynamic_gaussian_filter_selection = float_max_ratio_to_arr_dist_guassian_filter_min_sigma_for_dynamic_gaussian_filter_selection, 
+            float_sigma_gaussian_filter_min = float_sigma_gaussian_filter_min, 
+            float_sigma_gaussian_filter_max = float_sigma_gaussian_filter_max, 
+            int_num_guassian_filters = int_num_guassian_filters,
+            flag_use_logspace_to_generate_sigma_values = flag_use_logspace_to_generate_sigma_values,
+            float_sigma_gaussian_filter_for_final_cleanup = float_sigma_gaussian_filter_for_final_cleanup,
+        ) for arr in l_arr_dist_peak_removed
+    ) # smoothen the distributions
 
     ''' calculate the log average of the distributions (reference distribution) '''
     logger.info(f"creating the reference distribution")
@@ -7279,11 +7456,6 @@ def LongCreateReferenceSizeDistribution(
         # print( f"'{n}' x {np.round( float_optimal_coefficient, 2 )},\t{np.round( f( 1 ), 2 )} > {np.round( f( float_optimal_coefficient ), 2 )}" ) # print the optimization results
 
     ''' plot graph (interactive) '''
-    # create output folders
-    path_folder_graph = f"{path_folder_output}graph/"
-    path_folder_graph_noninteractive, path_folder_graph_interactive = f"{path_folder_graph}noninteractive_graph/", f"{path_folder_graph}interactive_graph/"
-    for path_folder in [ path_folder_graph, path_folder_graph_noninteractive, path_folder_graph_interactive ] :
-        os.makedirs( path_folder, exist_ok = True )
     # display correction ratios
     # compose a dataframe for plotting
     l_l = [ ] # initialize the container
@@ -7321,23 +7493,7 @@ def LongCreateReferenceSizeDistribution(
     logger.info(f"exporting output data")
     # compose a namespace
     dict_output = {
-        'setting' : {
-            'flag_usage_from_command_line_interface' : flag_usage_from_command_line_interface,
-            'l_path_file_distributions' : l_path_file_distributions,
-            'l_name_file_distributions' : l_name_file_distributions,
-            'float_sigma_gaussian_filter' : float_sigma_gaussian_filter,
-            'int_min_total_read_count_for_a_peak' : int_min_total_read_count_for_a_peak,
-            'float_min_ratio_read_count_peak_to_baseline' : float_min_ratio_read_count_peak_to_baseline,
-            'float_min_ratio_peak_height_to_baseline_height' : float_min_ratio_peak_height_to_baseline_height,
-            'int_size_window_surveying_surrounding_values' : int_size_window_surveying_surrounding_values,
-            'int_num_iterative_peak_removal' : int_num_iterative_peak_removal,
-            'float_max_correction_ratio' : float_max_correction_ratio,
-            't_distribution_range_of_interest' : t_distribution_range_of_interest,
-            'float_memory_in_GiB' : float_memory_in_GiB,
-            'verbose' : verbose,
-            'name_type_dist_for_creating_reference' : name_type_dist_for_creating_reference,
-            'dict_kw_gaussian_filter' : dict_kw_gaussian_filter,
-        },
+        'setting' : dict_program_setting, # add the current setting
         'l_arr_dist' : l_arr_dist,
         'l_arr_dist_peak_removed' : l_arr_dist_peak_removed,
         'l_arr_dist_smoothened' : l_arr_dist_smoothened,
@@ -7347,6 +7503,57 @@ def LongCreateReferenceSizeDistribution(
         'df_range_confident' : df_range_confident,
     }
     bk.PICKLE_Write( f"{path_folder_output}dict_output.pickle", dict_output )
+    
+    def draw_graph( dict_output, int_max_molecule_size_for_visualization : int = 5_000 ) :
+        """
+        draw graphs using the 'dict_output'
+        # 2024-01-05 15:48:51 
+        """
+        import plotly.graph_objects as go
+        
+        idx_end_dist = int_max_molecule_size_for_visualization + 1 # size distribution uses 1-based coordinate
+        arr_x = np.arange( idx_end_dist ) # retrieve the x axis values
+        def format_array( arr, flag_normalize = False ) :
+            '''
+            format the size distribution array for visualization
+            # 2024-01-05 14:33:04 
+            '''
+            arr = arr[ : idx_end_dist ] # truncated values
+            if len( arr ) < idx_end_dist : # if the array is smaller than the max molecule size for visualization, fill in zero values
+                arr_temp = np.zeros( idx_end_dist )
+                arr_temp[ : len( arr ) ] = arr
+                arr = arr_temp
+            if flag_normalize : # normalize the array
+                arr = arr / arr.max( )
+            return arr # return the formatted array
+
+        # Create Plotly figure
+        fig_smoothened, fig_peak_removed = go.Figure( ), go.Figure( )
+
+        for arr_peak_removed, arr_smoothened, name_file_distributions in zip( dict_output[ 'l_arr_dist_peak_removed' ], dict_output[ 'l_arr_dist_smoothened' ], dict_output[ 'setting' ][ 'l_name_file_distributions' ] ) :
+            # format arrays
+            arr_peak_removed = format_array( arr_peak_removed )
+            arr_smoothened = format_array( arr_smoothened )
+
+            # normalize arrays
+            max_height = arr_smoothened.max( ) # set the max height using the smoothened distribution
+            arr_peak_removed = arr_peak_removed / max_height 
+            arr_smoothened = arr_smoothened / max_height 
+            
+            # add traces # use Scattergl for faster interactions
+            fig_smoothened.add_trace( go.Scattergl( x = arr_x, y = arr_smoothened, mode='lines', name = name_file_distributions ) ) 
+            fig_peak_removed.add_trace( go.Scattergl( x = arr_x, y = arr_peak_removed, mode='lines', name = name_file_distributions ) ) 
+            
+        for fig, name_dist in zip(
+            [ fig_smoothened, fig_peak_removed ],
+            [ 'smoothened', 'peak_removed' ],
+        ) :
+            fig.add_trace( go.Scattergl( x = arr_x, y = format_array( dict_output[ 'arr_dist_combined' ], flag_normalize = True ), mode='lines', name = 'Reference', line = { 'color' : 'black', 'width' : 10 } ) )
+            fig.update_layout( plot_bgcolor='white', title = { 'text' : f'Normalized {name_dist} distributions and the Reference distribution' } )
+            fig.update_xaxes( mirror=True, ticks='outside', showline=True, linecolor='black', gridcolor='#f8f8f8' )
+            fig.update_yaxes( mirror=True, ticks='outside', showline=True, linecolor='black', gridcolor='#f8f8f8' )
+            fig.write_html( f"{path_folder_graph_interactive}normalized_{name_dist}_distributions.with_the_reference.html" ) # save as a figure
+    draw_graph( dict_output, int_max_molecule_size_for_visualization = int_max_molecule_size_for_visualization ) # draw graphs
         
     logger.info(f"Completed.")
     return 
