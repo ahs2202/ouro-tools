@@ -87,7 +87,7 @@ logger = logging.getLogger("ouro-tools")
 # define version
 _version_ = "0.1.1"
 _ourotools_version_ = _version_
-_last_modified_time_ = "2024-01-10 21:35:48"
+_last_modified_time_ = "2024-01-23 13:55:23"
 
 str_release_note = [
     """
@@ -169,6 +169,7 @@ A comprehensive toolkit for quality control and analysis of single-cell long-rea
 
 str_documentation = """
 # 2023-12-31 17:35:02 a first implementation of the core concepts of the ouro-tools completed, including chimeric molecule detection & polyA tailing identification (while exporting versatile, single-cell long-read specific QC metrics), validating 3' and 5' ends of cDNA molecules (using molecular signatures specific to biologically genuine 3' and 5' ends of cDNA), and exporting a size-distribution-normalized isoform count matrix of full-length molecules with validated 3' and 5' ends (TES/TSS matching).
+# 2024-01-23 12:37:19 strand-specific output for SplitBAMs, SplitBAM modules are now supported.
 
 documentation_date = '2023-12-31 17:35:07 '
 """
@@ -12414,13 +12415,20 @@ def SplitBAM(
     arr_ratio_to_ref = None, # an array containing correction ratio, calculated as ratio of the size distribution to the reference distribution.
     t_distribution_range_of_interest : Union[ List[ int ], None ] = None, # define a range of distribution of interest for exporting normalized coverage.
     name_tag_length : str = 'LE', # the total length of genomic regions that are actually covered by the read, excluding spliced introns (the sum of exons).
+    flag_strand_specific : bool = False, # if True, create separate BAM files and coverage BigWig files for + strand and - strand reads.
 ) :
-    """ # 2024-01-07 00:38:15 
+    """ # 2024-01-23 12:10:49 
     A scalable pipeline employing multiprocessing for faster splitting of a barcoded BAM file to multiple BAM files, each containing the list of cell barcodes of the cells belonging to each 'name_cluster' (representing a cell type) or even a single-cell (a separate BAM file for each a single cell-barcode).
-    Capable of splitting BAM file into more then thousand of files.
-    Of note, for 'flag_export_coverages' to work, a sorted BAM file should be given as an input.
+    Features:
+    - use multiple processes to increase the performance
+    - capable of splitting BAM file into more then thousand of files (scalable).
+    - support size-distribution-normalized coverage output
+    - strand-specific BAM/coverage file outputs are available
+    
+    Of note, for 'flag_export_coverages' == True to work, a sorted BAM file should be given as an input.
     Also, for size distribution normalization for coverage calculation to work, every read with a 'CB' (name_tag_cb) tag should also have 'LE' (name_tag_length) tag.
 
+    # -------- General ---------
     path_file_bam_input : str # an input Barcoded BAM file to split
     path_folder_output : str # the output folder where splitted Barcoded BAM files will be exported
     dict_cb_to_name_clus : dict # a dictionary containing corrected cell barcode to 'name_clus' (name of cluster) mapping. if the name is not compatible with Windoe OS path, incompatible characters will be replaced with spaceholder character.
@@ -12433,6 +12441,9 @@ def SplitBAM(
     arr_ratio_to_ref = None, # an array containing correction ratio, calculated as ratio of the size distribution to the reference distribution.
     t_distribution_range_of_interest : Union[ List[ int ], None ] = None, # define a range of distribution of interest for exporting normalized coverage.
     name_tag_length : str = 'LE', # the total length of genomic regions that are actually covered by the read, excluding spliced introns (the sum of exons).
+    
+    # -------- Strand specific BAM ---------
+    flag_strand_specific : bool = False, # if True, create separate BAM files and coverage BigWig files for + strand and - strand reads.
 
     """
     ''' prepare : retrieve file header, preprocess name_clus, and group 'name_clus' values for each worker process. '''
@@ -12447,6 +12458,11 @@ def SplitBAM(
     # create the output folder
     os.makedirs( path_folder_output, exist_ok = True )
     # define functions
+    def _check_binary_flags( flags : int, int_bit_flag_position : int ) :
+        """ # 2023-08-08 22:47:02 
+        check a flag in the binary flags at the given position
+        """
+        return ( flags & ( 1 << int_bit_flag_position ) ) > 0 
     def To_window_path_compatible_str(a_string):
         """
             replace following characters to '_' so that a given string will be compatible for Window file system :
@@ -12488,38 +12504,57 @@ def SplitBAM(
         ''' prepare : create output files '''
         set_name_clus = p_in.recv( ) # retrieve a list of cluster names
         l_path_file_bam = [ ] # collect the paths of output BAM files
-        dict_name_clus_to_newsamfile = dict( ) # mapping between name_clus to the newsamfile
-        dict_name_clus_to_coverage_writer = dict( ) # mapping between name_clus to the coverage writer
+        """
+        structure of l_newsamfile and l_coverage_writer for 'dict_name_clus_to_l_newsamfile' and 'dict_name_clus_to_l_coverage_writer'
+        # if flag_strand_specific == True
+        [ strand == '-' , strand == '+' ]
+        # if flag_strand_specific == False
+        [ strand == '-' | strand == '+' ]
+        """
+        dict_name_clus_to_l_newsamfile = dict( ) # mapping between name_clus to the newsamfile
+        dict_name_clus_to_l_coverage_writer = dict( ) # mapping between name_clus to the coverage writer
         for name_clus in set_name_clus :
-            # initialize the BAM file
-            path_file_bam = f'{path_folder_output}{name_clus}.bam'
-            dict_name_clus_to_newsamfile[ name_clus ] = pysam.AlignmentFile( path_file_bam, 'wb', header = sam_header ) # collect the newsamfile
-            l_path_file_bam.append( path_file_bam ) # collect a path of an output BAM file
+            ''' initialize the paths of output BAM/coverage files '''
+            # initialize the prefixes
+            path_file_bam_prefix = f"{path_folder_output}{name_clus}"
+            path_file_bw_prefix = f"{path_folder_output}{name_clus}{'.size_distribution_normalized' if flag_perform_size_distribution_normalization_for_coverage_calculation else ''}"
+            if flag_strand_specific : # output strand-specific output files
+                l_path_file_bam_for_name_clus = [ f'{path_file_bam_prefix}.minus_strand.bam', f'{path_file_bam_prefix}.plus_strand.bam' ]
+                l_path_file_bw_for_name_clus = [ f'{path_file_bw_prefix}.minus_strand.bw', f'{path_file_bw_prefix}.plus_strand.bw' ]
+            else :
+                l_path_file_bam_for_name_clus = [ f'{path_file_bam_prefix}.bam' ]
+                l_path_file_bw_for_name_clus = [ f"{path_file_bw_prefix}.bw" ]
+            
+            ''' initialize output files '''
+            dict_name_clus_to_l_newsamfile[ name_clus ] = list( pysam.AlignmentFile( path_file_bam, 'wb', header = sam_header ) for path_file_bam in l_path_file_bam_for_name_clus ) # collect the newsamfiles
+            l_path_file_bam.extend( l_path_file_bam_for_name_clus ) # collect paths of output BAM files
             if flag_export_coverages :
-                path_file_bw = f"{path_folder_output}{name_clus}.{'size_distribution_normalized' if flag_perform_size_distribution_normalization_for_coverage_calculation else 'bam'}.bw"
-                dict_name_clus_to_coverage_writer[ name_clus ] = ReadsToCoverage( path_file_bw, sam_header ) # collect the newsamfile
+                dict_name_clus_to_l_coverage_writer[ name_clus ] = list( ReadsToCoverage( path_file_bw, sam_header ) for path_file_bw in l_path_file_bw_for_name_clus ) # collect the newsamfile
 
         ''' work : retrieve records and write the records to output BAM files '''
         while True :
             batch = p_in.recv( ) # receive a record
             if batch is None :
                 break
-            for name_clus, str_r, data in batch : # parse the batch
+            for name_clus, str_r, flag_is_plus_strand, data in batch : # parse the batch
                 r = pysam.AlignedSegment.fromstring( str_r, sam_header ) # compose a pysam record
-                dict_name_clus_to_newsamfile[ name_clus ].write( r ) # write the record to the output BAM file
+                int_idx_output_file = int( flag_is_plus_strand ) if flag_strand_specific else 0 # retrieve index of the output file based on the strand information of the read
+                dict_name_clus_to_l_newsamfile[ name_clus ][ int_idx_output_file ].write( r ) # write the record to the output BAM file
                 if flag_export_coverages : # write the record to the output BigWig file
                     if flag_perform_size_distribution_normalization_for_coverage_calculation :
                         int_total_aligned_length = data # parse data
                         if int_molecule_size_min <= int_total_aligned_length <= int_molecule_size_max : # if the molecule size satisfy the size range of interest
-                            dict_name_clus_to_coverage_writer[ name_clus ].add_read( r, float_weight = arr_ratio_to_ref[ int_total_aligned_length ] ) # update the coverage using a size-distribution-normalizedweight 
+                            dict_name_clus_to_l_coverage_writer[ name_clus ][ int_idx_output_file ].add_read( r, float_weight = arr_ratio_to_ref[ int_total_aligned_length ] ) # update the coverage using a size-distribution-normalizedweight 
                     else :
-                        dict_name_clus_to_coverage_writer[ name_clus ].add_read( r ) # update the coverage using the default weight (1)
+                        dict_name_clus_to_l_coverage_writer[ name_clus ][ int_idx_output_file ].add_read( r ) # update the coverage using the default weight (1)
 
         ''' post-process : close files and index the files '''
-        for name_clus in dict_name_clus_to_newsamfile :
-            dict_name_clus_to_newsamfile[ name_clus ].close( ) # close the output BAM file
-        for name_clus in dict_name_clus_to_coverage_writer :
-            dict_name_clus_to_coverage_writer[ name_clus ].close( ) # close the output BigWig file
+        for name_clus in dict_name_clus_to_l_newsamfile :
+            for newsamfile in dict_name_clus_to_l_newsamfile[ name_clus ] :
+                newsamfile.close( ) # close the output BAM file
+        for name_clus in dict_name_clus_to_l_coverage_writer :
+            for coverage_writer in dict_name_clus_to_l_coverage_writer[ name_clus ] :
+                coverage_writer.close( ) # close the output BigWig file
 
         for path_file_bam in l_path_file_bam :
             pysam.index( path_file_bam ) # index an output bam file
@@ -12566,27 +12601,31 @@ def SplitBAM(
             l_p_to_writers[ idx_process ].send( batch ) # send the batch to the writer
             l_batch[ idx_process ] = [ ] # empty the batch    
 
-    def _write_record( name_clus : str, str_r : str, data ) :
+    def _write_record( name_clus : str, str_r : str, flag_is_plus_strand : bool, data ) :
         """ # 2023-09-07 22:00:38 
         write a record
 
         data # a data associated with the read
         """
         idx_process = dict_name_clus_to_idx_process[ name_clus ] # retrieve index of the process assigned to 'name_clus'
-        l_batch[ idx_process ].append( ( name_clus, str_r, data ) ) # add the record
+        l_batch[ idx_process ].append( ( name_clus, str_r, flag_is_plus_strand, data ) ) # add the record
         if len( l_batch[ idx_process ] ) >= int_max_num_record_in_a_batch : # if the batch is full,
             _flush_batch( idx_process ) # flush the batch 
 
     # read file and write the record
     with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
         for r in samfile.fetch( ) :
+            # retrieve read information
+            flags = r.flag # retrieve flags
             dict_tags = dict( r.get_tags( ) ) # retrieve tags of the read
+            flag_is_plus_strand = not _check_binary_flags( flags, 4 ) # if not reverse complemented, the read will be considered as plus strand
+            # process cell barcode information 
             if name_tag_cb in dict_tags :
                 str_cb = dict_tags[ name_tag_cb ]
                 if str_cb in dict_cb_to_name_clus : 
                     name_clus = dict_cb_to_name_clus[ str_cb ] # retrieve name of the cluster
                     str_r = r.tostring( ) # convert samtools record to a string
-                    _write_record( name_clus, str_r, dict_tags[ name_tag_length ] if flag_perform_size_distribution_normalization_for_coverage_calculation else None ) # write the record
+                    _write_record( name_clus, str_r, flag_is_plus_strand, dict_tags[ name_tag_length ] if flag_perform_size_distribution_normalization_for_coverage_calculation else None ) # write the record
 
     # flush remaining records
     for idx_process in range( int_num_worker_processes ) :
@@ -12614,10 +12653,21 @@ def SplitBAMs(
     dict__path_file_bam_input__to__name_file_distribution : Union[ dict, None ] = None, # a mapping of input BAM file path to name of the sample ('name_file_distribution') that was used for building the reference distribution using 'LongCreateReferenceSizeDistribution'.
     t_distribution_range_of_interest : Union[ List[ str ], str, None ] = None, # define a range of distribution of interest for exporting normalized coverage.
     name_tag_length : str = 'LE', # the total length of genomic regions that are actually covered by the read, excluding spliced introns (the sum of exons).
+    flag_strand_specific : bool = False, # if True, create separate BAM files and coverage BigWig files for + strand and - strand reads.
 ) :
-    """ # 2024-01-07 04:04:20 
+    """ # 2024-01-23 12:36:08 
     A pipeline employing multiprocessing for faster splitting of barcoded BAM files of a single cell dataset to multiple BAM files, each containing records of cells belonging to a single 'name_cluster' (a single cell type)
     
+    Features:
+    - use multiple processes to increase the performance
+    - capable of splitting BAM file into more then thousand of files (scalable).
+    - support size-distribution-normalized coverage output
+    - strand-specific BAM/coverage file outputs are available
+    
+    Of note, for 'flag_export_coverages' == True to work, a sorted BAM file should be given as an input.
+    Also, for size distribution normalization for coverage calculation to work, every read with a 'CB' (name_tag_cb) tag should also have 'LE' (name_tag_length) tag.
+
+    # -------- General ---------
     dict__path_file_bam_input__to__dict_cb_to_name_clus : dict # a dictionary with key = 'path_file_bam_input' and value = 'dict_cb_to_name_clus'.
         * dict_cb_to_name_clus : dict # a dictionary containing corrected cell barcode to 'name_clus' (name of cluster) mapping. if the name is not compatible with Windoe OS path, incompatible characters will be replaced with spaceholder character.
         * path_file_bam_input : str # an input BAM file to split
@@ -12638,6 +12688,9 @@ def SplitBAMs(
     dict__path_file_bam_input__to__name_file_distribution : Union[ dict, None ] = None, # a mapping of input BAM file path to 'name_distribution' used for building the reference distribution
     t_distribution_range_of_interest : Union[ List[ int ], None ] = None, # define a range of interest for molecule sizes for exporting normalized coverage.
     name_tag_length : str = 'LE', # the total length of genomic regions that are actually covered by the read, excluding spliced introns (the sum of exons).
+    
+    # -------- Strand specific BAM ---------
+    flag_strand_specific : bool = False, # if True, create separate BAM files and coverage BigWig files for + strand and - strand reads.
     """
     # create the output folder
     os.makedirs( path_folder_output, exist_ok = True )
@@ -12677,38 +12730,50 @@ def SplitBAMs(
                 'arr_ratio_to_ref' : arr_ratio_to_ref,
                 't_distribution_range_of_interest' : t_distribution_range_of_interest,
                 'name_tag_length' : name_tag_length,
+                'flag_strand_specific' : flag_strand_specific,
             },
         )
                     
     # wait all pipelines to be completed
     pipelines.wait_all()
     
+    ''' define the list of suffixes '''
+    l_str_suffix = [ '.minus_strand', '.plus_strand', ] if flag_strand_specific else [ '' ] # no suffix if 'flag_strand_specific' == False
+    
     ''' survey the output files '''
-    df_file_bam = bk.GLOB_Retrive_Strings_in_Wildcards( f'{path_folder_output}*/*.bam' ) # retrieve a list of temporary output BAM files
+    # retrieve a list of temporary output BAM files
+    l_df = [ ]
+    for str_suffix in l_str_suffix : # collect the list of temporary output BAM files for each 'str_suffix'
+        df = bk.GLOB_Retrive_Strings_in_Wildcards( f'{path_folder_output}*/*{str_suffix}.bam' )
+        df[ 'str_suffix' ] = str_suffix
+        l_df.append( df )
+    df_file_bam = pd.concat( l_df )
     df_file_bam.rename( columns = { 'wildcard_1' : 'name_clus' }, inplace = True )
     l_name_clus = df_file_bam.name_clus.unique( ) # retrieve list of name_clus
     
     ''' combine temporary output BigWig files '''
     if flag_export_coverages :
         name_type_coverage = 'size_distribution_normalized' if flag_perform_size_distribution_normalization_for_coverage_calculation else 'bam' # retrieve type of the coverage
-        for name_clus in l_name_clus : # for each 'name_clus'
-            # run 'merge_bigwigs' for the BigWig files of the current 'name_clus'
-            pipelines.submit_work( 
-                merge_bigwigs, 
-                kwargs = { 
-                    'path_file_bw_output' : f'{path_folder_output}{name_clus}.{name_type_coverage}.bw',
-                    'l_path_file_bw_input' : glob.glob( f'{path_folder_output}*/{name_clus}.{name_type_coverage}.bw' ),
-                },
-            )
+        for str_suffix in l_str_suffix :
+            for name_clus in l_name_clus : # for each 'name_clus'
+                # run 'merge_bigwigs' for the BigWig files of the current 'name_clus'
+                pipelines.submit_work( 
+                    merge_bigwigs, 
+                    kwargs = { 
+                        'path_file_bw_output' : f'{path_folder_output}{name_clus}.{name_type_coverage}{str_suffix}.bw',
+                        'l_path_file_bw_input' : glob.glob( f'{path_folder_output}*/{name_clus}.{name_type_coverage}{str_suffix}.bw' ),
+                    },
+                )
             
     ''' combine temporary output BAM files ''' # does not use multiprocessing to not overwhelm the file system I/O
-    for name_clus, _df in df_file_bam[ [ 'name_clus', 'path' ] ].groupby( 'name_clus' ) : # for each 'name_clus'
-        l_path_file_output_temp = _df.path.values # retrieve list of temporary output files
-        path_file_bam_output = f"{path_folder_output}{name_clus}.bam"
-        pysam.merge( '--threads', str( min( int_num_threads, 10 ) ), '-c', '-p', path_file_bam_output, * l_path_file_output_temp ) # merge splitted BAM files into a single output BAM file
-        for path_file in l_path_file_output_temp : # delete the temporary output files
-            os.remove( path_file )
-        pysam.index( path_file_bam_output ) # index the output file
+    for str_suffix in l_str_suffix : # for each 'str_suffix'
+        for name_clus in l_name_clus : # for each 'name_clus'
+            l_path_file_output_temp = bk.PD_Select( df_file_bam, name_clus = name_clus, str_suffix = str_suffix ).path.values # retrieve the list of temporary output files
+            path_file_bam_output = f"{path_folder_output}{name_clus}{str_suffix}.bam"
+            pysam.merge( '--threads', str( min( int_num_threads, 10 ) ), '-c', '-p', path_file_bam_output, * l_path_file_output_temp ) # merge splitted BAM files into a single output BAM file
+            for path_file in l_path_file_output_temp : # delete the temporary output files
+                os.remove( path_file )
+            pysam.index( path_file_bam_output ) # index the output file
         
     # wait all works to be completed
     pipelines.wait_all()
