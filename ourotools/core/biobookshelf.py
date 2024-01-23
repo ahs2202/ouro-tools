@@ -590,6 +590,38 @@ def PD_Select(df, deselect=False, **dict_select):
     return df
 
 
+def PD_Threshold(df, AND_operation=True, **dict_thresholds):
+    """Select rows of a given DataFrame or indices of Series based on a given threshold for each given column or the given series.
+    Add 'b' or 'B' at the end of column_label to select rows below the threshold, or add 'a' or 'A' to select rows above the threshold.
+    If 'AND_operation' is true, filter generated from the given threshold will be combined with AND operation before filtering rows of a given dataframe
+    """
+    set_df_columns = set(df.columns.values) if type(df) is pd.DataFrame else set([""])
+    mask_filter = (
+        np.ones(len(df), dtype=bool) if AND_operation else np.zeros(len(df), dtype=bool)
+    )
+    for col_direction, threshold in dict_thresholds.items():
+        col, direction = col_direction[:-1], col_direction[-1]
+        if col not in set_df_columns:
+            print("'{}' column_label does not exist in the given DataFrame".format(col))
+            continue
+        data = df[col].values if type(df) is pd.DataFrame else df.values
+        if direction.lower() == "a":
+            current_mask = data > threshold
+        elif direction.lower() == "b":
+            current_mask = data < threshold
+        else:
+            print(
+                "'{}' direction is not either 'a' or 'b' and thus invalid".format(
+                    direction
+                )
+            )
+            continue
+        mask_filter = (
+            current_mask & mask_filter if AND_operation else current_mask | mask_filter
+        )
+    return df[mask_filter]
+
+
 def DF_Deduplicate_without_loading_in_memory(
     path_file_dataframe: str,
     path_file_dataframe_deduplicated: str,

@@ -87,7 +87,7 @@ logger = logging.getLogger("ouro-tools")
 # define version
 _version_ = "0.1.1"
 _ourotools_version_ = _version_
-_last_modified_time_ = "2024-01-05 13:55:08"
+_last_modified_time_ = "2024-01-10 21:35:48"
 
 str_release_note = [
     """
@@ -115,7 +115,10 @@ str_release_note = [
     'LongFilterNSplit' : Ouro-Enrich applied samples can be now processed with 'LongFilterNSplit' with 'flag_recover_original_molecule_before_self_circularization_and_digestion' flag turned on.
     
     # 2023-11-03 23:32:31 
-    'LongFilterNSplit' : now molecules with poly A at both ends can be detected and filtered accordingly. Also, subsampling of input FASTQ file for exploratory analysis is now supported.
+    'LongFilterNSplit' : now molecules with poly A at both ends can be detected and filtered accordingly by default. Also, subsampling of input FASTQ file for exploratory analysis is now supported. 
+    
+    # 2024-01-10 21:30:02 
+    'LongExportNormalizedCountMatrix' : ('analysis_statistics.tsv.gz' output) now full-length read statistics will be exported for each feature .
     ##### Future implementations #####
 
     """
@@ -2999,7 +3002,7 @@ def LongFilterNSplit(
                                 flag_aligned_to_unwanted_sequence = True
                                 break
                             for hit in l_hit_unwanted :
-                                l_seq, int_total_aligned_length = bk.SAM.Retrive_List_of_Mapped_Segments( hit.cigar, hit.r_st, flag_is_cigartuples_from_mappy = True )
+                                l_seq, int_total_aligned_length = bk.SAM.Retrieve_List_of_Mapped_Segments( hit.cigar, hit.r_st, flag_is_cigartuples_from_mappy = True )
                                 
                         """
                         handle the case when read was aligned to unwanted sequences
@@ -3040,7 +3043,7 @@ def LongFilterNSplit(
                         l_l = [ ] # initialize the container # 
                         for hit in l_hit_genome :
                             l_l.append( [ hit.q_st, hit ] )
-                            # l_seq, int_total_aligned_length = bk.SAM.Retrive_List_of_Mapped_Segments( hit.cigar, hit.r_st, flag_is_cigartuples_from_mappy = True )
+                            # l_seq, int_total_aligned_length = bk.SAM.Retrieve_List_of_Mapped_Segments( hit.cigar, hit.r_st, flag_is_cigartuples_from_mappy = True )
     
                         arr_algn = np.array( l_l, dtype = object ) # create an array of alignments
                         arr_algn = arr_algn[ arr_algn[ :, 0 ].argsort( ) ] # sort alignments using 'q_st'
@@ -3974,7 +3977,7 @@ def LongExtractBarcodeFromBAM(
                             flag_is_reverse_complemented = _check_binary_flags( flags, 4 ) 
                             
                             # estimate the size of the molecule (total length of genomic regions covered by the molecule, excluding the soft-clipped regions)
-                            l_seg, int_total_length_covering_genome = SAM.Retrive_List_of_Mapped_Segments( cigartuples, reference_start )                          
+                            l_seg, int_total_length_covering_genome = SAM.Retrieve_List_of_Mapped_Segments( cigartuples, reference_start )                          
 
                             # retrieve soft-clipped sequences
                             flag_left_softclipped = int_cigarop_S == cigartuples[ 0 ][ 0 ]
@@ -7668,7 +7671,7 @@ def LongExportNormalizedCountMatrix(
     l_seqname_to_skip: list = ["MT"],
     flag_no_strand_specificity : bool = False,
 ) -> dict:
-    """# 2024-01-01 20:03:22 
+    """
     perform secondary analysis of cell-ranger output (barcoded BAM)
 
     l_str_mode_scarab_count : list[ Literal[ "gex5prime-single-end", 'gex5prime-paired-end', "gex3prime-single-end", 'gex3prime', 'gex', 'gex5prime', 'atac', 'multiome' ] ] = [ 'gex3prime' ], # list of scarab_count operation mode
@@ -7754,6 +7757,8 @@ def LongExportNormalizedCountMatrix(
 
     returns
     a loaded scarab-count index ('scidx')
+    
+    # 2024-01-10 21:28:50 
     """
     """
     Parse arguments
@@ -9429,6 +9434,8 @@ def LongExportNormalizedCountMatrix(
                         )
                     )
 
+                l_name_col_for_read_stat = [ 'int_num_reads_with_valid3p_and_valid5p', 'int_num_reads_with_valid3p_and_invalid5p', 'int_num_reads_with_invalid3p_and_valid5p', 'int_num_reads_with_invalid3p_and_invalid5p' ] # define column names for read statistics
+                
                 """
                 Define a function for processing a part of a BAM file
                 """
@@ -9497,7 +9504,7 @@ def LongExportNormalizedCountMatrix(
                     """
                     Initiate workers for off-loading works for processing each batch
                     """
-                    int_num_workers_for_bucket_processing = 3 # the number of workers for bucket processing
+                    int_num_workers_for_bucket_processing = 5 # the number of workers for bucket processing
                     workers_for_bucket_processing = bk.Offload_Works( int_num_workers_for_bucket_processing )  # 💛 adjustment of the number of workers might be needed.
   
                     int_max_bucket_deletion_count_before_reinitialize = 10000 # the max number of bucket deletion count before re-initializing the bucket container (python dictionary, when too many keys are deleted, lead to 'memory leak')
@@ -9513,6 +9520,14 @@ def LongExportNormalizedCountMatrix(
                         """initialize Reads object"""
                         return {"data": dict(), "int_n_removed_elements": 0}
 
+                    def _initialize_read_statistics( dict_data ) :
+                        """
+                        initialize the read statistics for an annotation bucket
+                        # 2024-01-10 21:14:14 
+                        """
+                        for name_stat in l_name_col_for_read_stat :
+                            dict_data[ name_stat ] = 0 # initialize to 0
+                    
                     def __Initialize_gene_and_isoform_data__(
                         reads, refname_gene, refstart_gene, refend_gene, id_gene
                     ):
@@ -9530,6 +9545,7 @@ def LongExportNormalizedCountMatrix(
                         dict_data["wall_time"] = 0  # initialize wall_time
                         # initialize an array for counting reads for each cell-barcode
                         dict_data["l_read"] = []
+                        _initialize_read_statistics( dict_data ) # initialize the read statistics
 
                         """ when using isoform assignment from minimap2 alignment """
                         if not flag_use_isoform_assignment_from_10x_cellranger:
@@ -9589,6 +9605,7 @@ def LongExportNormalizedCountMatrix(
                         dict_data["wall_time"] = 0  # initialize wall_time
                         # initialize an array for counting reads for each cell-barcode
                         dict_data["l_read"] = []
+                        _initialize_read_statistics( dict_data ) # initialize the read statistics
 
                         # load the initialized data
                         reads["data"][id_anno] = dict_data
@@ -10127,7 +10144,7 @@ def LongExportNormalizedCountMatrix(
                                                 id_anno,
                                                 dict_data["wall_time"],
                                                 int_num_record,
-                                            ],
+                                            ] + list( dict_data[ e ] for e in l_name_col_for_read_stat ),
                                         )
                                     )
                                 )
@@ -10474,7 +10491,7 @@ def LongExportNormalizedCountMatrix(
                                                 id_anno,
                                                 dict_data["wall_time"],
                                                 int_num_record,
-                                            ],
+                                            ] + list( dict_data[ e ] for e in l_name_col_for_read_stat ),
                                         )
                                     )
                                 )
@@ -10494,6 +10511,17 @@ def LongExportNormalizedCountMatrix(
                             dict_output = ( _process_gene_and_isoform_data if ( dict_data["annotation_type"] == "gene_and_isoform" ) else _process_misc_anno_data )( id_anno, dict_data ) # process the data in the the bucket and retrieve the output
                             l_dict_output.append( dict_output ) # collect the result
                         return l_dict_output # return the collected result
+                    
+                    def _add_read_to_the_bucket( reads, id_anno : str, l_data_for_counting, flag_valid_3p : bool, flag_valid_5p : bool ) :
+                        """ 
+                        add a read to the bucket and update the statistics about the reads in the bucket.
+                        # 2024-01-10 20:52:12 
+                        """
+                        # add record to the bucket of the annotation
+                        reads["data"][id_anno]["l_read"].append(
+                            l_data_for_counting
+                        )
+                        reads["data"][id_anno][ 'int_num_reads_with_' + ( '' if flag_valid_3p else 'in' ) + 'valid3p_and_' + ( '' if flag_valid_5p else 'in' ) + 'valid5p' ] += 1 # update the read statistics
                     
                     l_newfile = list( dict_t_distribution_range_of_interest_to_newfile_df_count[ e ] for e in l_t_distribution_range_of_interest ) + [ newfile_df_analysis_statistics ] # compose a linear list of file handles for output TSV files
                     def _post_process_buckets( l_dict_output : List[ dict ] ) :
@@ -10730,7 +10758,7 @@ def LongExportNormalizedCountMatrix(
                                 (
                                     l_seg,
                                     int_total_aligned_length,
-                                ) = SAM.Retrive_List_of_Mapped_Segments(
+                                ) = SAM.Retrieve_List_of_Mapped_Segments(
                                     cigartuples, pos_start=refstart
                                 )  # 0-based coordinates
                                 str_l_seg = ",".join(
@@ -11665,6 +11693,7 @@ def LongExportNormalizedCountMatrix(
                                             "exon_and_splice_junc",
                                             str_mode_scarab_count,
                                         )  # for exon and splice_junc annotation, start and end position of the annotation will be set as that of the gene to which read has been assigned to.
+                                """ distribute the information about the current read to the data containers of the matched features """
                                 l_id_anno_valid = list(
                                     id_anno
                                     for id_anno in [
@@ -11681,9 +11710,7 @@ def LongExportNormalizedCountMatrix(
                                 """ append data to each feature """
                                 for id_anno in l_id_anno_valid:
                                     if len(id_anno) > 0:  # if 'id_anno' is valid
-                                        reads["data"][id_anno]["l_read"].append(
-                                            l_data_for_counting
-                                        )
+                                        _add_read_to_the_bucket( reads, id_anno, l_data_for_counting, flag_valid_3p, flag_valid_5p ) # add the current read to the bucket # collect read statistics
 
                                 """
                                 - A Wildcard - 
@@ -11716,9 +11743,7 @@ def LongExportNormalizedCountMatrix(
                                             end_bin_genome,
                                             id_bin_genome,
                                         )
-                                    reads["data"][id_bin_genome]["l_read"].append(
-                                        l_data_for_counting
-                                    )
+                                    _add_read_to_the_bucket( reads, id_bin_genome, l_data_for_counting, flag_valid_3p, flag_valid_5p ) # add the current read to the bucket # collect read statistics
 
                                 """ write the analysis result to the output BAM file """
                                 if (
@@ -11876,7 +11901,7 @@ def LongExportNormalizedCountMatrix(
                             overwrite_existing_file=True,
                         )
                     ''' combine other files '''
-                    l_col_df_stat = ["str_uuid", "id_anno", "wall_time", "int_n_reads"]
+                    l_col_df_stat = ["str_uuid", "id_anno", "wall_time", "int_n_reads"] + l_name_col_for_read_stat # retrieve the column names for the statistics
                     bk.OS_FILE_Combine_Files_in_order(
                         glob.glob(f"{path_folder_temp}*.analysis_statistics.tsv.gz"),
                         f"{path_folder_output}analysis_statistics.tsv.gz",
@@ -11954,19 +11979,26 @@ def LongExportNormalizedCountMatrix(
                         flag_output_dtype_is_integer = t_distribution_range_of_interest is None # output dtype is integer if the raw count matrix is exported.
                         str_t_distribution_range_of_interest = _t_distribution_range_of_interest_to_str( t_distribution_range_of_interest ) # retrieve string representation of 't_distribution_range_of_interest'
                         str_suffix = f"count.size_distribution__{str_t_distribution_range_of_interest}.tsv.gz" # compose the suffix of the files belonging to the 't_distribution_range_of_interest'
+                        path_file_df_count = f"{path_folder_output}df_{str_suffix}" # compose 'path_file_df_count'
                         path_folder_mtx = f"{path_folder_output}mtx/{str_t_distribution_range_of_interest}/" # compose the output folder
                         os.makedirs( path_folder_mtx, exist_ok = True ) # create the output folder
                         Convert_df_count_to_MTX_10X(
-                            path_file_df_count=f"{path_folder_output}df_{str_suffix}",
+                            path_file_df_count=path_file_df_count,
                             path_folder_mtx_10x_output=f"{path_folder_mtx}raw_feature_bc_matrix/",
                             path_folder_mtx_10x_filtered_output=f"{path_folder_mtx}filtered_feature_bc_matrix/",
                             chunksize=1000000,
                             int_min_count_features_for_filtering_barcodes=int_min_count_features_for_filtering_barcodes,
                             flag_output_dtype_is_integer = flag_output_dtype_is_integer,
                         )  # export count matrix as a 10X MTX object
+                        # remove the unnecessary output file
+                        os.remove( path_file_df_count )
                         
                     # write a flag indicating the count matrix is exported
                     os.mknod(f"{path_folder_output}count_matrix.export_completed.txt")
+                    
+                    # delete temporary folder
+                    shutil.rmtree( path_folder_temp )
+                    
                     release_lock()  # release the lock
                     logger.info(
                         f"[{path_file_bam_input}] Count matrix in 10X MTX format was exported."
@@ -12099,7 +12131,278 @@ def ourotools(str_mode=None, **dict_args):
             LongExtractBarcodeFromBAM(**dict_args)
 
 """ functions that are currently not supported in the command line (only accessible in python environment, including jupyter notebook) """
-# functions independent of the main ourotools pipeline (utility functions)
+class ReadsToCoverage :
+    """
+    Receive pysam read and a weight associated with the read and write a weighted coverage as a BigWig file that uses the BedGraph format.
+    (Also, it can receive a coverage values of a region, which is immediately flushed to the file.)
+    Internally, a dynamically sized buffer is used to hold the data values before they are written to the BigWig file.
+    [IMPORTANT] Assumes the reads are from a single BAM file sorted by reference start position.
+    
+    path_file_bw : str, # path to the output bw file
+    pysam_header, # pysam header object. Alternatively, a Python list containing a tuple ( name_chr, len_chr ) can be given. (e.g., [ ( 'chr1', 1000 ), ( 'chr2' , 2000) ])
+    int_initial_buffer_size : int = 1_000_000,
+    # 2024-01-07 01:25:47 
+    """
+    def __init__( 
+        self, 
+        path_file_bw : str, 
+        pysam_header, 
+        int_initial_buffer_size : int = 1_000_000,
+    ) :
+        import pyBigWig # import required package
+        self._path_file_bw = path_file_bw
+        # open BigWig file
+        self._bw = pyBigWig.open( path_file_bw, "w" )
+        # add header
+        l_t_name_chr_and_len_chr = pysam_header if isinstance( pysam_header, list ) else list( ( e[ 'SN' ], e[ 'LN' ] ) for e in pysam_header.to_dict( )[ 'SQ' ] )
+        self._dict_name_chr_to_len = dict( l_t_name_chr_and_len_chr ) # retrieve name_chr to length mapping
+        self._bw.addHeader( l_t_name_chr_and_len_chr )
+        # add properties
+        self._int_initial_buffer_size = int_initial_buffer_size
+        # initialize properties
+        self._buffer_name_chr = None
+        self._flag_closed = False
+    def initialize_buffer( self, name_chr : str, start : int ) :
+        """
+        initialize the buffer for the given 'name_chr' and 'start'
+        name_chr : str # name of the chromosome
+        start : int # start position of the chromosome (0-based coordinates)
+        # 2024-01-06 19:44:59 
+        """
+        # create a new buffer
+        self._buffer = np.zeros( self._int_initial_buffer_size, dtype = float )
+        # initialize the buffer
+        self._buffer_name_chr = name_chr
+        self._buffer_start = start
+        self._buffer_size = len( self._buffer )
+        self._idx_current_pos_in_a_buffer = 0
+        self._idx_start_pos_of_unwritten_portion_of_the_buffer = 0
+        self._buffer_first_entry_added = False
+    def expand_buffer( self, int_required_size : int ) :
+        """
+        int_required_size : int # the minimum required size of the buffer
+        
+        increase the size of the buffer
+        # 2024-01-06 20:30:41 
+        """
+        int_size_remaining = self._buffer_size - self._idx_start_pos_of_unwritten_portion_of_the_buffer # retrieve the remaining size of the buffer
+        int_new_buffer_size = ( int_required_size - self._idx_start_pos_of_unwritten_portion_of_the_buffer ) * 3 # calculate the new buffer size based on the minimum required size of the buffer
+        buffer_new = np.zeros( int_new_buffer_size, dtype = float ) # create a new buffer
+        buffer_new[ : int_size_remaining ] = self._buffer[ - int_size_remaining : ] # copy buffer content to the new buffer
+        self._buffer_start = self._buffer_start + self._idx_start_pos_of_unwritten_portion_of_the_buffer # update buffer start position
+        self._buffer = buffer_new
+        self._buffer_size = int_new_buffer_size
+        self._idx_current_pos_in_a_buffer = self._idx_current_pos_in_a_buffer - self._idx_start_pos_of_unwritten_portion_of_the_buffer # update 'idx_current_pos_in_a_buffer'
+        self._idx_start_pos_of_unwritten_portion_of_the_buffer = 0
+    def flush_buffer( self, flag_flush_all : bool = False, flag_add_first_entry : bool = True, flag_add_last_entry : bool = True ) :
+        '''
+        flush the buffer and write coverages to the currently opened BigWig file
+        
+        flag_flush_all : bool = False, # if True, move the current position in the buffer to the end of the buffer and flush all the values in the buffer.
+        flag_add_first_entry : bool = True, # if True and currently no entry has been added for the current chromosome, add the first entry containing a zero value when a non-zero value entry is added for the first time for the chromosome.
+        flag_add_last_entry : bool = True, # if True and 'flag_flush_all' is also True, add the last entry containing a zero value for the current chromosome
+        # 2024-01-07 01:59:09 
+        '''
+        if self._buffer_name_chr is None : # if buffer has not been initialized, exit
+            return 0
+        
+        if flag_flush_all :
+            self._idx_current_pos_in_a_buffer = self._buffer_size # change the current position to the end of the buffer so that all values will be flushed.
+
+        if self._idx_start_pos_of_unwritten_portion_of_the_buffer == self._idx_current_pos_in_a_buffer : # if there is no writtable data, exit
+            return 0
+        
+        # collect the records to write
+        bf = self._buffer
+        l_val, l_st, l_en = [ ], [ ], [ ] # initialize the lists of bedGraph records
+        val_prev = bf[ self._idx_start_pos_of_unwritten_portion_of_the_buffer ] # initialize 'val_prev'
+        st_prev = self._idx_start_pos_of_unwritten_portion_of_the_buffer # initialize 'st_prev' (an index position in the buffer)
+        for idx in range( self._idx_start_pos_of_unwritten_portion_of_the_buffer, self._idx_current_pos_in_a_buffer ) :
+            val = bf[ idx ]
+            if val_prev != val : # if a value has change, 
+                # add a record
+                l_val.append( val_prev )
+                l_st.append( st_prev + self._buffer_start )
+                l_en.append( idx + self._buffer_start )
+                # initialize the next record
+                val_prev = val
+                st_prev = idx
+        int_num_records_written = len( l_val ) # retrieve the number of records written
+        if int_num_records_written == 0 : # exit when there is no records to write
+            return 0
+        
+        # add the first entry
+        if not self._buffer_first_entry_added and flag_add_first_entry :
+            pos_end_first_entry = l_st[ 0 ]
+            if pos_end_first_entry > 0 : # add the first entry only when the end position is larger than 0
+                self._bw.addEntries( [ self._buffer_name_chr ], [ 0 ], ends = [ pos_end_first_entry ], values = [ 0.0 ] ) # add the first entry containing a zero value # values should be [0.0] to avoid error ([0] will cause an error)
+            self._buffer_first_entry_added = True # update the flag, which prevent adding the first entry until a new buffer has been initialized.
+        
+        # write the records
+        self._bw.addEntries([ self._buffer_name_chr ] * int_num_records_written, l_st, ends = l_en, values = l_val ) # write records for the current chromosome
+        
+        # add the last entry
+        if flag_flush_all and flag_add_last_entry :
+            len_chr, pos_start_last_entry = self._dict_name_chr_to_len[ self._buffer_name_chr ], l_en[ -1 ]
+            if pos_start_last_entry < len_chr :
+                self._bw.addEntries( [ self._buffer_name_chr ], [ pos_start_last_entry ], ends = [ len_chr ], values = [ 0.0 ] ) # add the last entry containing a zero value
+                
+        # update the current unwritten position
+        self._idx_start_pos_of_unwritten_portion_of_the_buffer = l_en[ -1 ] - self._buffer_start
+        return int_num_records_written # return the number of records written
+    def close( self ) :
+        """ 
+        flush the buffer and close the bigwig file
+        # 2024-01-06 21:19:45 
+        """
+        if self._flag_closed :
+            raise RuntimeError( 'close on the already closed BigWig file' )
+        self.flush_buffer( flag_flush_all = True ) # flush the buffer
+        self._bw.close( )
+        self._flag_closed = True # update the flag
+    def __enter__( self ) :
+        """
+        # 2024-01-06 21:59:11 
+        """
+        return self
+    def __exit__( self, exc_type, exc_val, exc_tb ) :
+        """
+        # 2024-01-06 21:59:11 
+        """
+        self.close( )
+    def __repr__( self ) :
+        return f"<ReadsToCoverage object of {self._path_file_bw}, (current buffer name_chr={self._buffer_name_chr} start={self._buffer_start}, pos={self._idx_current_pos_in_a_buffer}, and size={self._buffer_size}>"
+    def retrieve_mapped_segments(
+        self,
+        cigartuples,
+        pos_start,
+    ) :
+        """# 2024-01-06 20:09:55 
+        return l_seq for given cigartuples (returned by pysam cigartuples) and 'pos_start' (0-based coordinates, assuming pos_start is 0-based coordinate)
+        """
+        l_seg, start, int_aligned_length = list(), pos_start, 0
+        for operation, length in cigartuples:
+            if operation in {0, 2, 7, 8}:  # 'MD=X'
+                int_aligned_length += length
+            elif (
+                operation == 3
+            ):  # 'N' if splice junction appears, split the region and make a record
+                l_seg.append(
+                    (
+                        start,
+                        (start + int_aligned_length),
+                    )
+                )  # set the end position
+                start = start + int_aligned_length + length  # set the next start position
+                int_aligned_length = 0
+        if int_aligned_length > 0:
+            l_seg.append(
+                (
+                    start,
+                    (start + int_aligned_length),
+                )
+            )
+        return l_seg
+    def add_read( self, pysam_read, float_weight : float = 1.0 ) :
+        '''
+        add a read to the coverage.
+        reads added to a single 'ReadsToCoverage' object should be in a sorted order (sorted by chromosome name matched with given 'pysam_header' and sorted by the reference start position)
+        
+        float_weight : float = 1, # default weight would be 1
+        # 2024-01-06 19:45:03 
+        '''
+        r = pysam_read
+        # retrieve read properties
+        name_chr, r_st, cigartuples = r.reference_name, r.reference_start, r.cigartuples
+        if name_chr != self._buffer_name_chr : # if chromosome has changed, 
+            self.flush_buffer( flag_flush_all = True ) # flush all buffer
+            self.initialize_buffer( name_chr, r_st ) # initialize new buffer using the properties of the current read
+        l_seg = self.retrieve_mapped_segments( cigartuples, r_st ) # retrieve segments of the current read
+        
+        for st, en in l_seg : # for each segment, update the coverage 
+            st_in_buffer, en_in_buffer = st - self._buffer_start, en - self._buffer_start # retrieve positions in the buffer
+            if en_in_buffer > self._buffer_size :
+                self.expand_buffer( en_in_buffer )
+                st_in_buffer, en_in_buffer = st - self._buffer_start, en - self._buffer_start # re-calculate the positions in the buffer
+            self._buffer[ st_in_buffer : en_in_buffer ] += float_weight # update the buffer
+        
+        r_st_in_buffer = r_st - self._buffer_start # calculate the position in the buffer
+        if r_st_in_buffer > self._idx_current_pos_in_a_buffer : # if the position (reference start, which is used for sorting the BAM file) of a read exceeds the current position in the buffer
+            self._idx_current_pos_in_a_buffer = r_st_in_buffer # update the current position in a buffer
+            self.flush_buffer( ) # write the records
+    def add_region( self, name_chr : str, reference_start : int, values ) :
+        '''
+        add a region to the coverage.
+        region added to a single 'ReadsToCoverage' object should be in a sorted order (sorted by chromosome name matched with given 'pysam_header' and sorted by the reference start position)
+        
+        name_chr : str, 
+        reference_start : int, 
+        values
+        # 2024-01-07 01:17:51 
+        '''
+        r_st = reference_start
+        r_en = r_st + len( values )
+        if name_chr != self._buffer_name_chr : # if chromosome has changed, 
+            self.flush_buffer( flag_flush_all = True ) # flush all buffer
+            self.initialize_buffer( name_chr, r_st ) # initialize new buffer using the properties of the current read
+        
+        st_in_buffer, en_in_buffer = r_st - self._buffer_start, r_en - self._buffer_start # retrieve positions in the buffer
+        if en_in_buffer > self._buffer_size :
+            self.expand_buffer( en_in_buffer )
+            st_in_buffer, en_in_buffer = r_st - self._buffer_start, r_en - self._buffer_start # re-calculate the positions in the buffer
+        self._buffer[ st_in_buffer : en_in_buffer ] += values # update the buffer
+        
+        self._idx_current_pos_in_a_buffer = en_in_buffer # update the current position in a buffer
+        self.flush_buffer( ) # write the records
+        
+def merge_bigwigs( path_file_bw_output : str, l_path_file_bw_input : List[ str ], int_window_size_for_a_batch : int = 10_000_000 ) :
+    '''
+    merge bigwig files into a single bigwig file.
+    Assumes all input chromosomes shares the same set of chromosome names.
+    
+    path_file_bw_output : str, 
+    l_path_file_bw_input : List[ str ], 
+    int_window_size_for_a_batch : int = 10_000_000,
+    # 2024-01-07 03:46:59 
+    '''
+    import pyBigWig
+
+    # exit if input is invalid
+    if len( l_path_file_bw_input ) == 0 :
+        return -1
+
+    l_bw = list( pyBigWig.open( e ) for e in l_path_file_bw_input ) # open bigwig files
+    dict_name_chr_to_len = l_bw[ 0 ].chroms( ) # retrieve chromosome information
+    l_name_chr = list( dict_name_chr_to_len ) # retrieve list of chromosomes
+
+    # open the coverage file
+    coverage_writer = ReadsToCoverage( path_file_bw_output, pysam_header = list( ( name_chr, dict_name_chr_to_len[ name_chr ] ) for name_chr in l_name_chr ) ) # initialize the coverage writer
+
+    for name_chr in l_name_chr : # for each chr, combine coverage values and write a BigWig file
+        len_chr = dict_name_chr_to_len[ name_chr ] # retrieve the length of the chromosome
+        ''' update the coverage for each batch '''
+        for i in range( len_chr // int_window_size_for_a_batch ) : # process each batch
+            arr = np.zeros( int_window_size_for_a_batch, dtype = float ) # initialize the data container 
+            for bw in l_bw : # for each input BigWig file
+                arr_from_an_input_bw = np.array( bw.values( name_chr, i * int_window_size_for_a_batch, ( i + 1 ) * int_window_size_for_a_batch ) )
+                arr_from_an_input_bw[ np.isnan( arr_from_an_input_bw ) ] = 0 # replace np.nan to 0
+                if len( arr_from_an_input_bw ) > 0 : # when a bigwig file lack a data for a chromosome, it returns an empty list
+                    arr += arr_from_an_input_bw
+            coverage_writer.add_region( name_chr, i * int_window_size_for_a_batch, arr ) # update the coverage
+        ''' update the coverage for the last batch '''
+        if (len_chr % int_window_size_for_a_batch) != 0 : # process the last batch
+            st_remaining = ( len_chr // int_window_size_for_a_batch ) * int_window_size_for_a_batch # the start position of the remaining portion of the current chromosome
+            arr = np.zeros( len_chr - st_remaining, dtype = float ) # initialize the data container 
+            for bw in l_bw : # for each input BigWig file
+                arr_from_an_input_bw = np.array( bw.values( name_chr, st_remaining, len_chr ) )
+                arr_from_an_input_bw[ np.isnan( arr_from_an_input_bw ) ] = 0 # replace np.nan to 0
+                if len( arr_from_an_input_bw ) > 0 : # when a bigwig file lack a data for a chromosome, it returns an empty list
+                    arr += arr_from_an_input_bw
+            coverage_writer.add_region( name_chr, st_remaining, arr ) # update the coverage
+
+    # close the coverage file
+    coverage_writer.close( ) # close the output file
+
 def SplitBAM( 
     path_file_bam_input : str, 
     path_folder_output : str, 
@@ -12107,18 +12410,30 @@ def SplitBAM(
     name_tag_cb : str = 'CB',
     int_max_num_files_for_each_process : int = 700,
     int_num_worker_processes : int = 100,
+    flag_export_coverages : bool = False,
+    arr_ratio_to_ref = None, # an array containing correction ratio, calculated as ratio of the size distribution to the reference distribution.
+    t_distribution_range_of_interest : Union[ List[ int ], None ] = None, # define a range of distribution of interest for exporting normalized coverage.
+    name_tag_length : str = 'LE', # the total length of genomic regions that are actually covered by the read, excluding spliced introns (the sum of exons).
 ) :
-    """ # 2023-11-05 17:20:03 
-    A standalone pipeline employing multiprocessing for faster splitting of a barcoded BAM file to multiple BAM files, each containing the list of cell barcodes of the cells belonging to each 'name_cluster' (representing a cell type), or even a single-cell (a single cell-barcode).
+    """ # 2024-01-07 00:38:15 
+    A scalable pipeline employing multiprocessing for faster splitting of a barcoded BAM file to multiple BAM files, each containing the list of cell barcodes of the cells belonging to each 'name_cluster' (representing a cell type) or even a single-cell (a separate BAM file for each a single cell-barcode).
     Capable of splitting BAM file into more then thousand of files.
-    
+    Of note, for 'flag_export_coverages' to work, a sorted BAM file should be given as an input.
+    Also, for size distribution normalization for coverage calculation to work, every read with a 'CB' (name_tag_cb) tag should also have 'LE' (name_tag_length) tag.
+
     path_file_bam_input : str # an input Barcoded BAM file to split
     path_folder_output : str # the output folder where splitted Barcoded BAM files will be exported
     dict_cb_to_name_clus : dict # a dictionary containing corrected cell barcode to 'name_clus' (name of cluster) mapping. if the name is not compatible with Windoe OS path, incompatible characters will be replaced with spaceholder character.
     name_tag_cb : str = 'CB' # name of the SAM tag containing the corrected cell barcode
     int_max_num_files_for_each_process : int = 700, # max number of file descriptors (an output BAM file or a pipe object) that can be opened in a single process.
     int_num_worker_processes : int = 100, # the max number of worker processes for writing output BAM files
-    
+
+    # -------- Calculating normalized coverages --------
+    flag_export_coverages : bool = False, # export size-distribution-normalized coverages of the output BAM files. if 'arr_ratio_to_ref'  is not given, the coverage of each BAM file will be exported as-is.
+    arr_ratio_to_ref = None, # an array containing correction ratio, calculated as ratio of the size distribution to the reference distribution.
+    t_distribution_range_of_interest : Union[ List[ int ], None ] = None, # define a range of distribution of interest for exporting normalized coverage.
+    name_tag_length : str = 'LE', # the total length of genomic regions that are actually covered by the read, excluding spliced introns (the sum of exons).
+
     """
     ''' prepare : retrieve file header, preprocess name_clus, and group 'name_clus' values for each worker process. '''
     # import packages
@@ -12126,6 +12441,9 @@ def SplitBAM(
     import pysam
     import os
     import math
+    if flag_export_coverages :
+        import pyBigWig
+
     # create the output folder
     os.makedirs( path_folder_output, exist_ok = True )
     # define functions
@@ -12136,12 +12454,12 @@ def SplitBAM(
             Also, replace new line character into '_'
         """
         return a_string.replace("\n", "_").replace(":", "_").replace('"', "_").replace("/", "_").replace("\\", "_").replace("|", "_").replace("?", "_").replace("*", "_")
-    
+
     # convert 'name_cluster' to window-compatible file name
     dict_convert = dict( ( v, To_window_path_compatible_str( v ).replace( ' ', '_' ) ) for v in set( dict_cb_to_name_clus.values( ) ) )
     dict_cb_to_name_clus = dict( ( e, dict_convert[ dict_cb_to_name_clus[ e ] ] ) for e in dict_cb_to_name_clus )
     l_name_clus = list( dict_convert.values( ) ) # retrieve list of 'name_clus' (after correction)
-    
+
     # raise OSError when the number of output 'name_clus' exceeds the current limit, set by int_max_num_files_for_each_process and int_num_worker_processes arguments.
     num_name_clus = len( l_name_clus )
     if num_name_clus > int_max_num_files_for_each_process * int_num_worker_processes :
@@ -12150,11 +12468,19 @@ def SplitBAM(
     # adjust 'int_num_worker_processes' according to the number of 'name_clus'
     if num_name_clus < int_num_worker_processes :
         int_num_worker_processes = num_name_clus
-    
+
     # read the header of the input BAM file    
     with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
         sam_header = samfile.header
+
+    # initialize flags 
+    flag_perform_size_distribution_normalization_for_coverage_calculation = flag_export_coverages and arr_ratio_to_ref is not None
+    if flag_perform_size_distribution_normalization_for_coverage_calculation :
+        if t_distribution_range_of_interest is None :
+            raise RuntimeError( "for size distribution-normalized coverage output, please set 't_distribution_range_of_interest'" )
+        int_molecule_size_min, int_molecule_size_max = t_distribution_range_of_interest # parse 't_distribution_range_of_interest'
         
+
     def _write_bam_of_name_clus( p_in, p_out ) :
         ''' # 2023-11-05 17:44:33 
         for writing bam files for a list of 'name_clus'
@@ -12163,29 +12489,43 @@ def SplitBAM(
         set_name_clus = p_in.recv( ) # retrieve a list of cluster names
         l_path_file_bam = [ ] # collect the paths of output BAM files
         dict_name_clus_to_newsamfile = dict( ) # mapping between name_clus to the newsamfile
+        dict_name_clus_to_coverage_writer = dict( ) # mapping between name_clus to the coverage writer
         for name_clus in set_name_clus :
+            # initialize the BAM file
             path_file_bam = f'{path_folder_output}{name_clus}.bam'
             dict_name_clus_to_newsamfile[ name_clus ] = pysam.AlignmentFile( path_file_bam, 'wb', header = sam_header ) # collect the newsamfile
             l_path_file_bam.append( path_file_bam ) # collect a path of an output BAM file
-        
+            if flag_export_coverages :
+                path_file_bw = f"{path_folder_output}{name_clus}.{'size_distribution_normalized' if flag_perform_size_distribution_normalization_for_coverage_calculation else 'bam'}.bw"
+                dict_name_clus_to_coverage_writer[ name_clus ] = ReadsToCoverage( path_file_bw, sam_header ) # collect the newsamfile
+
         ''' work : retrieve records and write the records to output BAM files '''
         while True :
             batch = p_in.recv( ) # receive a record
             if batch is None :
                 break
-            for name_clus, str_r in batch : # parse the batch
+            for name_clus, str_r, data in batch : # parse the batch
                 r = pysam.AlignedSegment.fromstring( str_r, sam_header ) # compose a pysam record
-                dict_name_clus_to_newsamfile[ name_clus ].write( r ) # write the record to the output file
-                
+                dict_name_clus_to_newsamfile[ name_clus ].write( r ) # write the record to the output BAM file
+                if flag_export_coverages : # write the record to the output BigWig file
+                    if flag_perform_size_distribution_normalization_for_coverage_calculation :
+                        int_total_aligned_length = data # parse data
+                        if int_molecule_size_min <= int_total_aligned_length <= int_molecule_size_max : # if the molecule size satisfy the size range of interest
+                            dict_name_clus_to_coverage_writer[ name_clus ].add_read( r, float_weight = arr_ratio_to_ref[ int_total_aligned_length ] ) # update the coverage using a size-distribution-normalizedweight 
+                    else :
+                        dict_name_clus_to_coverage_writer[ name_clus ].add_read( r ) # update the coverage using the default weight (1)
+
         ''' post-process : close files and index the files '''
         for name_clus in dict_name_clus_to_newsamfile :
-            dict_name_clus_to_newsamfile[ name_clus ].close( ) # close the output file
-            
+            dict_name_clus_to_newsamfile[ name_clus ].close( ) # close the output BAM file
+        for name_clus in dict_name_clus_to_coverage_writer :
+            dict_name_clus_to_coverage_writer[ name_clus ].close( ) # close the output BigWig file
+
         for path_file_bam in l_path_file_bam :
             pysam.index( path_file_bam ) # index an output bam file
-            
+
         p_out.send( 'completed' ) # indicate the work has been completed
-    
+
     dict_name_clus_to_idx_process = dict( ) # name_clus to idx_process mapping
     l_p_to_writers = [ ] # collect the pipes
     l_p_from_writers = [ ]
@@ -12198,7 +12538,7 @@ def SplitBAM(
     while idx_name_clus < num_name_clus : # until all 'name_clus' is assigned
         int_num_name_clus = ( int_num_name_clus_for_each_worker_process if ( idx_process < int_num_worker_process_assigned_with_int_num_name_clus_for_each_worker_process ) else ( int_num_name_clus_for_each_worker_process - 1 ) ) if int_num_worker_process_assigned_with_int_num_name_clus_for_each_worker_process > 0 else int_num_name_clus_for_each_worker_process # retrieve number of 'name_clus' labels that will be assigned to the current process
         set_name_clus_for_worker_process = set( l_name_clus[ idx_name_clus : idx_name_clus + int_num_name_clus ] ) # retrieve a list of 'name_clus' for the current process
-        
+
         pm2w, pw4m = mp.Pipe( ) # create pipes
         pw2m, pm4w = mp.Pipe( )
         p = mp.Process( target = _write_bam_of_name_clus, args = ( pw4m, pw2m ) )
@@ -12209,7 +12549,7 @@ def SplitBAM(
         l_process.append( p ) # collect the process
         for name_clus in set_name_clus_for_worker_process : # record 'idx_process' for each 'name_clus'
             dict_name_clus_to_idx_process[ name_clus ] = idx_process 
-        
+
         idx_process += 1 # increase the indices
         idx_name_clus += int_num_name_clus
 
@@ -12226,12 +12566,14 @@ def SplitBAM(
             l_p_to_writers[ idx_process ].send( batch ) # send the batch to the writer
             l_batch[ idx_process ] = [ ] # empty the batch    
 
-    def _write_record( name_clus : str, str_r : str ) :
+    def _write_record( name_clus : str, str_r : str, data ) :
         """ # 2023-09-07 22:00:38 
         write a record
+
+        data # a data associated with the read
         """
         idx_process = dict_name_clus_to_idx_process[ name_clus ] # retrieve index of the process assigned to 'name_clus'
-        l_batch[ idx_process ].append( ( name_clus, str_r ) ) # add the record
+        l_batch[ idx_process ].append( ( name_clus, str_r, data ) ) # add the record
         if len( l_batch[ idx_process ] ) >= int_max_num_record_in_a_batch : # if the batch is full,
             _flush_batch( idx_process ) # flush the batch 
 
@@ -12244,7 +12586,7 @@ def SplitBAM(
                 if str_cb in dict_cb_to_name_clus : 
                     name_clus = dict_cb_to_name_clus[ str_cb ] # retrieve name of the cluster
                     str_r = r.tostring( ) # convert samtools record to a string
-                    _write_record( name_clus, str_r ) # write the record
+                    _write_record( name_clus, str_r, dict_tags[ name_tag_length ] if flag_perform_size_distribution_normalization_for_coverage_calculation else None ) # write the record
 
     # flush remaining records
     for idx_process in range( int_num_worker_processes ) :
@@ -12267,8 +12609,13 @@ def SplitBAMs(
     int_num_threads : int = 5,
     int_max_num_files_for_each_process : int = 700,
     int_num_worker_processes : int = 100,
+    flag_export_coverages : bool = False, # export size-distribution-normalized coverages of the output BAM files. if 'path_folder_reference_distribution' is not given, the coverage of each BAM file will be exported as-is.
+    path_folder_reference_distribution : Union[ str, None ] = None, # a folder containing the reference distribution, the output of the 'LongCreateReferenceSizeDistribution'
+    dict__path_file_bam_input__to__name_file_distribution : Union[ dict, None ] = None, # a mapping of input BAM file path to name of the sample ('name_file_distribution') that was used for building the reference distribution using 'LongCreateReferenceSizeDistribution'.
+    t_distribution_range_of_interest : Union[ List[ str ], str, None ] = None, # define a range of distribution of interest for exporting normalized coverage.
+    name_tag_length : str = 'LE', # the total length of genomic regions that are actually covered by the read, excluding spliced introns (the sum of exons).
 ) :
-    """ # 2023-09-11 16:52:39 
+    """ # 2024-01-07 04:04:20 
     A pipeline employing multiprocessing for faster splitting of barcoded BAM files of a single cell dataset to multiple BAM files, each containing records of cells belonging to a single 'name_cluster' (a single cell type)
     
     dict__path_file_bam_input__to__dict_cb_to_name_clus : dict # a dictionary with key = 'path_file_bam_input' and value = 'dict_cb_to_name_clus'.
@@ -12284,17 +12631,39 @@ def SplitBAMs(
     int_max_num_files_for_each_process : int = 700, # max number of file descriptors (an output BAM file or a pipe object) that can be opened in a single process.
     
     int_num_worker_processes : int = 100, # the max number of worker processes for writing output BAM files
+    
+    # -------- Calculating normalized coverages -------- #
+    flag_export_coverages : bool = False, # export size-distribution-normalized coverages of the output BAM files. if 'path_folder_reference_distribution' is not given, the coverage of each BAM file will be exported as-is.
+    path_folder_reference_distribution : Union[ str, None ] = None, # a folder containing the reference distribution, the output of the 'LongCreateReferenceSizeDistribution'
+    dict__path_file_bam_input__to__name_file_distribution : Union[ dict, None ] = None, # a mapping of input BAM file path to 'name_distribution' used for building the reference distribution
+    t_distribution_range_of_interest : Union[ List[ int ], None ] = None, # define a range of interest for molecule sizes for exporting normalized coverage.
+    name_tag_length : str = 'LE', # the total length of genomic regions that are actually covered by the read, excluding spliced introns (the sum of exons).
     """
     # create the output folder
     os.makedirs( path_folder_output, exist_ok = True )
     
     ''' Initiate pipelines for processing individual BAM file separately. '''
     logger.info(f"Started.")
-    pipelines = bk.Offload_Works( None )  # no limit for the number of works that can be submitted.
+    pipelines = bk.Offload_Works( None ) # no limit for the number of works that can be submitted.
+    
+    # initialize flags 
+    flag_perform_size_distribution_normalization_for_coverage_calculation = flag_export_coverages and isinstance( path_folder_reference_distribution, str ) and os.path.exists( f"{path_folder_reference_distribution}dict_output.pickle" )
+    
+    ''' read the reference distribution for exporting size-distribution normalized coverage calculation '''
+    if flag_perform_size_distribution_normalization_for_coverage_calculation :
+        dict_output = bk.PICKLE_Read( f"{path_folder_reference_distribution}dict_output.pickle" )
+        dict_name_file_distribution_to_arr_ratio_to_ref = dict( ( name_file_dist, arr_ratio_to_ref ) for name_file_dist, arr_ratio_to_ref in zip( dict_output[ 'setting' ][ 'l_name_file_distributions' ], dict_output[ 'l_arr_ratio_to_ref' ] ) ) # retrieve name_file_distribution > arr_ratio_to_ref mapping
     
     ''' run 'SplitBAM' for individual BAM files '''
     for path_file_bam_input in dict__path_file_bam_input__to__dict_cb_to_name_clus : # run 'SplitBAM' for each input BAM file separately
         str_uuid_file_bam_input = bk.UUID( ) # retrieve UUID of the input bam file
+        # retrieve 'arr_ratio_to_ref' for size_distribution_normalization during coverage_calculation
+        if flag_perform_size_distribution_normalization_for_coverage_calculation :
+            name_file_distribution = dict__path_file_bam_input__to__name_file_distribution[ path_file_bam_input ]
+            arr_ratio_to_ref = dict_name_file_distribution_to_arr_ratio_to_ref[ name_file_distribution ]
+        else :
+            arr_ratio_to_ref = None
+        # run 'SplitBAM' for the current BAM file
         pipelines.submit_work( 
             SplitBAM, 
             kwargs = { 
@@ -12304,21 +12673,45 @@ def SplitBAMs(
                 'name_tag_cb' : name_tag_cb, 
                 'int_max_num_files_for_each_process' : int_max_num_files_for_each_process, 
                 'int_num_worker_processes' : int_num_worker_processes,
+                'flag_export_coverages' : flag_export_coverages,
+                'arr_ratio_to_ref' : arr_ratio_to_ref,
+                't_distribution_range_of_interest' : t_distribution_range_of_interest,
+                'name_tag_length' : name_tag_length,
             },
         )
                     
     # wait all pipelines to be completed
     pipelines.wait_all()
     
-    ''' combine temporary output BAM files '''
+    ''' survey the output files '''
     df_file_bam = bk.GLOB_Retrive_Strings_in_Wildcards( f'{path_folder_output}*/*.bam' ) # retrieve a list of temporary output BAM files
-    for name_clus, _df in df_file_bam[ [ 'wildcard_1', 'path' ] ].groupby( 'wildcard_1' ) : # for each 'name_clus'
+    df_file_bam.rename( columns = { 'wildcard_1' : 'name_clus' }, inplace = True )
+    l_name_clus = df_file_bam.name_clus.unique( ) # retrieve list of name_clus
+    
+    ''' combine temporary output BigWig files '''
+    if flag_export_coverages :
+        name_type_coverage = 'size_distribution_normalized' if flag_perform_size_distribution_normalization_for_coverage_calculation else 'bam' # retrieve type of the coverage
+        for name_clus in l_name_clus : # for each 'name_clus'
+            # run 'merge_bigwigs' for the BigWig files of the current 'name_clus'
+            pipelines.submit_work( 
+                merge_bigwigs, 
+                kwargs = { 
+                    'path_file_bw_output' : f'{path_folder_output}{name_clus}.{name_type_coverage}.bw',
+                    'l_path_file_bw_input' : glob.glob( f'{path_folder_output}*/{name_clus}.{name_type_coverage}.bw' ),
+                },
+            )
+            
+    ''' combine temporary output BAM files ''' # does not use multiprocessing to not overwhelm the file system I/O
+    for name_clus, _df in df_file_bam[ [ 'name_clus', 'path' ] ].groupby( 'name_clus' ) : # for each 'name_clus'
         l_path_file_output_temp = _df.path.values # retrieve list of temporary output files
         path_file_bam_output = f"{path_folder_output}{name_clus}.bam"
         pysam.merge( '--threads', str( min( int_num_threads, 10 ) ), '-c', '-p', path_file_bam_output, * l_path_file_output_temp ) # merge splitted BAM files into a single output BAM file
         for path_file in l_path_file_output_temp : # delete the temporary output files
             os.remove( path_file )
         pysam.index( path_file_bam_output ) # index the output file
+        
+    # wait all works to be completed
+    pipelines.wait_all()
         
     # remove temporary output files
     for path_folder in bk.GLOB_Retrive_Strings_in_Wildcards( f"{path_folder_output}temp_*/" ).path.values :

@@ -12,7 +12,7 @@ with open(os.path.join(HERE, "README.md")) as fid:
 
 setup(
     name="ourotools",
-    version="0.0.3",
+    version="0.1.1",
     author="Hyunsu An",
     author_email="ahs2202@gm.gist.ac.kr",
     description="A comprehensive toolkit for quality control and analysis of single-cell long-read RNA-seq data",
@@ -35,6 +35,7 @@ setup(
         "matplotlib>=3.5.2",
         "mappy>=2.24",
         "h5py>=3.8.0",
+        "pyBigWig>=0.3.22",
     ],
     entry_points={
         "console_scripts": [
