@@ -23,6 +23,7 @@ from multiprocessing import (
 import multiprocessing
 import multiprocessing as mp
 import collections
+from copy import copy, deepcopy
 
 def Wide(int_percent_html_code_cell_width=95):
     """
@@ -40,6 +41,91 @@ def Wide(int_percent_html_code_cell_width=95):
             + "%;margin-right:auto;}</style>"
         )
     )
+    
+def Search_list_of_strings(
+    list_of_strings,
+    query="cancer",
+    return_mask_matched=False,
+    return_location_matched=False,
+):
+    """search list of strings to find strings that contains query string and return the result as a list. if 'return_mask_matched' is True,
+    return list_mask for locations of matched entries (return np.array( search_result, dtype = object ), list_mask_matched)
+    """
+    search_result, list_mask_matched = list(), list()
+    list_of_strings = (
+        list_of_strings.values
+        if type(list_of_strings) is pd.Series
+        else list_of_strings
+    )  # if type of list_of_strings is pd.Series, even though iterating through pandas series is just fine, to be safe and fast, convert pd.Series to a numpy array
+    for (
+        string
+    ) in (
+        list_of_strings
+    ):  # search list of strings to find strings that contains query string and return the result as a list
+        if not isinstance(string, (float, int)) and query in string:
+            search_result.append(string)
+            list_mask_matched.append(True)
+        else:
+            list_mask_matched.append(False)
+    if return_mask_matched:
+        return np.array(search_result, dtype=object), np.array(
+            list_mask_matched, dtype=bool
+        )
+    elif return_location_matched:
+        return np.where(np.array(list_mask_matched, dtype=bool))[0]
+    else:
+        return search_result
+
+def Search_list_of_strings_with_multiple_query(
+    l_str,
+    *l_query,
+    flag_ignore_case: bool = True,
+    return_mask=False,
+    return_position=False,
+):
+    """# 2023-04-28 01:04:38
+    Search list of strings with multiple query. for negative query, add '-' in front of the query
+
+    flag_ignore_case : bool = True # ignore cases by default
+    """
+
+    arr_mask_matched = np.ones(len(l_str), dtype=bool)
+    l_str_input = l_str  # save the reference to the original object
+    if flag_ignore_case:
+        l_str = deepcopy(l_str)  # copy l_str 'before' converting to lower cases
+        for i in range(len(l_str)):
+            l_str[i] = l_str[i].lower()
+    for query in l_query:
+        bool_query_positive = True
+        if query[0] == "-":
+            bool_query_positive, query = False, query[1:]
+        if flag_ignore_case:
+            query = query.lower()  # convert the query to lower case
+        l_mask_matched_for_a_query = (
+            list(True if query in entry else False for entry in l_str)
+            if bool_query_positive
+            else list(False if query in entry else True for entry in l_str)
+        )
+        arr_mask_matched = arr_mask_matched & np.array(
+            l_mask_matched_for_a_query, dtype="bool"
+        )
+    if return_position:
+        return np.where(arr_mask_matched)[0]
+    return (
+        arr_mask_matched
+        if return_mask
+        else np.array(l_str_input, dtype=object)[arr_mask_matched]
+    )  # return a subset of the list of input strings
+
+def Search_list_of_strings_Return_mask(data, query, is_negative_query=False):
+    if is_negative_query:
+        return np.array(
+            list(False if query in entry else True for entry in data), dtype=bool
+        )
+    else:
+        return np.array(
+            list(True if query in entry else False for entry in data), dtype=bool
+        )
 
 def MPL_SAVE(fig_name, l_format=[".pdf", ".png"], close_fig=True, **dict_save_fig):
     """With the given 'fig_name', save fiqures in both svg and png format
@@ -718,51 +804,6 @@ def PD_Binary_Flag_Select(
     ]
 
 
-def GTF_Interval_Tree(
-    path_file_gtf, feature=["gene"], value="gene_name", drop_duplicated_intervals=False
-):
-    """# 2022-05-20 22:48:35
-    Return an interval tree containing intervals retrieved from the given gtf file.
-
-    'path_file_gtf' : directory to the gtf file or dataframe iteslf
-    'feature' : list of features in the gtf to retrieve intervals from the gtf file
-    'value' : list of columne names (including GTF attributes) to include as a list of values for each interval in the returned interval tree.
-    'drop_duplicated_intervals' : drop duplicated intervals
-    """
-    # read GTF file
-    if isinstance(
-        path_file_gtf, (str)
-    ):  # if 'path_file_gtf' is a string object, used the value to read a GTF file.
-        df_gtf = GTF_Read(path_file_gtf, parse_attr=True)
-    else:  # assumes 'path_file_gtf' is a dataframe containing GTF records if it is not a string object
-        df_gtf = path_file_gtf
-    # retrieve gtf records of given list of features if valid query is given
-    if feature is not None:
-        df_gtf = PD_Select(df_gtf, feature=feature)
-    if len(df_gtf) == 0:  # return an empty dictionary if df_gtf is an empty dataframe
-        return dict()
-    df_gtf.dropna(
-        subset=[value] if isinstance(value, str) else value, inplace=True
-    )  # value should be valid
-    # remove duplicated intervals
-    if drop_duplicated_intervals:
-        df_gtf.drop_duplicates(subset=["seqname", "start", "end"], inplace=True)
-    dict_it = dict()
-    for arr_interval, arr_value in zip(
-        df_gtf[["seqname", "start", "end"]].values, df_gtf[value].values
-    ):
-        seqname, start, end = arr_interval
-        if seqname not in dict_it:
-            dict_it[seqname] = intervaltree.IntervalTree()
-        # add the interval with a given list of value
-        dict_it[seqname].addi(
-            start - 1,
-            end,
-            tuple(arr_value) if isinstance(arr_value, np.ndarray) else arr_value,
-        )  # 1-based coordinate system to 1-based coordinate
-    return dict_it
-
-
 def GTF_Parse_Attribute(attr):
     """
     # 2021-02-06 18:51:47
@@ -922,6 +963,51 @@ def GTF_Write(
         ]
     ].to_csv(path_file, index=False, header=None, sep="\t", quoting=csv.QUOTE_NONE)
 
+
+def GTF_Interval_Tree(
+    path_file_gtf, feature=["gene"], value="gene_name", drop_duplicated_intervals=False
+):
+    """# 2022-05-20 22:48:35
+    Return an interval tree containing intervals retrieved from the given gtf file.
+
+    'path_file_gtf' : directory to the gtf file or dataframe iteslf
+    'feature' : list of features in the gtf to retrieve intervals from the gtf file
+    'value' : list of columne names (including GTF attributes) to include as a list of values for each interval in the returned interval tree.
+    'drop_duplicated_intervals' : drop duplicated intervals
+    """
+    # read GTF file
+    if isinstance(
+        path_file_gtf, (str)
+    ):  # if 'path_file_gtf' is a string object, used the value to read a GTF file.
+        df_gtf = GTF_Read(path_file_gtf, parse_attr=True)
+    else:  # assumes 'path_file_gtf' is a dataframe containing GTF records if it is not a string object
+        df_gtf = path_file_gtf
+    # retrieve gtf records of given list of features if valid query is given
+    if feature is not None:
+        df_gtf = PD_Select(df_gtf, feature=feature)
+    if len(df_gtf) == 0:  # return an empty dictionary if df_gtf is an empty dataframe
+        return dict()
+    df_gtf.dropna(
+        subset=[value] if isinstance(value, str) else value, inplace=True
+    )  # value should be valid
+    # remove duplicated intervals
+    if drop_duplicated_intervals:
+        df_gtf.drop_duplicates(subset=["seqname", "start", "end"], inplace=True)
+    dict_it = dict()
+    for arr_interval, arr_value in zip(
+        df_gtf[["seqname", "start", "end"]].values, df_gtf[value].values
+    ):
+        seqname, start, end = arr_interval
+        if seqname not in dict_it:
+            dict_it[seqname] = intervaltree.IntervalTree()
+        # add the interval with a given list of value
+        dict_it[seqname].addi(
+            start - 1,
+            end,
+            tuple(arr_value) if isinstance(arr_value, np.ndarray) else arr_value,
+        )  # 1-based coordinate system to 1-based coordinate
+    return dict_it
+    
 
 def FASTA_Read(
     path_file_fasta,
