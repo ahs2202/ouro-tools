@@ -36,6 +36,31 @@ import scanpy as sc
 import anndata as ad
 import scipy
 
+''' useful variables '''
+dict_kwargs_filter_ft_for_retrieving_isoform_only = {
+    'flag_exclude_exon' : True,
+    'flag_exclude_sj' : True,
+    'flag_exclude_genomic_bin' : True,
+    'flag_exclude_repeat_element' : True,
+    'flag_exclude_reg_element' : True,
+    'flag_exclude_not_uniquely_assigned_to_tx' : True,
+    'flag_exclude_intron_retention' : True,
+    'flag_exclude_realigned' : True,
+    'flag_exclude_flag_gene_strand_specific' : True,
+}
+dict_kwargs_filter_ft_for_retrieving_isoform_exon_sj_only = {
+    'flag_exclude_exon' : False,
+    'flag_exclude_sj' : False,
+    'flag_exclude_genomic_bin' : True,
+    'flag_exclude_repeat_element' : True,
+    'flag_exclude_reg_element' : True,
+    'flag_exclude_not_uniquely_assigned_to_tx' : True,
+    'flag_exclude_intron_retention' : True,
+    'flag_exclude_realigned' : True,
+    'flag_exclude_flag_gene_strand_specific' : True,
+}
+
+''' ourotools pipeline-specific functions '''
 def exclude_or_include_internal_polyA_primed( adata, flag_include_internal_polyA_primed : bool = False, inplace : bool = True ) :
     ''' 
     exclude internal polyA primed reads during counting or include all reads for counting
@@ -404,7 +429,7 @@ def find_markers_at_sub_gene_level(
     ===Usage Example===
     >>> df_res = find_markers_at_sub_gene_level( adata, name_col_clus )
 
-    # 2023-12-15 16:57:03 
+    # 2024-03-05 16:27:59 
     """
     from tqdm import tqdm as progress_bar  # for progress bar
     from sklearn.metrics import roc_auc_score
@@ -433,11 +458,14 @@ def find_markers_at_sub_gene_level(
     np.random.seed( random_seed ) # initialize the random function
     np.random.shuffle( arr_idx_bc )
     adata = adata[ arr_idx_bc ].copy( ) # randomly shuffle the barcodes (to avoid barcodes from sample samples being groupped into the same pseudobulk samples)
-
+    
+    ''' drop barcodes with np.nan values as name_clus '''
+    adata = adata[ ~ pd.isnull( adata.obs[ name_col_clus ] ) ].copy( ) # randomly shuffle the barcodes (to avoid barcodes from sample samples being groupped into the same pseudobulk samples)
+    
     # retrieve cluster labels
-    col = adata.obs[ name_col_clus ]
+    col = adata.obs[ name_col_clus ]    
     arr_clus = col.values
-    l_name_clus_all = list( sorted( col.values.unique( ) ) ) # retrieve all unique clus labels
+    l_name_clus_all = list( sorted( e for e in col.values.unique( ) if isinstance( e, str ) ) ) # retrieve all unique clus labels # exclude float values
     # retrieve name_clus -> index mapping
     dict_name_clus_to_idx_clus = dict( ( e, i ) for i, e in enumerate( l_name_clus_all ) )
 
@@ -723,3 +751,101 @@ def find_markers_at_sub_gene_level(
         'pval' : arr_pval_res,
     } )
     return df_res # return result
+
+''' utility functions that are not specific to the ourotools pipeline '''
+def identify_batch_specific_features( 
+    adata,
+    name_col_batch : str,
+    name_col_cluster : str = None,
+    l_name_cluster = None,
+    min_prop_expr = 0.15,
+    min_score_ratio = 3,
+) :
+    """
+    Identify features that are consistently differently expressed in each sample for multiple clusters
+    Note)
+    The primary aim of this function is for identifying batch specific features in an entire dataset or in a set of clusters to improve UMAP embedding/clustering without/with the help of other batch-correction algorithms.
+    Empirically, batch effect can be significantly reduced (with some loss of information) simply by excluding a set of features contributing to the batch effects, which is often sufficient for clustering analysis.
+    # 2024-02-26 22:34:55 
+    """
+    def _filter_marker_feature( df_unique_marker_feature ) :
+        return bk.PD_Threshold( df_unique_marker_feature, prop_expr_1sta = min_prop_expr, score_ratioa = min_score_ratio )
+
+    if l_name_cluster is None :
+        set_name_feature_to_exclude = set( _filter_marker_feature( search_uniquely_expressed_marker_features( adata, name_col_batch ) ).feature_name.values )
+    else :
+        l_l_name_feature = list( _filter_marker_feature( search_uniquely_expressed_marker_features( adata[ adata.obs[ name_col_cluster ] == name_cluster ].copy( ), name_col_batch ) ).feature_name.values for name_cluster in l_name_cluster ) # retrieve batch specific features for each cluster
+        # identify batch specific features shared between all clusters
+        set_name_feature_to_exclude = set( l_l_name_feature[ 0 ] ) # initialize 'set_name_feature_to_exclude'
+        for l_name_feature in l_l_name_feature[ 1 : ] :
+            set_name_feature_to_exclude = set_name_feature_to_exclude.intersection( l_name_feature )
+    return set_name_feature_to_exclude
+def summarize_expression_for_each_clus( 
+    adata,
+    name_col_cluster : str,
+) :
+    """
+    summarize expression of each cluster for the given adata
+    # 2024-02-26 21:01:16 
+    """
+    l_df = [ ]
+    def _parse_array( arr ) :
+        if len( arr.shape ) == 1 :
+            return arr
+        else :
+            return arr[ 0 ]
+    for name_cluster in set( adata.obs[ name_col_cluster ].values ) :
+        adata_subset = adata[ adata.obs[ name_col_cluster ] == name_cluster ] # retrieve 
+        arr_num_cell_with_expr = _parse_array( np.array( ( adata_subset.X > 0 ).sum( axis = 0 ) ) )
+        arr_avg_expr = _parse_array( np.array( adata_subset.X.sum( axis = 0 ) ) ) / arr_num_cell_with_expr # calculate average expression in cells expressing the feature
+        arr_avg_expr[ np.isnan( arr_avg_expr ) ] = 0 # when number of cells expressing is zero, set expression values as 0
+        arr_prop_expr = arr_num_cell_with_expr / len( adata_subset.obs )
+        _df = pd.DataFrame( { 'avg_expr' : arr_avg_expr, 'prop_expr' : arr_prop_expr } )
+        _df[ name_col_cluster ] = name_cluster
+        _df[ 'feature_name' ] = adata_subset.var.index.values
+        l_df.append( _df )
+    df_feature_expr = pd.concat( l_df )
+    df_feature_expr[ 'score' ] = df_feature_expr.avg_expr * df_feature_expr.prop_expr # calculate the score
+    return df_feature_expr
+def search_marker_features_unique_to_a_single_cluster( 
+    adata,  
+    name_col_cluster : str,
+    float_max_score : float = 1000,
+) :
+    """
+    find unique markers for each clusters.
+    Note)
+    score is calculated as the product of the proportion-expressed and the average (log-normalized) expression values.
+
+    name_col_cluster : str, # name of the column in the 'adata.obs' containing cluster labels 
+    float_max_score : 1000, # 'infinite' score ratios will be replaced by this value
+
+    # 2024-02-20 13:24:17 
+    """
+    '''
+    survey proportion expressed and avg expression
+    '''
+    df_feature_expr = summarize_expression_for_each_clus( adata, name_col_cluster )
+
+    '''
+    identify marker features uniquely expressed in a single cluster
+    '''
+    l_l = [ ]
+    for feature_name, _df in df_feature_expr.groupby( 'feature_name' ) :
+        # retrieve values
+        arr_avg_expr, arr_prop_expr, arr_str_int_cell_type_subclustered_temp, _, arr_score = _df.values.T
+        # sort by score
+        arr_score_argsort = arr_score.argsort( )
+        arr_avg_expr, arr_prop_expr, arr_str_int_cell_type_subclustered_temp, arr_score = arr_avg_expr[ arr_score_argsort ], arr_prop_expr[ arr_score_argsort ], arr_str_int_cell_type_subclustered_temp[ arr_score_argsort ], arr_score[ arr_score_argsort ]
+
+        avg_expr_highest, prop_expr_highest = arr_avg_expr.max( ), arr_prop_expr.max( )
+        avg_expr_2nd, avg_expr_1st = arr_avg_expr[ -2 : ]
+        prop_expr_2nd, prop_expr_1st = arr_prop_expr[ -2 : ]
+        str_int_cell_type_subclustered_temp_2nd, str_int_cell_type_subclustered_temp_1st = arr_str_int_cell_type_subclustered_temp[ -2 : ]
+        score_2nd, score_1st = arr_score[ -2 : ]
+        l_l.append( [ feature_name, str_int_cell_type_subclustered_temp_1st, avg_expr_1st, prop_expr_1st, score_1st, avg_expr_2nd, prop_expr_2nd, score_2nd, avg_expr_highest, prop_expr_highest ] ) # add a record
+    df_unique_marker_feature = pd.DataFrame( l_l, columns = [ 'feature_name', 'str_int_cell_type_subclustered_temp_1st', 'avg_expr_1st', 'prop_expr_1st', 'score_1st', 'avg_expr_2nd', 'prop_expr_2nd', 'score_2nd', 'avg_expr_highest', 'prop_expr_highest' ] )
+    arr_score_ratio = df_unique_marker_feature.score_1st.values / df_unique_marker_feature.score_2nd.values
+    arr_score_ratio[ np.isinf( arr_score_ratio ) ] = float_max_score
+    df_unique_marker_feature[ 'score_ratio' ] = arr_score_ratio
+    return df_unique_marker_feature

@@ -11,6 +11,7 @@ from . import SAM
 from . import MAP
 from . import SEQ
 from . import STR
+from . import OT
 from . import biobookshelf as bk
 
 
@@ -18,12 +19,14 @@ from . import biobookshelf as bk
 ||||||||||||||||||||||||||||||||
 """
 
-# import biobookshelf as bk
-# import biobookshelf.STR as STR
-# import biobookshelf.SEQ as SEQ
-# import biobookshelf.SC as SC
-# import biobookshelf.SAM as SAM
-# import biobookshelf.MAP as MAP
+# import ourotools
+# bk = ourotools.bk
+# STR = ourotools.STR
+# SEQ = ourotools.SEQ
+# SC = ourotools.SC
+# SAM = ourotools.SAM
+# MAP = ourotools.MAP
+# OT = ourotools.OT
 # bk.Wide( 100 )
 
 """
