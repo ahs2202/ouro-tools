@@ -2545,7 +2545,7 @@ def LongFilterNSplit(
     for type_molecule in l_type_molecule :
         for e in [ 'no_poly_A', 'poly_A__plus_strand', 'identical_poly_A_types_at_both_ends', ] :
             l_name_output.append( f'aligned_to_genome__{type_molecule}__{e}' )
-        for e in [ 'no_poly_A', 'external_poly_A__unencoded_G', 'internal_poly_A__unencoded_G', 'external_poly_A__no_unencoded_G', 'internal_poly_A__no_unencoded_G', 'external_poly_A__external_poly_A', 'external_poly_A__internal_poly_A', 'internal_poly_A__internal_poly_A', ] :
+        for e in [ 'no_poly_A', 'external_poly_A__external_G', 'internal_poly_A__external_G', 'external_poly_A__no_external_G', 'internal_poly_A__no_external_G', 'external_poly_A__external_poly_A', 'external_poly_A__internal_poly_A', 'internal_poly_A__internal_poly_A', ] :
             l_name_dist.append( f'aligned_to_genome__{type_molecule}__{e}' )
     
     def _write_a_fastq_record( newfastqfile, r ) :
@@ -2565,33 +2565,33 @@ def LongFilterNSplit(
     
     def _classify_read( seq : str, q_st : int, q_en : int ) :
         """ # 2023-11-02 19:12:39 
-        classlfy read by detecting poly A and unencoded Gs.
+        classlfy read by detecting poly A and external Gs.
 
         # possible labels
-        'no_poly_A', 'external_poly_A__unencoded_G', 'internal_poly_A__unencoded_G', 'external_poly_A__no_unencoded_G', 'internal_poly_A__no_unencoded_G', 'external_poly_A__external_poly_A', 'external_poly_A__internal_poly_A', 'internal_poly_A__internal_poly_A'
+        'no_poly_A', 'external_poly_A__external_G', 'internal_poly_A__external_G', 'external_poly_A__no_external_G', 'internal_poly_A__no_external_G', 'external_poly_A__external_poly_A', 'external_poly_A__internal_poly_A', 'internal_poly_A__internal_poly_A'
 
         return the direction of the read and the classification label
         """
         # internal setting
-        float_min_G_frequency_for_identifying_unencoded_Gs = 0.5
-        int_size_window_for_identifying_unencoded_Gs = 3
+        float_min_G_frequency_for_identifying_external_Gs = 0.5
+        int_size_window_for_identifying_external_Gs = 3
 
         # calculate metrics for classification
         len_left_clipped, left_clipped_T_prop = _calculate_proportion_of_a_base( seq[ max( 0, q_st - int_size_window_for_searching_poly_a_tail ) : q_st ], 'T', int_size_window_for_searching_poly_a_tail )
         len_left_internal, left_internal_T_prop = _calculate_proportion_of_a_base( seq[ q_st : q_st + int_size_window_for_searching_poly_a_tail ], 'T', int_size_window_for_searching_poly_a_tail )
         len_right_clipped, right_clipped_A_prop = _calculate_proportion_of_a_base( seq[ q_en : q_en + int_size_window_for_searching_poly_a_tail ], 'A', int_size_window_for_searching_poly_a_tail )
         len_right_internal, right_internal_A_prop = _calculate_proportion_of_a_base( seq[ max( 0, q_en - int_size_window_for_searching_poly_a_tail ) : q_en ], 'A', int_size_window_for_searching_poly_a_tail )
-        len_left_clipped_3bp, left_clipped_3bp_G_prop = _calculate_proportion_of_a_base( seq[ max( 0, q_st - int_size_window_for_identifying_unencoded_Gs ) : q_st ], 'G', int_size_window_for_identifying_unencoded_Gs )
-        len_right_clipped_3bp, right_clipped_3bp_C_prop = _calculate_proportion_of_a_base( seq[ q_en : q_en + int_size_window_for_identifying_unencoded_Gs ], 'C', int_size_window_for_identifying_unencoded_Gs )
+        len_left_clipped_3bp, left_clipped_3bp_G_prop = _calculate_proportion_of_a_base( seq[ max( 0, q_st - int_size_window_for_identifying_external_Gs ) : q_st ], 'G', int_size_window_for_identifying_external_Gs )
+        len_right_clipped_3bp, right_clipped_3bp_C_prop = _calculate_proportion_of_a_base( seq[ q_en : q_en + int_size_window_for_identifying_external_Gs ], 'C', int_size_window_for_identifying_external_Gs )
 
         # retrieve flags for poly A
         flag_external_poly_A_flipped = left_clipped_T_prop >= float_min_A_frequency_for_identifying_poly_A # if length = 0, the value will be np.nan, and the comparison will be automatically failed
         flag_internal_poly_A_flipped = left_internal_T_prop >= float_min_A_frequency_for_identifying_poly_A
         flag_external_poly_A = right_clipped_A_prop >= float_min_A_frequency_for_identifying_poly_A
         flag_internal_poly_A = right_internal_A_prop >= float_min_A_frequency_for_identifying_poly_A
-        # retrieve flags for unencoded Gs
-        flag_unencoded_Gs = left_clipped_3bp_G_prop >= float_min_G_frequency_for_identifying_unencoded_Gs
-        flag_unencoded_Gs_flipped = right_clipped_3bp_C_prop >= float_min_G_frequency_for_identifying_unencoded_Gs
+        # retrieve flags for external Gs
+        flag_external_Gs = left_clipped_3bp_G_prop >= float_min_G_frequency_for_identifying_external_Gs
+        flag_external_Gs_flipped = right_clipped_3bp_C_prop >= float_min_G_frequency_for_identifying_external_Gs
 
         ''' handles 'no_poly_A' '''
         if not( flag_external_poly_A_flipped or flag_internal_poly_A_flipped or flag_external_poly_A or flag_internal_poly_A ) :
@@ -2626,27 +2626,27 @@ def LongFilterNSplit(
         ''' handles internal poly A at only one end '''
         if flag_internal_poly_A_flipped or flag_internal_poly_A :
             if flag_internal_poly_A_flipped :
-                if flag_unencoded_Gs_flipped :
-                    return 'internal_poly_A__unencoded_G', '-'
+                if flag_external_Gs_flipped :
+                    return 'internal_poly_A__external_G', '-'
                 else :
-                    return 'internal_poly_A__no_unencoded_G', '-'
+                    return 'internal_poly_A__no_external_G', '-'
             else :
-                if flag_unencoded_Gs :
-                    return 'internal_poly_A__unencoded_G', '+'
+                if flag_external_Gs :
+                    return 'internal_poly_A__external_G', '+'
                 else :
-                    return 'internal_poly_A__no_unencoded_G', '+'
+                    return 'internal_poly_A__no_external_G', '+'
 
         ''' handles external poly A at only one end '''
         if flag_external_poly_A_flipped :
-            if flag_unencoded_Gs_flipped :
-                return 'external_poly_A__unencoded_G', '-'
+            if flag_external_Gs_flipped :
+                return 'external_poly_A__external_G', '-'
             else :
-                return 'external_poly_A__no_unencoded_G', '-'
+                return 'external_poly_A__no_external_G', '-'
         else :
-            if flag_unencoded_Gs :
-                return 'external_poly_A__unencoded_G', '+'
+            if flag_external_Gs :
+                return 'external_poly_A__external_G', '+'
             else :
-                return 'external_poly_A__no_unencoded_G', '+'
+                return 'external_poly_A__no_external_G', '+'
     
     def _initialize_dict_arr_dist( ) :
         """ # 2023-08-03 11:49:26 
@@ -7647,7 +7647,7 @@ def LongExportNormalizedCountMatrix(
     path_file_vcf_for_filtering_variant: Union[str, None] = None,
     int_min_count_features_for_filtering_barcodes: int = 50,
     int_length_of_polya_to_append_to_transcript_sequence_during_realignment : int = 50, # during re-alignment analysis for unique transcript assignment, append poly A sequence of given length at the 3' end of transcript sequences, which aids identification of the correct isoform from which the read is likely originated.
-    flag_enforce_transcript_start_site_matching_for_long_read_during_realignment : bool = False, # should only be used when (1) all read contains unencoded Gs sequences at 5' end originating from the template switching activity of RT enzymes (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it use the unencoded G information (the length of unencoded G at the 5' end), and does not perform TSS matching if the read appear to have invalid 5' end (false positive TSS). To enable this behavior, 'int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment' should be set to non-negative values.
+    flag_enforce_transcript_start_site_matching_for_long_read_during_realignment : bool = False, # should only be used when (1) all read contains external Gs sequences at 5' end originating from the template switching activity of RT enzymes (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it use the external G information (the length of external G at the 5' end), and does not perform TSS matching if the read appear to have invalid 5' end (false positive TSS). To enable this behavior, 'int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment' should be set to non-negative values.
     flag_enforce_transcript_end_site_matching_for_long_read_during_realignment : bool = False, # should only be used when (1) all read contains poly A sequences (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it also use internal-polyA-tract priming information (the length of the internal poly A tract, recorded as a BAM record tag with the tag name 'str_name_bam_tag_length_of_internal_polyA' for all reads), and does not perform TES matching if the read appear to be primed by internal-polyA-tract. To enable this behavior, 'int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment' should be set to non-negative values.
     int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment : int = 10, # Rather than aligning an entire sequence of the read, exclude soft clipped regions and align the portion of read that was aligned to the genome. Since this portion of read should be perfectly match the transcript without softclipping if the read was indeed originated from the transcript, during realignment, alignments with extensive softclipping longer than the given threshold will be filtered out. Additionally, alignment to transcript with insertion and deletion longer than this length will be filtered out, too. To disable this behavior, set this value to negative values (e.g., -1).
     int_max_distance_from_transcript_start_for_tss_matching_during_realignment : int = 25, # the maximum distance (in base pairs, bp) from the transcript start coordinates for a read to be assigned to a specific transcript. This argument will be only effective if 'flag_enforce_transcript_start_site_matching_for_long_read_during_realignment' is True.
@@ -7660,7 +7660,7 @@ def LongExportNormalizedCountMatrix(
     str_name_bam_tag_flag_valid_TSS : str = 'VS', # name of the SAM tag containing a flag indicating the 5' site is a valid transcript start site.
     str_name_bam_tag_num_aligned_untemplated_Gs : str = 'AU', # name of the SAM tag containing the number of aligned consecutive Gs from 5' site that were actually untemplated Gs added to the end of the 5' site (the offset between the actual TSS and the alignment end site).
     flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification : bool = False, # if True, a read with four unaligned Gs at 5' site will be considered as having a valid 5' site
-    flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification : bool = False, # if True, a read with four untemplated Gs at 5' site will be considered as having a valid 5' site. The number of untemplated Gs is calculated from the number of unencoded Gs and the number of aligned untemplated Gs.
+    flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification : bool = False, # if True, a read with four untemplated Gs at 5' site will be considered as having a valid 5' site. The number of untemplated Gs is calculated from the number of external Gs and the number of aligned untemplated Gs.
     flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification : bool = False, # if True, a read with 5' site marked as a valid TSS will be considered as having a valid 5' site. (when the 'str_name_bam_tag_flag_valid_TSS' tag is True)
     dict_num_manager_processes_for_each_data_object: dict = {
         'dict_it_promoter' : 0,
@@ -7718,14 +7718,14 @@ def LongExportNormalizedCountMatrix(
     str_name_bam_tag_flag_valid_TSS : str = 'VS', # name of the SAM tag containing a flag indicating the 5' site is a valid transcript start site.
     str_name_bam_tag_num_aligned_untemplated_Gs : str = 'AU', # name of the SAM tag containing the number of aligned consecutive Gs from 5' site that were actually untemplated Gs added to the end of the 5' site (the offset between the actual TSS and the alignment end site).
     flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification : bool = False, # if True, a read with four unaligned Gs at 5' site will be considered as having a valid 5' site
-    flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification : bool = False, # if True, a read with four untemplated Gs at 5' site will be considered as having a valid 5' site. The number of untemplated Gs is calculated from the number of unencoded Gs and the number of aligned untemplated Gs.
+    flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification : bool = False, # if True, a read with four untemplated Gs at 5' site will be considered as having a valid 5' site. The number of untemplated Gs is calculated from the number of external Gs and the number of aligned untemplated Gs.
     flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification : bool = False, # if True, a read with 5' site marked as a valid TSS will be considered as having a valid 5' site. (when the 'str_name_bam_tag_flag_valid_TSS' tag is True)
 
     ------ for re-alignment -------
     str_mappy_aligner_preset_for_realignment : str = 'sr', # minimap2 presets for re-alignment analysis: 'sr' for single-end short read data; 'map-pb' for PacBio long read data; 'map-ont' for Oxford Nanopore long read data. Please avoid using the 'splice' preset, since re-alignment to transcripts should not contain 'splicing', or large deletions.
     int_min_mapq_minimap2_tx_assignment : int = 0, # (default = 0, meaning no filtering). a value between 0~60. Minimum mapping quality required for assigning reads to a unique isoform using minimap2 realignment.
     int_length_of_polya_to_append_to_transcript_sequence_during_realignment : int = 50, # during re-alignment analysis for unique transcript assignment, append poly A sequence of given length at the 3' end of transcript sequences, which aids identification of the correct isoform from which the read is likely originated.
-    flag_enforce_transcript_start_site_matching_for_long_read_during_realignment : bool = False, # should only be used when (1) all read contains unencoded Gs sequences at 5' end originating from the template switching activity of RT enzymes (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it use the unencoded G information (the length of unencoded G at the 5' end), and does not perform TSS matching if the read appear to have invalid 5' end (false positive TSS). To enable this behavior, 'int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment' should be set to non-negative values.
+    flag_enforce_transcript_start_site_matching_for_long_read_during_realignment : bool = False, # should only be used when (1) all read contains external Gs sequences at 5' end originating from the template switching activity of RT enzymes (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it use the external G information (the length of external G at the 5' end), and does not perform TSS matching if the read appear to have invalid 5' end (false positive TSS). To enable this behavior, 'int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment' should be set to non-negative values.
     flag_enforce_transcript_end_site_matching_for_long_read_during_realignment : bool = False, # should only be used when (1) all read contains poly A sequences (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it also use internal-polyA-tract priming information (the length of the internal poly A tract, recorded as a BAM record tag with the tag name 'str_name_bam_tag_length_of_internal_polyA' for all reads), and does not perform TES matching if the read appear to be primed by internal-polyA-tract. To enable this behavior, 'int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment' should be set to non-negative values.
     int_max_distance_from_transcript_start_for_tss_matching_during_realignment : int = 25, # the maximum distance (in base pairs, bp) from the transcript start coordinates for a read to be assigned to a specific transcript. This argument will be only effective if 'flag_enforce_transcript_start_site_matching_for_long_read_during_realignment' is True.
     int_max_distance_from_transcript_end_for_tes_matching_during_realignment : int = 100, # the maximum distance (in base pairs, bp) from the transcript end coordinates for a read to be assigned to a specific transcript. This argument will be only effective if 'flag_enforce_transcript_end_site_matching_for_long_read_during_realignment' is True.
@@ -7939,7 +7939,7 @@ def LongExportNormalizedCountMatrix(
         )
         arg_grp_isoform_realignment.add_argument(
             "--flag_enforce_transcript_start_site_matching_for_long_read_during_realignment",
-            help="(Default: False) Should only be used when (1) all read contains unencoded Gs sequences at 5' end originating from the template switching activity of RT enzymes (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it use the unencoded G information (the length of unencoded G at the 5' end), and does not perform TSS matching if the read appear to have invalid 5' end (false positive TSS). To enable this behavior, 'int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment' should be set to non-negative values.",
+            help="(Default: False) Should only be used when (1) all read contains external Gs sequences at 5' end originating from the template switching activity of RT enzymes (long-read full-length sequencing results) (2) read is stranded so that its directionality (5'->3') matches that of the original mRNA molecule. For long-read, it is recommanded to turn this setting on. When this mode is active, it use the external G information (the length of external G at the 5' end), and does not perform TSS matching if the read appear to have invalid 5' end (false positive TSS). To enable this behavior, 'int_max_softclipping_and_indel_length_for_filtering_alignment_to_transcript_during_realignment' should be set to non-negative values.",
             action="store_true",
         )
         arg_grp_isoform_realignment.add_argument(
@@ -7998,7 +7998,7 @@ def LongExportNormalizedCountMatrix(
         )
         arg_grp_full_length.add_argument(
             "--flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification",
-            help="if True, a read with four untemplated Gs at 5' site will be considered as having a valid 5' site. The number of untemplated Gs is calculated from the number of unencoded Gs and the number of aligned untemplated Gs.",
+            help="if True, a read with four untemplated Gs at 5' site will be considered as having a valid 5' site. The number of untemplated Gs is calculated from the number of external Gs and the number of aligned untemplated Gs.",
             action="store_true",
         )
         arg_grp_full_length.add_argument(
@@ -13078,7 +13078,7 @@ def FilterArtifactReadFromBAM(
     str_name_bam_tag_flag_valid_TSS : str = 'VS', # name of the SAM tag containing a flag indicating the 5' site is a valid transcript start site.
     str_name_bam_tag_num_aligned_untemplated_Gs : str = 'AU', # name of the SAM tag containing the number of aligned consecutive Gs from 5' site that were actually untemplated Gs added to the end of the 5' site (the offset between the actual TSS and the alignment end site).
     flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification : bool = False, # if True, a read with four unaligned Gs at 5' site will be considered as having a valid 5' site
-    flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification : bool = False, # if True, a read with four untemplated Gs at 5' site will be considered as having a valid 5' site. The number of untemplated Gs is calculated from the number of unencoded Gs and the number of aligned untemplated Gs.
+    flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification : bool = False, # if True, a read with four untemplated Gs at 5' site will be considered as having a valid 5' site. The number of untemplated Gs is calculated from the number of external Gs and the number of aligned untemplated Gs.
     flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification : bool = False, # if True, a read with 5' site marked as a valid TSS will be considered as having a valid 5' site. (when the 'str_name_bam_tag_flag_valid_TSS' tag is True)
     flag_skip_output_artifact_reads : bool = False, # if True, does not output a BAM file containing artifact reads 
     int_max_num_record_in_a_batch : int = 100, # the maximum number of SAM records that will be written to each BAM file for each batch. It is recommended to reduce this number if a deadlock occurs during the run (a deadlock from multiprocessing.Pipe) 
