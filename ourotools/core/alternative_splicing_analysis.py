@@ -132,7 +132,7 @@ def classify_and_sort_feature(
     ===Usage Example===
     >>> adata = classify_and_sort_feature( adata, path_folder_ref = '/home/project/Single_Cell_Full_Length_Atlas/ourotools.index/Mus_musculus.GRCm38.102.v0.2.4/', flag_convert_gene_id_to_gene_name = True, flag_assign_features_with_position_tag_to_overlapping_gene = True )
 
-    # 2023-12-14 22:35:32 
+    # 2024-03-22 14:54:03 
     """
     if not inplace :
         adata = adata.copy( ) # create a copy of the data
@@ -141,11 +141,14 @@ def classify_and_sort_feature(
     # retrieve list of features
     arr_ft = adata.var.index.values 
     # strand specific
+    adata.var[ 'flag_short_read' ] = bk.Search_list_of_strings_Return_mask( arr_ft, '|short_read' )
+    # strand specific
     adata.var[ 'flag_strand_specific' ] = bk.Search_list_of_strings_Return_mask( arr_ft, '|strand' )
     # genomic bin mask
     adata.var[ 'flag_genomic_bin' ] = bk.Search_list_of_strings_Return_mask( arr_ft, 'genomic_region|' )
     # repeat element mask
     mask = ~ adata.var[ 'flag_genomic_bin' ].values
+    mask &= ( ~ adata.var[ 'flag_short_read' ].values ) # exclude short_read features for classification
     adata.var[ 'flag_repeat_element' ] = False # initialize the column
     adata.var.loc[ mask, 'flag_repeat_element' ] = bk.Search_list_of_strings_Return_mask( arr_ft[ mask ], 'repeatmasker_ucsc|' )
     # reg. element mask
@@ -751,6 +754,49 @@ def find_markers_at_sub_gene_level(
         'pval' : arr_pval_res,
     } )
     return df_res # return result
+def combine_long_and_short_read_data( 
+    adata_sr, adata_lr, path_folder_ref : str
+) :
+    """
+    Combine long and short-read data.
+    Assumes short-read data were normalized, log-transformed data, while long-read data is normalized data.
+    Cell type annotations (adata_sr.obs)  will be transferred from short-read data object to long-read data object
+    'obsm' will be copied to combined data object in the following order : short_read, long_read (long-read obsm overwriting short-read obsm)
+    
+    adata_sr, # short-read AnnData object
+    adata_lr, # long-raed AnnData object
+    path_folder_ref : str, # reference folder
+    
+    # 2024-03-22 14:59:51 
+    """
+    import anndata as ad
+    '''
+    combine short-read and long-read data
+    '''
+    # retrieve copy of raw short read counts (normalized) of target cells
+    adata_sr_copy = adata_sr.copy( )
+    # change varnames so that var names become uniuque
+    adata_sr_copy.var.index = list( f"{e}|short_read" for e in adata_sr_copy.var.index.values )
+
+    # retrieve copy of raw long read counts (normalized) of target cells
+    adata_lr_copy = adata_lr.copy( )
+    sc.pp.log1p(adata_lr_copy) # perform log-transformation
+
+    # retrieve list of shared barcodes
+    l_id_bc_shared = np.sort( list( set( adata_sr_copy.obs.index.values ).intersection( adata_lr_copy.obs.index.values ) ) )
+
+    adata_sr_copy, adata_lr_copy = adata_sr_copy[ l_id_bc_shared, : ].copy( ), adata_lr_copy[ l_id_bc_shared, : ].copy( ) # align obs
+    adata_combined = ad.concat( [ adata_sr_copy, adata_lr_copy ], axis = 1 ) # combine short-read and long-read data
+    
+    adata_combined.obs = adata_sr_copy.obs # transfer obs
+    
+    ''' copy obsm '''
+    for a in [ adata_sr_copy, adata_lr_copy ] :
+        for k in a.obsm :
+            adata_combined.obsm[ k ] = a.obsm[ k ]
+
+    adata_combined = classify_and_sort_feature( adata_combined, path_folder_ref = path_folder_ref, flag_convert_gene_id_to_gene_name = True, flag_assign_features_with_position_tag_to_overlapping_gene = True )
+    return adata_combined
 
 ''' utility functions that are not specific to the ourotools pipeline '''
 def identify_batch_specific_features( 
@@ -820,8 +866,14 @@ def search_marker_features_unique_to_a_single_cluster(
     name_col_cluster : str, # name of the column in the 'adata.obs' containing cluster labels 
     float_max_score : 1000, # 'infinite' score ratios will be replaced by this value
 
-    # 2024-02-20 13:24:17 
+    # 2024-03-22 19:06:46 
     """
+    '''
+    raise an error when there is only single cluster label available
+    '''
+    if len( set( adata.obs[ name_col_cluster ].values ) ) == 1 : # check the number of labels, and if only a single label available, raise an error
+        RuntimeError( f"only single label available for '{name_col_cluster}'" )
+    
     '''
     survey proportion expressed and avg expression
     '''
