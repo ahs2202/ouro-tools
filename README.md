@@ -1,13 +1,18 @@
-# Ouro-Tools
-Ouro-Tools is a novel computational pipeline for long-read scRNA-seq with the following key features. Ouro-Tools (1) normalizes mRNA size distributions and (2) detects mRNA 7-methylguanosine caps to integrate multiple single-cell long-read RNA-sequencing experiments across modalities and characterize full-length transcripts, respectively.
-
 ![ouro-tools.logo.png](doc/img/ouro-tools.logo.png)
+
+# Ouro-Tools
+
+Ouro-Tools is a novel computational pipeline for long-read scRNA-seq with the following key features. Ouro-Tools **(1) normalizes mRNA size distributions** and **(2) detects mRNA 7-methylguanosine caps** to integrate multiple single-cell long-read RNA-sequencing experiments across modalities and characterize full-length transcripts, respectively.
+
+
+
+## Introduction
 
 ![ouro-tools.modules.png](doc/img/ouro-tools.modules.png)
 
 
 
-### Installation 
+## Installation 
 
 The latest stable version of Ouro-Tools is available via https://pypi.org/
 
@@ -23,36 +28,36 @@ pip install .
 
 Ouro-Tools can be used in command line, in a Python script, or in an interactive Python interpreter (e.g., Jupyter Notebook).
 
-##### Bash shell
+### Bash shell
 
-To print the command line usage from the bash shell, please type the following command.
+To print the command line usage example of each module from the bash shell, please type the following command.
 
 ```bash
-ouro-tools count -h
+ourotools LongFilterNSplit -h
 ```
 
 
 
-##### Python script
+### Python script
 
 ```python
 #run 
-import 
+import ourotools
 if __name__ == '__main__' : # protect the entry point (important!)
 
 ```
 
-##### IPython environment
+### IPython environment
 
 Detailed arguments and the docstring can be printed in IPython environment.
 
 ```python
-?
+ourotools.LongFilterNSplit?
 ```
 
 
 
-### Building an index for Ouro-Tools' single-cell count module
+## Building an index for Ouro-Tools' single-cell count module
 
 Single-cell count module of Ouro-Tools utilizes <u>genome, transcriptome, and gene annotations</u> to assign reads to **genes, isoforms, and genomic bins (tiles across the genome)**. The index building process is automatic; <u>there is no needs to run a separate command in order to build the index</u>. Once Ouro-Tools processes these information before analyzing an input BAM file(s), the program saves an index in order to load the information much faster next time.
 
@@ -60,17 +65,21 @@ We recommends using <u>***Ensembl*** reference genome, transcriptome, and gene a
 
 
 
-##### Pre-build index files 
+### Pre-build index files 
 
 pre-built index can be downloaded using the following links (should be extracted to a folder using **tar -xf** command):
 
-<u>*Human (GRCh38, Ensembl version 105)*</u> : https://www.dropbox.com/s/8agizrykiorpnag/Homo_sapiens.GRCh38.105.v0.1.1.tar?dl=0
+<u>*Human (GRCh38, Ensembl version 105)*</u> : https://ouro-tools.s3.amazonaws.com/index/latest/Homo_sapiens.GRCh38.105.v0.2.4.tar
 
-*<u>Mouse (GRCm38, Ensembl version 102)</u>* : https://www.dropbox.com/s/ehen2xg0bmc573g/Mus_musculus.GRCm38.102.v0.1.1.tar?dl=0
+*<u>Mouse (GRCm38, Ensembl version 102)</u>* : https://ouro-tools.s3.amazonaws.com/index/latest/Mus_musculus.GRCm38.102.v0.2.4.tar
+
+<u>*Zebrafish (GRCz11, Ensembl version 104)*</u> : https://ouro-tools.s3.amazonaws.com/index/latest/Danio_rerio.GRCz11.104.v0.2.4.tar
+
+*<u>Thale cress (TAIR10, Ensembl Plant version 56)</u>* : https://ouro-tools.s3.amazonaws.com/index/latest/Arabidopsis_thaliana.TAIR10.56.v0.2.4.tar
 
 
 
-##### Building index from scratch
+### Building index from scratch
 
 An Ouro-Tools index can be built on-the-fly from the input genome, transcriptome, and gene annotation files. For example, below are the list of files that were used for the pre-built Ouro-Tools index "<u>*[Human (GRCh38, Ensembl version 105)](https://www.dropbox.com/s/8agizrykiorpnag/Homo_sapiens.GRCh38.105.v0.1.1.tar?dl=0)*</u>".
 
@@ -126,7 +135,7 @@ An Ouro-Tools index can be built on-the-fly from the input genome, transcriptome
 
 
 
-### Running the Ouro-Tools in a Python script (with examples)
+## Running the Ouro-Tools in a Python script (with examples)
 
 ```python
 #run Ouro-Tools 
