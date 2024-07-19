@@ -1,33 +1,34 @@
-# Scarab-Count (Single-cell Catch-All Analysis Toolkit)
- a python package for analyzing every genomic regions of single-cell RNA/ATAC-seq data. 
+# Ouro-Tools
+Ouro-Tools is a novel computational pipeline for long-read scRNA-seq with the following key features. Ouro-Tools (1) normalizes mRNA size distributions and (2) detects mRNA 7-methylguanosine caps to integrate multiple single-cell long-read RNA-sequencing experiments across modalities and characterize full-length transcripts, respectively.
 
+![ouro-tools.logo.png](doc/img/ouro-tools.logo.png)
 
-![scarab-logo](doc/img/scarab_logo.png)
+![ouro-tools.modules.png](doc/img/ouro-tools.modules.png)
 
 
 
 ### Installation 
 
-Currently, Scarab-Count is <u>***unpublished***</u>, and maintained in the private repo. 
+The latest stable version of Ouro-Tools is available via https://pypi.org/
 
-In order to install Scarab-Count, run the following commands in bash shell.
+In order to install the latest, unreleased version of Ouro-Tools, run the following commands in bash shell.
 
 ```bash
-git clone https://github.com/ahs2202/scarab-count.git
-cd scarab-count
+git clone https://github.com/ahs2202/ouro-tools.git
+cd ouro-tools
 pip install .
 ```
 
 
 
-scarab-count can be used in command line, in a Python script, or in an interactive Python interpreter.
+Ouro-Tools can be used in command line, in a Python script, or in an interactive Python interpreter (e.g., Jupyter Notebook).
 
 ##### Bash shell
 
 To print the command line usage from the bash shell, please type the following command.
 
 ```bash
-scarab_count count -h
+ouro-tools count -h
 ```
 
 
@@ -35,37 +36,25 @@ scarab_count count -h
 ##### Python script
 
 ```python
-#run scarab-count v0.2.2
-import scarab_count # import scarab-count
+#run 
+import 
 if __name__ == '__main__' : # protect the entry point (important!)
-    # retrieve path of the input bam files
-    df_file = scarab_count.pd.read_csv( '/path/to/tsv/file/containing/bam/file/paths', sep = '\t' )
-    # retrieve bam files and compose a list of output folders
-    l_path_file_bam_input = df_file.path.values
-    l_path_folder_output = [ f'{path_file}.scarab-count.{scarab_count.__version__}.output/' for path_file in l_path_file_bam_input ]
 
-    # run scarab-count
-    scarab_count.count( 
-        path_folder_ref = '/path/where/reference/will/be/saved/and/loaded/Homo_sapiens.GRCh38.105.v0.2.2/', 
-        l_path_file_bam_input = l_path_file_bam_input,
-        l_path_folder_output = l_path_folder_output,
-        l_str_mode_scarab_count = [ 'gex' ],
-    )
 ```
 
 ##### IPython environment
 
-Detailed arguments and the docstring can be printed in IPython environment (Jupyter Notebook).
+Detailed arguments and the docstring can be printed in IPython environment.
 
 ```python
-scarab_count.count?
+?
 ```
 
 
 
-### Building an index for scarab-count
+### Building an index for Ouro-Tools' single-cell count module
 
-Scarab-Count utilizes <u>genome, transcriptome, and gene annotations</u> to assign reads to **genes, isoforms, and genomic bins (tiles across the genome)**. The index building process is automatic; <u>there is no needs to run a separate command in order to build the index</u>. Once Scarab-Count processes these information before analyzing an input BAM file(s), the program saves an index in order to load the information much faster next time.
+Single-cell count module of Ouro-Tools utilizes <u>genome, transcriptome, and gene annotations</u> to assign reads to **genes, isoforms, and genomic bins (tiles across the genome)**. The index building process is automatic; <u>there is no needs to run a separate command in order to build the index</u>. Once Ouro-Tools processes these information before analyzing an input BAM file(s), the program saves an index in order to load the information much faster next time.
 
 We recommends using <u>***Ensembl*** reference genome, transcriptome, and gene annotations of the same version</u> (release number). 
 
@@ -83,7 +72,7 @@ pre-built index can be downloaded using the following links (should be extracted
 
 ##### Building index from scratch
 
-A Scarab-Count index can be built on-the-fly from the input genome, transcriptome, and gene annotation files. For example, below are the list of files that were used for the pre-built Scarab-Count index "<u>*[Human (GRCh38, Ensembl version 105)](https://www.dropbox.com/s/8agizrykiorpnag/Homo_sapiens.GRCh38.105.v0.1.1.tar?dl=0)*</u>".
+An Ouro-Tools index can be built on-the-fly from the input genome, transcriptome, and gene annotation files. For example, below are the list of files that were used for the pre-built Ouro-Tools index "<u>*[Human (GRCh38, Ensembl version 105)](https://www.dropbox.com/s/8agizrykiorpnag/Homo_sapiens.GRCh38.105.v0.1.1.tar?dl=0)*</u>".
 
 
 
@@ -137,59 +126,11 @@ A Scarab-Count index can be built on-the-fly from the input genome, transcriptom
 
 
 
-### Running the Scarab-Count in a Python script (with examples)
+### Running the Ouro-Tools in a Python script (with examples)
 
 ```python
-#run scarab-count v0.2.2
-#pipeline v0.0.20230110
-import scarab_count # import scarab-count
-if __name__ == '__main__' :
-    # setting
-    scarab_count.logger.info( f"pipeline started" )
+#run Ouro-Tools 
 
-    # set paths of the reference files
-    path_folder_ref = '/path/where/reference/will/be/saved/and/loaded/Homo_sapiens.GRCh38.105.v0.2.2/'
-    path_fa_for_cram = '/home/shared/cellranger_reference/refdata-gex-GRCh38-2020-A/fasta/genome.fa' 
-    path_file_vcf_for_filtering_variant = '/home/shared/database/ncbi/clinvar/clinvar_20221231.vcf.gz'
-
-    # retrieve path of the input bam files
-    df_file = scarab_count.pd.read_csv( '/path/to/tsv/file/containing/bam/file/paths', sep = '\t' )
-
-    # retrieve bam files and compose a list of output folders
-    l_path_file_bam_input = df_file.path.values
-    l_path_folder_output = [ f'{path_file}.scarab-count.{scarab_count.__version__}.output/' for path_file in l_path_file_bam_input ]
-
-    # run scarab-count
-    scidx = scarab_count.count( 
-        # scidx = scidx, # previously loaded index can be re-used 
-        flag_usage_from_command_line_interface = False, 
-        path_folder_ref = path_folder_ref, 
-        l_path_file_bam_input = l_path_file_bam_input,
-        l_path_folder_output = l_path_folder_output,
-        l_str_mode_scarab_count = [ 'gex' ],
-        int_num_sam_records_for_each_chunk = 100000, 
-        int_num_samples_analyzed_concurrently = 4, # starting 4 pipelines, each pipeline processing a single BAM file at a time independently from other pipelines.
-        n_threads = 64, # total number of CPUs used for runs. for example. when 'int_num_samples_analyzed_concurrently' is 4 and 'n_threads' is 64, the number of CPUs for analyzing each sample will be 16, and 4 samples will be analyzed concurrently at the same time.
-        verbose = True, # for debugging purpose, we recommend to turn on the verbose setting.
-        path_file_fa_for_cram = path_fa_for_cram, # if input files are CRAM files, reference FASTA file for the CRAM files should be given as an input.
-        path_file_vcf_for_filtering_variant = path_file_vcf_for_filtering_variant,
-        flag_skip_read_analysis_summary_output_bam_file = False, # output annotated BAM file
-        flag_skip_read_analysis_summary_output_tsv_file = True, # does not generate a TSV file containing the analysis result for each individual read (useful for debugging).
-        int_bp_for_bins = 100, # the size of the genomic bin (genomic tiling)
-        flag_include_strand_specific_counts = True, # count reads in a strand-specific manner. 
-        flag_output_variant_information_with_annotations = True, # assign reads to each annotation with variant information. 
-        dict_num_manager_processes_for_each_data_object = { 
-            'dict_it_promoter' : 0,
-            'dict_t_splice_junc_to_info_genome' : 0,
-            'dict_it_exon' : 0,
-            'dict_it_exon_transcriptome' : 3, # 4.5 GB
-            'dict_it_splice_junc_transcriptome' : 3, # 4.5 GB
-            'dict_it_rpmk' : 4, # each 12 GB
-            'dict_it_reg' : 5, # 2 GB
-            'dict_fa_transcriptome' : 3, # 1.5 GB
-        },
-        l_seqname_to_skip = [ 'MT' ], # skip mitochondrial sequences
-    )
 
 
 ```
@@ -198,6 +139,6 @@ if __name__ == '__main__' :
 
 ---------------
 
-Scarab-Count was developed by Hyunsu An at Gwangju Institute of Science and Technology under the supervision of Professor JiHwan Park. 
+Ouro-Tools was developed by Hyunsu An and Chaemin Lim at Gwangju Institute of Science and Technology under the supervision of Professor Jihwan Park. 
 
-© 2022 Functional Genomics Lab, Gwangju Institute of Science and Technology
+© 2024 Functional Genomics Lab, Gwangju Institute of Science and Technology

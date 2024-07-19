@@ -5992,7 +5992,7 @@ def LongClassify5pSiteProfiles(
     ''' process 'dict_weight' argument '''
     l_name_col_for_5p_site_classification = list( f'float_proportion_of_unaligned_{"G" * int_num_G}' for int_num_G in range( 0, len( dict_weight[ 'mtx' ][ 0 ] ) ) ) # retrieve 'l_name_col_for_5p_site_classification' based on the shape of the scoring matrix
     l_name_5p_site_class = dict_weight[ 'l_label' ] # retrieve names of the classification labels
-    arr_num_aligned_untemplated_G_for_labels = np.array( list( np.nan if e == 'no_unrefG' else - int( e.split( '_', 1 )[ 0 ] ) for e in dict_weight[ 'l_label' ] ), dtype = object ) # retrieve the number of aligned G bases for each label
+    arr_num_aligned_unreferenced_G_for_labels = np.array( list( np.nan if e == 'no_unrefG' else - int( e.split( '_', 1 )[ 0 ] ) for e in dict_weight[ 'l_label' ] ), dtype = object ) # retrieve the number of aligned G bases for each label
     arr_GGGG_for_labels = np.array( list( e.rsplit( '_', 1 )[ 1 ] == 'GGGG' for e in l_name_5p_site_class ), dtype = bool ) # flag 5p site label indicating GGGG
 
     """
@@ -6160,14 +6160,14 @@ def LongClassify5pSiteProfiles(
 
             ''' adjust the classification results based on the number of 'int_num_G_aligned_avg' '''
             # adjust classes based on the 'int_num_G_aligned_avg'
-            int_class_no_unrefG = np.where( pd.isnull( arr_num_aligned_untemplated_G_for_labels ) )[ 0 ][ 0 ] # integer representation of 'no unrefG' classification
+            int_class_no_unrefG = np.where( pd.isnull( arr_num_aligned_unreferenced_G_for_labels ) )[ 0 ][ 0 ] # integer representation of 'no unrefG' classification
             arr_int_num_G_aligned_avg = df_propG.int_num_G_aligned_avg.values
             for int_num_G_aligned_avg in df_propG.int_num_G_aligned_avg.unique( ) : # for each 'int_num_G_aligned_avg'
                 mask = arr_int_num_G_aligned_avg == int_num_G_aligned_avg # retrieve mask for current 'int_num_G_aligned_avg'
 
                 # update 'inferred_num_unrefG_aligned_to_genome'
                 arr = df_propG.loc[ mask, 'int_class' ]
-                for int_class in np.where( arr_num_aligned_untemplated_G_for_labels > int_num_G_aligned_avg )[ 0 ] :
+                for int_class in np.where( arr_num_aligned_unreferenced_G_for_labels > int_num_G_aligned_avg )[ 0 ] :
                     arr[ arr == int_class ] = int_class_no_unrefG # 'inferred_num_unrefG_aligned_to_genome' cannot exceed 'int_num_G_aligned_avg', and they will be classified as 'no unrefG' class
                 df_propG.loc[ mask, 'int_class' ] = arr
                 
@@ -6184,13 +6184,13 @@ def LongClassify5pSiteProfiles(
             ''' initialize 'dict_t_5p_classification' container '''
             # list of flag of labels indicatings GGGG 
             dict_t_5p_classification = dict( ( e, dict( ) ) for e in set( arr_GGGG_for_labels ) )
-            for flag_GGGG, int_num_aligned_untemplated_Gs in zip( arr_GGGG_for_labels, arr_num_aligned_untemplated_G_for_labels ) :
-                if int_num_aligned_untemplated_Gs not in dict_t_5p_classification[ flag_GGGG ] :
-                    dict_t_5p_classification[ flag_GGGG ][ int_num_aligned_untemplated_Gs ] = set( )
+            for flag_GGGG, int_num_aligned_unreferenced_Gs in zip( arr_GGGG_for_labels, arr_num_aligned_unreferenced_G_for_labels ) :
+                if int_num_aligned_unreferenced_Gs not in dict_t_5p_classification[ flag_GGGG ] :
+                    dict_t_5p_classification[ flag_GGGG ][ int_num_aligned_unreferenced_Gs ] = set( )
 
             ''' construct 'dict_t_5p_classification' '''
             for t_5p, int_class in df_propG[ [ 't_5p', 'int_class' ] ].values :
-                dict_t_5p_classification[ arr_GGGG_for_labels[ int_class ] ][ arr_num_aligned_untemplated_G_for_labels[ int_class ] ].add( t_5p )
+                dict_t_5p_classification[ arr_GGGG_for_labels[ int_class ] ][ arr_num_aligned_unreferenced_G_for_labels[ int_class ] ].add( t_5p )
 
             ''' export 'dict_t_5p_classification' '''
             bk.PICKLE_Write( f"{path_folder_output}5pSite/dict_t_5p_classification.{name_chr}.pkl", dict_t_5p_classification )
@@ -6294,7 +6294,7 @@ def LongClassify5pSiteProfiles(
         l_name_col_hover = [ 'id_5p_site' ] + l_name_col_for_5p_site_classification # list of column names that will be interatively visualized on a graph
         for idx_class, name_class_5p_site in enumerate( l_name_5p_site_class ) : # for each 5p site class label
             ''' draw interactive graphs '''
-            int_num_aligned_G_for_label, flag_GGGG_for_label = arr_num_aligned_untemplated_G_for_labels[ idx_class ], arr_GGGG_for_labels[ idx_class ] # retrieve information about the current class label
+            int_num_aligned_G_for_label, flag_GGGG_for_label = arr_num_aligned_unreferenced_G_for_labels[ idx_class ], arr_GGGG_for_labels[ idx_class ] # retrieve information about the current class label
             flag_no_unrefG = isinstance( int_num_aligned_G_for_label, float ) # retrieve 'flag_no_unrefG'
             # compose x and y column names
             name_col_x = 'float_proportion_of_unaligned_' + ( 'GGG' if flag_no_unrefG else 'G' * ( 3 - int_num_aligned_G_for_label ) ) # handle np.nan
@@ -6337,7 +6337,7 @@ def LongAdd5pSiteClassificationResultToBAM(
     AG:i = Number of consecutive G bases start from the 5p site (alignment start site) in the aligned region of the read.
     UG:i = Number of consecutive G bases start from the 5p site (alignment start site) in the unaligned region of the read.
     VS:i = 1 if the 5p site is classified as a valid Transcript Start Site (TSS). 0 if the 5p site is classified as an invalid TSS and represent 5p sites contributes by PCR/RT artifacts (including 5p degradation products of full-length transcripts).
-    AU:i = Number of untemplated G bases aligned to the genome, inferred from the 5p site classification analysis.
+    AU:i = Number of unreferenced G bases aligned to the genome, inferred from the 5p site classification analysis.
 
     returns
     """
@@ -6453,7 +6453,7 @@ def LongAdd5pSiteClassificationResultToBAM(
     name_tag_num_aligned_Gs = 'AG'
     name_tag_num_unaligned_Gs = 'UG'
     name_tag_flag_valid_TSS = 'VS'
-    name_tag_num_aligned_untemplated_Gs = 'AU'
+    name_tag_num_aligned_unreferenced_Gs = 'AU'
 
     """ validate input directory  """
     l_path_folder_input_valid = [ ]
@@ -6771,9 +6771,9 @@ def LongAdd5pSiteClassificationResultToBAM(
                             '''
                             for flag_GGGG in dict_t_5p_classification :
                                 _dict_data = dict_t_5p_classification[ flag_GGGG ]
-                                for int_num_aligned_untemplated_Gs in _dict_data :
-                                    if t_id_5p in _dict_data[ int_num_aligned_untemplated_Gs ] :
-                                        return flag_GGGG, int_num_aligned_untemplated_Gs
+                                for int_num_aligned_unreferenced_Gs in _dict_data :
+                                    if t_id_5p in _dict_data[ int_num_aligned_unreferenced_Gs ] :
+                                        return flag_GGGG, int_num_aligned_unreferenced_Gs
                             return None, None # if t_id_5p has not been found, return None, None
 
                     # read file and write the record
@@ -6805,11 +6805,11 @@ def LongAdd5pSiteClassificationResultToBAM(
 
                             ''' add new tags containing 5p site classification result '''
                             if flag_5p_site_classification_available :
-                                flag_GGGG, int_num_aligned_untemplated_Gs = get_classification_result( t_id_5p )
+                                flag_GGGG, int_num_aligned_unreferenced_Gs = get_classification_result( t_id_5p )
                                 if flag_GGGG is not None : # if a classification result is available for the current 't_id_5p'
                                     l_tags.extend( [ 
                                         ( name_tag_flag_valid_TSS, int( flag_GGGG ), 'i' ), 
-                                        ( name_tag_num_aligned_untemplated_Gs, -1 if isinstance( int_num_aligned_untemplated_Gs, float ) else int_num_aligned_untemplated_Gs, 'i' ) # add -1 if int_num_aligned_untemplated_Gs == np.nan (no unref G/untemplated G)
+                                        ( name_tag_num_aligned_unreferenced_Gs, -1 if isinstance( int_num_aligned_unreferenced_Gs, float ) else int_num_aligned_unreferenced_Gs, 'i' ) # add -1 if int_num_aligned_unreferenced_Gs == np.nan (no unref G/untemplated G)
                                     ] ) # add tags indicating the number of aligned/unaligned G bases.
                                     int_num_reads_analyzed_with_5p_site_classification_result += 1 # update the summary metric
 
@@ -7584,7 +7584,7 @@ def LongExportNormalizedCountMatrix(
     str_name_gtf_attr_for_name_transcript: str = "transcript_name",
     int_min_mapq_unique_mapped_for_gex_data: int = 255,
     int_min_mapq_unique_mapped_for_atac_data: int = 60,
-    int_n_bases_padding_around_interval: int = 10,
+    int_n_bases_padding_around_interval: int = 10, # deprecated
     path_file_tsv_repeatmasker_ucsc: Union[str, None] = None,
     l_repClass_repeatmasker_ucsc: list[str] = [
         "SINE",
@@ -7658,7 +7658,7 @@ def LongExportNormalizedCountMatrix(
     str_name_bam_tag_num_aligned_Gs : str = 'AG', # name of the SAM tag containing the number of consecutive Gs that start froms 5' site toward the aligned portion of the read.
     str_name_bam_tag_num_unaligned_Gs : str = 'UG', # name of the SAM tag containing the number of consecutive Gs that start froms 5' site toward the unaligned portion of the read.
     str_name_bam_tag_flag_valid_TSS : str = 'VS', # name of the SAM tag containing a flag indicating the 5' site is a valid transcript start site.
-    str_name_bam_tag_num_aligned_untemplated_Gs : str = 'AU', # name of the SAM tag containing the number of aligned consecutive Gs from 5' site that were actually untemplated Gs added to the end of the 5' site (the offset between the actual TSS and the alignment end site).
+    str_name_bam_tag_num_aligned_unreferenced_Gs : str = 'AU', # name of the SAM tag containing the number of aligned consecutive Gs from 5' site that were actually untemplated Gs added to the end of the 5' site (the offset between the actual TSS and the alignment end site).
     flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification : bool = False, # if True, a read with four unaligned Gs at 5' site will be considered as having a valid 5' site
     flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification : bool = False, # if True, a read with four untemplated Gs at 5' site will be considered as having a valid 5' site. The number of untemplated Gs is calculated from the number of external Gs and the number of aligned untemplated Gs.
     flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification : bool = False, # if True, a read with 5' site marked as a valid TSS will be considered as having a valid 5' site. (when the 'str_name_bam_tag_flag_valid_TSS' tag is True)
@@ -7716,7 +7716,7 @@ def LongExportNormalizedCountMatrix(
     str_name_bam_tag_num_aligned_Gs : str = 'AG', # name of the SAM tag containing the number of consecutive Gs that start froms 5' site toward the aligned portion of the read.
     str_name_bam_tag_num_unaligned_Gs : str = 'UG', # name of the SAM tag containing the number of consecutive Gs that start froms 5' site toward the unaligned portion of the read.
     str_name_bam_tag_flag_valid_TSS : str = 'VS', # name of the SAM tag containing a flag indicating the 5' site is a valid transcript start site.
-    str_name_bam_tag_num_aligned_untemplated_Gs : str = 'AU', # name of the SAM tag containing the number of aligned consecutive Gs from 5' site that were actually untemplated Gs added to the end of the 5' site (the offset between the actual TSS and the alignment end site).
+    str_name_bam_tag_num_aligned_unreferenced_Gs : str = 'AU', # name of the SAM tag containing the number of aligned consecutive Gs from 5' site that were actually untemplated Gs added to the end of the 5' site (the offset between the actual TSS and the alignment end site).
     flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification : bool = False, # if True, a read with four unaligned Gs at 5' site will be considered as having a valid 5' site
     flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification : bool = False, # if True, a read with four untemplated Gs at 5' site will be considered as having a valid 5' site. The number of untemplated Gs is calculated from the number of external Gs and the number of aligned untemplated Gs.
     flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification : bool = False, # if True, a read with 5' site marked as a valid TSS will be considered as having a valid 5' site. (when the 'str_name_bam_tag_flag_valid_TSS' tag is True)
@@ -7976,7 +7976,7 @@ def LongExportNormalizedCountMatrix(
             default = 'VS',
         )  
         arg_grp_full_length.add_argument(
-            "--str_name_bam_tag_num_aligned_untemplated_Gs",
+            "--str_name_bam_tag_num_aligned_unreferenced_Gs",
             help="(Default: 'AU') name of the SAM tag containing the number of aligned consecutive Gs from 5' site that were actually untemplated Gs added to the end of the 5' site (the offset between the actual TSS and the alignment end site).",
             default = 'AU',
         )  
@@ -8415,7 +8415,7 @@ def LongExportNormalizedCountMatrix(
         str_name_bam_tag_num_aligned_Gs = args.str_name_bam_tag_num_aligned_Gs
         str_name_bam_tag_num_unaligned_Gs = args.str_name_bam_tag_num_unaligned_Gs
         str_name_bam_tag_flag_valid_TSS = args.str_name_bam_tag_flag_valid_TSS
-        str_name_bam_tag_num_aligned_untemplated_Gs = args.str_name_bam_tag_num_aligned_untemplated_Gs
+        str_name_bam_tag_num_aligned_unreferenced_Gs = args.str_name_bam_tag_num_aligned_unreferenced_Gs
         flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification = args.flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification
         flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification = args.flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification
         flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification = args.flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification
@@ -8632,8 +8632,8 @@ def LongExportNormalizedCountMatrix(
             if str_name_bam_tag_num_aligned_Gs in dict_tags :
                 flag_valid_5p = _identify_valid_5p_based_on_number_of_unrefGs( dict_tags[ str_name_bam_tag_num_aligned_Gs ] ) # update 'flag_valid_5p'
         if not flag_valid_5p and not flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification : 
-            if str_name_bam_tag_num_unaligned_Gs in dict_tags and str_name_bam_tag_num_aligned_untemplated_Gs in dict_tags :
-                flag_valid_5p = _identify_valid_5p_based_on_number_of_unrefGs( dict_tags[ str_name_bam_tag_num_unaligned_Gs ] + dict_tags[ str_name_bam_tag_num_aligned_untemplated_Gs ] ) # update 'flag_valid_5p'
+            if str_name_bam_tag_num_unaligned_Gs in dict_tags and str_name_bam_tag_num_aligned_unreferenced_Gs in dict_tags :
+                flag_valid_5p = _identify_valid_5p_based_on_number_of_unrefGs( dict_tags[ str_name_bam_tag_num_unaligned_Gs ] + dict_tags[ str_name_bam_tag_num_aligned_unreferenced_Gs ] ) # update 'flag_valid_5p'
         return flag_valid_5p
 
     """
@@ -9080,7 +9080,7 @@ def LongExportNormalizedCountMatrix(
                     'str_name_bam_tag_num_aligned_Gs' : str_name_bam_tag_num_aligned_Gs,
                     'str_name_bam_tag_num_unaligned_Gs' : str_name_bam_tag_num_unaligned_Gs,
                     'str_name_bam_tag_flag_valid_TSS' : str_name_bam_tag_flag_valid_TSS,
-                    'str_name_bam_tag_num_aligned_untemplated_Gs' : str_name_bam_tag_num_aligned_untemplated_Gs,
+                    'str_name_bam_tag_num_aligned_unreferenced_Gs' : str_name_bam_tag_num_aligned_unreferenced_Gs,
                     'flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification' : flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification,
                     'flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification' : flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification,
                     'flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification' : flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification,
@@ -13058,10 +13058,10 @@ def FilterArtifactReadFromBAM(
     str_name_bam_tag_num_aligned_Gs : str = 'AG',
     str_name_bam_tag_num_unaligned_Gs : str = 'UG',
     str_name_bam_tag_flag_valid_TSS : str = 'VS',
-    str_name_bam_tag_num_aligned_untemplated_Gs : str = 'AU',
-    flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification : bool = False,
-    flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification : bool = False,
-    flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification : bool = False,
+    str_name_bam_tag_num_aligned_unreferenced_Gs : str = 'AU',
+    flag_does_not_automatically_classify_read_with_unrefGGGG_as_read_with_valid_5p : bool = False,
+    flag_does_not_automatically_classify_read_with_unrefGGGG_considering_num_of_aligned_unrefG_as_read_with_valid_5p : bool = False,
+    flag_does_not_automatically_classify_read_of_a_valid_TSS_as_read_with_valid_5p : bool = False,
     flag_skip_output_artifact_reads : bool = False,
     int_max_num_record_in_a_batch : int = 100,
 ) :
@@ -13076,10 +13076,10 @@ def FilterArtifactReadFromBAM(
     str_name_bam_tag_num_aligned_Gs : str = 'AG', # name of the SAM tag containing the number of consecutive Gs that start froms 5' site toward the aligned portion of the read.
     str_name_bam_tag_num_unaligned_Gs : str = 'UG', # name of the SAM tag containing the number of consecutive Gs that start froms 5' site toward the unaligned portion of the read.
     str_name_bam_tag_flag_valid_TSS : str = 'VS', # name of the SAM tag containing a flag indicating the 5' site is a valid transcript start site.
-    str_name_bam_tag_num_aligned_untemplated_Gs : str = 'AU', # name of the SAM tag containing the number of aligned consecutive Gs from 5' site that were actually untemplated Gs added to the end of the 5' site (the offset between the actual TSS and the alignment end site).
-    flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification : bool = False, # if True, a read with four unaligned Gs at 5' site will be considered as having a valid 5' site
-    flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification : bool = False, # if True, a read with four untemplated Gs at 5' site will be considered as having a valid 5' site. The number of untemplated Gs is calculated from the number of external Gs and the number of aligned untemplated Gs.
-    flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification : bool = False, # if True, a read with 5' site marked as a valid TSS will be considered as having a valid 5' site. (when the 'str_name_bam_tag_flag_valid_TSS' tag is True)
+    str_name_bam_tag_num_aligned_unreferenced_Gs : str = 'AU', # name of the SAM tag containing the number of aligned consecutive Gs from 5' site that were actually unreferenced Gs added to the end of the 5' site (the offset between the actual TSS and the alignment end site).
+    flag_does_not_automatically_classify_read_with_unrefGGGG_as_read_with_valid_5p : bool = False, # if False, a read with four unaligned Gs at 5' site will be considered as having a valid 5' site
+    flag_does_not_automatically_classify_read_with_unrefGGGG_considering_num_of_aligned_unrefG_as_read_with_valid_5p : bool = False, # if False, a read with four unreferenced Gs at 5' site will be considered as having a valid 5' site. The number of unreferenced Gs is calculated from the number of external Gs and the number of aligned unreferenced Gs.
+    flag_does_not_automatically_classify_read_of_a_valid_TSS_as_read_with_valid_5p : bool = False, # if False, a read with 5' site marked as a valid TSS will be considered as having a valid 5' site. (when the 'str_name_bam_tag_flag_valid_TSS' tag is True)
     flag_skip_output_artifact_reads : bool = False, # if True, does not output a BAM file containing artifact reads 
     int_max_num_record_in_a_batch : int = 100, # the maximum number of SAM records that will be written to each BAM file for each batch. It is recommended to reduce this number if a deadlock occurs during the run (a deadlock from multiprocessing.Pipe) 
     """
@@ -13153,7 +13153,7 @@ def FilterArtifactReadFromBAM(
     flag_includes_unrefGGGGG_or_longer_unrefGs = True # a flag indicating whether to include molecules with 5 unrefGs or larger number of unrefGs.
     def _identify_valid_5p_based_on_number_of_unrefGs( int_num_unrefGs ) :
         """
-        identify valid 5p based on the number of untemplated Gs
+        identify valid 5p based on the number of unreferenced Gs
         # 2023-12-30 14:49:34 
         """
         return int_num_unrefGs >= 4 if flag_includes_unrefGGGGG_or_longer_unrefGs else int_num_unrefGs == 4
@@ -13165,15 +13165,15 @@ def FilterArtifactReadFromBAM(
         """
         ''' identify valid 5p '''
         flag_valid_5p = False # default 'flag_valid_5p'
-        if not flag_does_not_include_5p_site_with_classified_as_a_valid_TSS_for_full_length_classification :
+        if not flag_does_not_automatically_classify_read_of_a_valid_TSS_as_read_with_valid_5p :
             if str_name_bam_tag_flag_valid_TSS in dict_tags :
                 flag_valid_5p = dict_tags[ str_name_bam_tag_flag_valid_TSS ] > 0 # update 'flag_valid_5p'
-        if not flag_valid_5p and not flag_does_not_include_5p_site_with_unrefGGGG_for_full_length_classification :
+        if not flag_valid_5p and not flag_does_not_automatically_classify_read_with_unrefGGGG_as_read_with_valid_5p :
             if str_name_bam_tag_num_aligned_Gs in dict_tags :
                 flag_valid_5p = _identify_valid_5p_based_on_number_of_unrefGs( dict_tags[ str_name_bam_tag_num_aligned_Gs ] ) # update 'flag_valid_5p'
-        if not flag_valid_5p and not flag_does_not_include_5p_site_with_unrefGGGG_based_on_the_number_of_aligned_unrefGs_for_full_length_classification : 
-            if str_name_bam_tag_num_unaligned_Gs in dict_tags and str_name_bam_tag_num_aligned_untemplated_Gs in dict_tags :
-                flag_valid_5p = _identify_valid_5p_based_on_number_of_unrefGs( dict_tags[ str_name_bam_tag_num_unaligned_Gs ] + dict_tags[ str_name_bam_tag_num_aligned_untemplated_Gs ] ) # update 'flag_valid_5p'
+        if not flag_valid_5p and not flag_does_not_automatically_classify_read_with_unrefGGGG_considering_num_of_aligned_unrefG_as_read_with_valid_5p : 
+            if str_name_bam_tag_num_unaligned_Gs in dict_tags and str_name_bam_tag_num_aligned_unreferenced_Gs in dict_tags :
+                flag_valid_5p = _identify_valid_5p_based_on_number_of_unrefGs( dict_tags[ str_name_bam_tag_num_unaligned_Gs ] + dict_tags[ str_name_bam_tag_num_aligned_unreferenced_Gs ] ) # update 'flag_valid_5p'
         return flag_valid_5p
 
     def _flush_batch( name_file : str ) :
