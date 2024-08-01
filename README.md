@@ -1,14 +1,28 @@
-![ouro-tools.logo.png](doc/img/ouro-tools.logo.png)
+<h1 align="center">
+  <a href="https://github.com/ahs2202/ouro-tools"><img src="doc/img/ourotools-logo-css.svg" width="850" height="189"></a>
+  <br><br>
+  <a href="https://github.com/ahs2202/ouro-tools">Ouro-Tools</a> - <em>long-read scRNA-seq</em> toolkit
+</h1>
 
-# Ouro-Tools
+Ouro-Tools is a novel, comprehensive computational pipeline for long-read scRNA-seq with the following key features. Ouro-Tools **(1) normalizes mRNA size distributions** and **(2) detects mRNA 7-methylguanosine caps** to integrate multiple single-cell long-read RNA-sequencing experiments across modalities and characterize full-length transcripts, respectively.
 
-Ouro-Tools is a novel computational pipeline for long-read scRNA-seq with the following key features. Ouro-Tools **(1) normalizes mRNA size distributions** and **(2) detects mRNA 7-methylguanosine caps** to integrate multiple single-cell long-read RNA-sequencing experiments across modalities and characterize full-length transcripts, respectively.
+<p align="center">
+  <a href="https://github.com/ahs2202/ouro-tools"><img src="doc/img/ourotools-intro.SVG" width="850" height="412"></a>
+</p>
+
+[TOC]
 
 
 
 ## Introduction
 
-![ouro-tools.modules.png](doc/img/ouro-tools.modules.png)
+
+
+#### What is long-read scRNA-seq?
+
+
+
+
 
 
 
@@ -28,28 +42,17 @@ pip install .
 
 Ouro-Tools can be used in command line, in a Python script, or in an interactive Python interpreter (e.g., Jupyter Notebook).
 
-### Bash shell
-
 To print the command line usage example of each module from the bash shell, please type the following command.
+
+
+
+**Bash shell**
 
 ```bash
 ourotools LongFilterNSplit -h
 ```
 
-
-
-### Python script
-
-```python
-#run 
-import ourotools
-if __name__ == '__main__' : # protect the entry point (important!)
-
-```
-
-### IPython environment
-
-Detailed arguments and the docstring can be printed in IPython environment.
+**IPython environment (Jupyter notebook)**
 
 ```python
 ourotools.LongFilterNSplit?
@@ -57,7 +60,98 @@ ourotools.LongFilterNSplit?
 
 
 
-## Building an index for Ouro-Tools' single-cell count module
+
+
+## Download our *toy* long-read scRNA-seq datasets
+
+
+
+
+
+## Run the entire Ouro-Tool pipeline
+
+```python
+#run 
+import ourotools
+if __name__ == '__main__' : # protect the entry point (important!)
+
+
+
+```
+
+
+
+
+
+
+
+## *step 1)* Raw long-read pre-processing module
+
+```python
+ourotools.LongFilterNSplit?
+```
+
+
+
+
+
+## *step 2)* Spliced alignment
+
+using *Minimap2*
+
+```python
+ourotools.LongFilterNSplit?
+```
+
+
+
+
+
+
+
+
+
+## *step 3)* Barcode extraction module
+
+```python
+ourotools.LongFilterNSplit?
+```
+
+
+
+
+
+## *step 4)* Biological full-length molecule ID module
+
+```python
+ourotools.LongFilterNSplit?
+```
+
+
+
+
+
+## *step 5)* Size distribution normalization module
+
+```python
+ourotools.LongFilterNSplit?
+```
+
+
+
+
+
+
+
+## *step 6)* Single-cell count module
+
+```python
+ourotools.LongFilterNSplit?
+```
+
+
+
+### Building an index for Ouro-Tools' single-cell count module
 
 Single-cell count module of Ouro-Tools utilizes <u>genome, transcriptome, and gene annotations</u> to assign reads to **genes, isoforms, and genomic bins (tiles across the genome)**. The index building process is automatic; <u>there is no needs to run a separate command in order to build the index</u>. Once Ouro-Tools processes these information before analyzing an input BAM file(s), the program saves an index in order to load the information much faster next time.
 
@@ -65,7 +159,7 @@ We recommends using <u>***Ensembl*** reference genome, transcriptome, and gene a
 
 
 
-### Pre-build index files 
+#### Pre-build index files 
 
 pre-built index can be downloaded using the following links (should be extracted to a folder using **tar -xf** command):
 
@@ -79,7 +173,7 @@ pre-built index can be downloaded using the following links (should be extracted
 
 
 
-### Building index from scratch
+#### Building index from scratch
 
 An Ouro-Tools index can be built on-the-fly from the input genome, transcriptome, and gene annotation files. For example, below are the list of files that were used for the pre-built Ouro-Tools index "<u>*[Human (GRCh38, Ensembl version 105)](https://www.dropbox.com/s/8agizrykiorpnag/Homo_sapiens.GRCh38.105.v0.1.1.tar?dl=0)*</u>".
 
@@ -109,7 +203,7 @@ An Ouro-Tools index can be built on-the-fly from the input genome, transcriptome
 
 
 
-*optional annotations:*
+#### *optional annotations*
 
 * **path_file_tsv_repeatmasker_ucsc** : [Table Browser (ucsc.edu)](https://genome.ucsc.edu/cgi-bin/hgTables?hgsid=1576143313_LetmEyQf9yggiQJAXajCua4TGOGl&clade=mammal&org=Human&db=hg38&hgta_group=rep&hgta_track=knownGene&hgta_table=0&hgta_regionType=genome&position=chr2%3A25%2C160%2C915-25%2C168%2C903&hgta_outputType=primaryTable&hgta_outFileName=GRCh38_RepeatMasker.tsv.gz) [click "get output" to download the annotation]
 
@@ -133,16 +227,19 @@ An Ouro-Tools index can be built on-the-fly from the input genome, transcriptome
 
 
 
-
-
-## Running the Ouro-Tools in a Python script (with examples)
+## *step 7)* Single-cell count module
 
 ```python
-#run Ouro-Tools 
-
-
-
+ourotools.LongFilterNSplit?
 ```
+
+
+
+
+
+
+
+
 
 
 
