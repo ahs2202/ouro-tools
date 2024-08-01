@@ -2541,7 +2541,7 @@ def LongFilterNSplit(
     if flag_recover_original_molecule_before_self_circularization_and_digestion : # add a 'type_molecule' if 'flag_recover_original_molecule_before_self_circularization_and_digestion' is True
         l_type_molecule += [ 'non_chimeric__before_self_circularization_and_digestion' ]
     l_name_output = [ 'aligned_to_unwanted_sequences', 'cannot_aligned_to_genome' ] # 'aligned_to_genome__non_chimeric__poly_A__plus_strand' : main fastq output file
-    l_name_dist = [ 'aligned_to_unwanted_sequence', 'cannot_aligned_to_genome', 'aligned_to_genome' ] 
+    l_name_dist = [ 'aligned_to_unwanted_sequences', 'cannot_aligned_to_genome', 'aligned_to_genome' ] 
     for type_molecule in l_type_molecule :
         for e in [ 'no_poly_A', 'poly_A__plus_strand', 'identical_poly_A_types_at_both_ends', ] :
             l_name_output.append( f'aligned_to_genome__{type_molecule}__{e}' )
@@ -3000,11 +3000,11 @@ def LongFilterNSplit(
                         """
                         align read to the list of unwanted sequences
                         """
-                        flag_aligned_to_unwanted_sequence = False
+                        flag_aligned_to_unwanted_sequences = False
                         for am_unwanted in l_am_unwanted : # for each aligner for unwanted sequences
                             l_hit_unwanted = list( hit for hit in am_unwanted.map( seq ) ) # exhuast the iterator to avoid the memory leak
                             if len( l_hit_unwanted ) > 0 :
-                                flag_aligned_to_unwanted_sequence = True
+                                flag_aligned_to_unwanted_sequences = True
                                 break
                             for hit in l_hit_unwanted :
                                 l_seq, int_total_aligned_length = bk.SAM.Retrieve_List_of_Mapped_Segments( hit.cigar, hit.r_st, flag_is_cigartuples_from_mappy = True )
@@ -3012,8 +3012,8 @@ def LongFilterNSplit(
                         """
                         handle the case when read was aligned to unwanted sequences
                         """
-                        if flag_aligned_to_unwanted_sequence :
-                            dict_arr_dist[ 'aligned_to_unwanted_sequence' ] = _update_size_distribution( new_size = len_seq, arr_dist = dict_arr_dist[ 'aligned_to_unwanted_sequence' ] ) # update distribution of reads aligned to unwanted sequences
+                        if flag_aligned_to_unwanted_sequences :
+                            dict_arr_dist[ 'aligned_to_unwanted_sequences' ] = _update_size_distribution( new_size = len_seq, arr_dist = dict_arr_dist[ 'aligned_to_unwanted_sequences' ] ) # update distribution of reads aligned to unwanted sequences
                             _write_a_fastq_record( dict_newfile_fastq_output[ 'aligned_to_unwanted_sequences' ], r ) # write the current read to the appropriate output fastq file
                             continue # skip the remaining operations
                             
@@ -3141,7 +3141,7 @@ def LongFilterNSplit(
                 int_total_num_records_for_a_batch = res[ 'int_total_num_records_for_a_batch' ]
                 ns["int_num_read_currently_processed"] += int_total_num_records_for_a_batch
                 if verbose :
-                    logger.info( f"[{path_file_fastq_input}] a batch has been completed, {0 if res[ 'dict_arr_dist' ][ 'aligned_to_unwanted_sequence' ] is None else res[ 'dict_arr_dist' ][ 'aligned_to_unwanted_sequence' ].sum( )}/{int_total_num_records_for_a_batch} number of reads were aligned to unwanted sequences, {0 if res[ 'dict_arr_dist' ][ 'cannot_aligned_to_genome' ] is None else res[ 'dict_arr_dist' ][ 'cannot_aligned_to_genome' ].sum( )}/{int_total_num_records_for_a_batch} number of reads cannot be aligned to genome" )
+                    logger.info( f"[{path_file_fastq_input}] a batch has been completed, {0 if res[ 'dict_arr_dist' ][ 'aligned_to_unwanted_sequences' ] is None else res[ 'dict_arr_dist' ][ 'aligned_to_unwanted_sequences' ].sum( )}/{int_total_num_records_for_a_batch} number of reads were aligned to unwanted sequences, {0 if res[ 'dict_arr_dist' ][ 'cannot_aligned_to_genome' ] is None else res[ 'dict_arr_dist' ][ 'cannot_aligned_to_genome' ].sum( )}/{int_total_num_records_for_a_batch} number of reads cannot be aligned to genome" )
                     logger.info( f"[{path_file_fastq_input}] total {ns[ 'int_num_read_currently_processed' ]} number of reads has been processed." )  # report
                 
                 # combine distributions
@@ -3215,7 +3215,7 @@ def LongFilterNSplit(
                 for flag_use_proportion in [ True, False ] :
                     _draw_bar_plot( 
                         df_bar, 
-                        [ 'aligned_to_unwanted_sequence', 'cannot_aligned_to_genome',  'aligned_to_genome', ],
+                        [ 'aligned_to_unwanted_sequences', 'cannot_aligned_to_genome',  'aligned_to_genome', ],
                         title = f"Alignment Results of '{name_file_input}'",
                         flag_use_proportion = flag_use_proportion,
                         flag_save_figure = True, path_folder_graph = path_folder_graph_interactive,
