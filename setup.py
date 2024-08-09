@@ -18,7 +18,7 @@ setup(
     description="A comprehensive toolkit for quality control and analysis of single-cell long-read RNA-seq data",
     long_description=README,
     long_description_content_type="text/markdown",
-    url="https://github.com/ahs2202/scarab-tools",
+    url="https://github.com/ahs2202/ouro-tools",
     license="GPLv3",
     packages=find_packages(),
     include_package_data=True,
@@ -36,6 +36,7 @@ setup(
         "mappy>=2.24",
         "h5py>=3.8.0",
         "pyBigWig>=0.3.22",
+        "plotly>=5.18.0",
     ],
     entry_points={
         "console_scripts": [
