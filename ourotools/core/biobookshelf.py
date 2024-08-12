@@ -25,6 +25,9 @@ import multiprocessing as mp
 import collections
 from copy import copy, deepcopy
 
+# set default parameters
+int_max_num_batches_in_a_queue_for_each_worker = 2 # 2 batches distributed to each process should be optimal, while preventing pipe buffer overloading. However, when deadlocks frequently occurs, changing this argument to 1 will prevent the occurrence of deadlocks.
+
 def Wide(int_percent_html_code_cell_width=95):
     """
     # 20210224
@@ -1567,7 +1570,7 @@ def Multiprocessing_Batch_Generator_and_Workers(
     int_num_seconds_to_wait_before_identifying_completed_processes_for_a_loop : float = 0.2,
     flag_wait_for_a_response_from_worker_after_sending_termination_signal : bool = True, # wait until all worker exists before resuming works in the main process
 ):
-    """# 2023-10-06 01:52:29 
+    """# 2024-07-30 11:29:35 
     'Multiprocessing_Batch_Generator_and_Workers' : multiprocessing using batch generator and workers.
     all worker process will be started using the default ('fork' in UNIX) method.
     perform batch-based multiprocessing using the three components, (1) gen_batch, (2) process_batch, (3) post_process_batch. (3) will be run in the main process, while (1) and (2) will be offloaded to worker processes.
@@ -1578,7 +1581,7 @@ def Multiprocessing_Batch_Generator_and_Workers(
     'post_process_batch( result )' : a function that can process return value from 'process_batch' function in the main process. operations that are not thread/process-safe can be done here, as these works will be serialized in the main thread.
     'int_num_threads' : the number of threads(actually processes) including the main process. For example, when 'int_num_threads' is 3, 2 worker processes will be used. one thread is reserved for batch generation.
     'int_num_seconds_to_wait_before_identifying_completed_processes_for_a_loop' : number of seconds to wait for each loop before checking which running processes has been completed
-    flag_wait_for_a_response_from_worker_after_sending_termination_signal : bool = True, # wait until all worker exists before resuming works in the main process
+    flag_wait_for_a_response_from_worker_after_sending_termination_signal : bool = True, # wait until all worker exists before resuming works in the main process.
     """
 
     def __batch_generating_worker(

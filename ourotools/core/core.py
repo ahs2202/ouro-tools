@@ -2353,6 +2353,7 @@ def LongFilterNSplit(
             "-u",
             "--l_path_file_minimap_index_unwanted",
             help="",
+            default=[ ],
             nargs="*",
         )
         arg_grp_alignment.add_argument(
