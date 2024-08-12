@@ -545,7 +545,6 @@ def OS_Run(
         os.remove(path_file_stdout)
     if not flag_path_file_stderr_was_given:
         os.remove(path_file_stderr)
-
     return {"stdout": stdout, "stderr": stderr} if return_output else None
 
 
@@ -1557,6 +1556,8 @@ def GLOB_Retrive_Strings_in_Wildcards(
     else:
         return l_l_str_in_wildcard
 
+# global setting
+int_max_num_batches_in_a_queue_for_each_worker = 2 # 2 batches distributed to each process should be optimal, while preventing pipe buffer overloading.
 
 def Multiprocessing_Batch_Generator_and_Workers(
     gen_batch,
@@ -1589,9 +1590,6 @@ def Multiprocessing_Batch_Generator_and_Workers(
         """# 2023-10-06 01:52:24 
         define a worker for generating batch and distributing batches across the workers, receives results across the workers, and send result back to the main process
         """
-        # hard coded setting
-        int_max_num_batches_in_a_queue_for_each_worker = 2 # 2 batches distributed to each process should be optimal, while preventing pipe buffer overloading.
-
         q_batch = collections.deque()  # initialize queue of batchs
         int_num_batch_processing_workers = len(l_pipe_sender_input)
         flag_batch_generation_completed = False  # flag indicating whether generating batchs for the current input sam file was completed
@@ -2072,48 +2070,6 @@ def Workers(
         int_num_threads = int_num_workers_for_Workers + 2,
         flag_wait_for_a_response_from_worker_after_sending_termination_signal = True,
     )
-
-def OS_Run(
-    l_args,
-    path_file_stdout=None,
-    path_file_stderr=None,
-    return_output=True,
-    remove_default_output_files=True,
-    stdout_binary=False,
-):
-    """# 2021-03-30 19:41:16
-    Run a process and save stdout and stderr as a file.
-
-    'return_output' : return the output as dictionary of strings
-    'remove_default_output_files' : remove default stdout and stderr files containing the output of the process when 'path_file_stdout' and 'path_file_stderr' were not given.
-    'stdout_binary' : set this flag to True if stdout is binary.
-    """
-    uuid_process = UUID()  # set uuid of the process
-    # define default stdout and stdin files and set approproate flags
-    flag_path_file_stdout_was_given = path_file_stdout is not None
-    flag_path_file_stderr_was_given = path_file_stderr is not None
-
-    # default stdout/stderr files will be written to the current working directory
-    path_cwd = os.getcwd()
-    if not flag_path_file_stdout_was_given:
-        path_file_stdout = f"{path_cwd}/{uuid_process}.out.txt"
-    if not flag_path_file_stderr_was_given:
-        path_file_stderr = f"{path_cwd}/{uuid_process}.err.txt"
-
-    with open(
-        path_file_stdout, "w+b" if stdout_binary else "w+"
-    ) as fout:  # excute and read std output and std errors of a process
-        with open(path_file_stderr, "w+") as ferr:
-            out = subprocess.call(l_args, stdout=fout, stderr=ferr)
-            fout.seek(0)
-            stdout = fout.read()
-            ferr.seek(0)
-            stderr = ferr.read()
-    # remove default output files
-    if not flag_path_file_stdout_was_given:
-        os.remove(path_file_stdout)
-    if not flag_path_file_stderr_was_given:
-        os.remove(path_file_stderr)
 
 
 def OS_FILE_Combine_Files_in_order(
