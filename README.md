@@ -39,26 +39,35 @@ Ouro-Tools is a novel, comprehensive computational pipeline for long-read scRNA-
 
  - [*step 6)* Single-cell count module](#single-cell-count-module)
 
-   - [Building an index for the single-cell count module](#count-module-index)
-     - [Pre-built index](#pre-built-index)
-     - [Building index from scratch](#building-index)
-     - [*optional input annotations*](#optional-input-annotations)
-
  - [*step 7)* Visualization](#visualization)
+
+ - [*wrap-up)* Running the entire pipeline using a wrapper function](#run-entire-pipeline)
+
+ - [An Ouro-Tools count module index](#count-module-index)
+
+   - [Pre-built index](#pre-built-index)
+   - [Building index from scratch](#building-index)
+   - [*optional input annotations*](#optional-input-annotations)
+   
+ - [SAM Tags](#SAM-tags)
+
+ - [Bitwise flags](bitwise-flags)
 
       
 
-
-
 ## Introduction <a name="introduction"></a>
+
+The Ouro-Tools pipeline comprises five main modules, allowing seamless integration with existing bulk and single-cell long-read RNA-seq pipelines and tools. Every main module of Ouro-Tools utilizes efficient parallelization for compute-intensive tasks to facilitate the processing of large datasets. Additionally, each Ouro-Tools module employs filesystem-based locks for parallel processing of a large number of samples across multiple machines for scalability.
 
 
 
 ### What is long-read scRNA-seq? <a name="what-is-long-read-scRNA-seq"></a>
 
+![long_read_scRNAseq_intro](doc/img/long_read_scRNAseq_intro.webp)
 
+(Figure adapted from Volden & Vollmers, Genome Biol. 23:47 (2022), and made available under [Creative Commons license 4.0](https://creativecommons.org/licenses/by/4.0/))
 
-
+In 2013, 2019, and 2022, “single-cell sequencing,” “single-cell multimodal omics,” and “long-read sequencing” were chosen as “Method of the Year” by *Nature Methods* journal, respectively, highlighting the urgent need to understand biology at the resolution of individual cells and individual biological molecules. Long-read scRNA-seq is a method that combines the single-cell RNA sequencing and long-read sequencing ([Nanopore](https://nanoporetech.com/applications/investigations/single-cell-sequencing) and [PacBio](https://www.pacb.com/products-and-services/applications/rna-sequencing/single-cell-rna-sequencing/)) methods.
 
 
 
@@ -140,15 +149,14 @@ path_file_valid_barcode_list = '/home/project/Single_Cell_Full_Length_Atlas/data
 path_file_minimap_index_genome = '/home/shared/ensembl/Mus_musculus/index/minimap2/Mus_musculus.GRCm38.dna.primary_assembly.k_14.idx'
 path_file_minimap_splice_junction = '/home/shared/ensembl/Mus_musculus/Mus_musculus.GRCm38.102.paftools.bed'
 path_file_minimap_unwanted = '/home/project/Single_Cell_Full_Length_Atlas/data/accessory_data/cDNA_depletion/index/minimap2/MT_and_rRNA_GRCm38.fa.ont.mmi'
+path_folder_count_module_index = '/home/project/Single_Cell_Full_Length_Atlas/data/pipeline/20211116_ouroboros_short_read_public_data_mining/scarab_annotations/Mus_musculus.GRCm38.102.v0.2.4/' # path to the Ouro-Tools count module index
 ```
 
+To find the barcode whitelist specific to your scRNA-seq experiment, please refer to [the official 10x Genomics article](https://kb.10xgenomics.com/hc/en-us/articles/115004506263-What-is-a-barcode-whitelist). Pre-built Ouro-Tools count module index can be downloaded [here](#pre-built-index).
 
 
 
-
-
-
-## *step 1)* Raw long-read pre-processing module <a name="preprocessing"></a>
+## *step 1)* Raw long-read pre-processing module (QC module)<a name="preprocessing"></a>
 
 ```python
 # run LongFilterNSplit
@@ -162,13 +170,15 @@ ourotools.LongFilterNSplit(
 )
 ```
 
+As the first module of the Ouro-Tools pipeline, the raw long-read pre-processing module `LongFilterNSplit` has a dual function for (1) providing comprehensive quality control metrics of a long-read scRNA-seq experiment and (2) pre-processing of raw long-read sequencing data for the downstream analysis. 
 
+
+
+According to the classification results, cDNA molecules are organized into separate output FASTQ files. For the cDNA molecules that contains a single (external or internal) poly(A) tail, the read is re-oriented so that it has the same orientation as its original mRNA transcript, with the poly(A) tail at its 3’ end; the resulting long-reads of cDNAs can be utilized for strand-specific long-read RNA-seq analysis.
 
 
 
 ## *step 2)* Spliced alignment <a name="alignment"></a>
-
-Alignment using *Minimap2*
 
 ```python
 # align using minimap2 (require that minimap2 executable can be found in PATH)
@@ -185,7 +195,7 @@ ourotools.Workers(
 )
 ```
 
-
+*Minimap2* can be used for annotation-guided alignment based on the transcript annotations prepared by the researcher. Here, the reference annotation from Ensembl (*Ensembl release 102*) was utilized.
 
 
 
@@ -203,7 +213,7 @@ ourotools.LongExtractBarcodeFromBAM(
 )
 ```
 
-
+The barcode extraction module `LongExtractBarcodeFromBAM` identifies cell barcode (**CB**) and unique molecular identifier (**UMI**) sequences for each read and exports the results as a **“barcoded” BAM file**, a BAM file containing corrected CB and UMI sequences for each read using [the predefined SAM tags](#SAM-tags).
 
 
 
@@ -221,19 +231,6 @@ ourotools.LongSurvey5pSiteFromBAM(
 ourotools.LongClassify5pSiteProfiles( 
     l_path_folder_input = l_path_folder_barcodedbam,
     path_folder_output = f"{path_folder_data}LongClassify5pSiteProfiles_out/",
-    # weight for classifier
-    path_file_dict_weight = {
-        'l_label' : [ '0_GGGG', '0_GGG', '-1_GGGG', '-1_GGG', '-2_GGGG', '-2_GGG', 'no_unrefG', ],
-        'mtx' : [ 
-            [ 0, 0.5, 0.5, 1.0,  2.0,   -1, -1 ],
-            [ 0,  -1,  -3,   2,   -2,   -1, -1 ],
-            [ 0, 0.5, 1.0, 2.0, -2.0, -1.0, -1 ],
-            [ 0,  -3,   2,  -2,   -1,   -1, -1 ],
-            [ 0,   1,   2,  -2,   -1,   -1, -1 ],
-            [ 0,   2,  -2,  -1,   -1,   -1, -1 ],
-            [ 1,  -1,  -3,  -5,  -10,   -1, -1 ],
-        ],
-    },
     n_threads = n_threads_for_each_worker,
 )
 # append 5' site classification results to each BAM file
@@ -253,7 +250,7 @@ ourotools.Workers(
 )
 ```
 
-
+The biological full-length identification module collects the lengths of guanosine homopolymers at the 5’ ends of cDNAs to identify genuine TSSs that produce capped mRNAs, depleting truncated cDNA molecules *in silico*. The module is implemented as a workflow consisting of `LongSurvey5pSiteFromBAM`, `LongClassify5pSiteProfiles`, `LongAdd5pSiteClassificationResultToBAM`, and `FilterArtifactReadFromBAM`.
 
 
 
@@ -262,37 +259,108 @@ ourotools.Workers(
 ```python
 # run mRNA size distribution normalization module
 # survey the size distribution of full-length mRNAs for each sample
+l_full_length_bam = list( f'{path_folder_data}LongExtractBarcodeFromBAM_out/{name_sample}/5pSiteTagAdded/FilterArtifactReadFromBAM_out/valid_3p_valid_5p.bam' for name_sample in l_name_sample )
 ourotools.Workers( 
     ourotools.LongSummarizeSizeDistributions,
     int_num_workers_for_Workers = n_workers, # create 'n_workers' number of workers
-    path_file_bam_input = list( f'{path_folder_data}LongExtractBarcodeFromBAM_out/{name_sample}/5pSiteTagAdded/FilterArtifactReadFromBAM_out/valid_3p_valid_5p.bam' for name_sample in l_name_sample ),
+    path_file_bam_input = l_full_length_bam,
     path_folder_output =  list( f'{path_folder_data}LongExtractBarcodeFromBAM_out/{name_sample}/5pSiteTagAdded/FilterArtifactReadFromBAM_out/valid_3p_valid_5p.LongSummarizeSizeDistributions_out/' for name_sample in l_name_sample ),
 )
+# normalize size distributions
+path_folder_size_norm = f"{path_folder_data}LongCreateReferenceSizeDistribution_out/"
+ourotools.LongCreateReferenceSizeDistribution(
+    l_path_file_distributions = list( f'{path_folder_data}LongExtractBarcodeFromBAM_out/{name_sample}/5pSiteTagAdded/FilterArtifactReadFromBAM_out/valid_3p_valid_5p.LongSummarizeSizeDistributions_out/dict_arr_dist.pkl' for name_sample in l_name_sample ),
+    l_name_file_distributions = l_name_sample,
+    path_folder_output = path_folder_size_norm,
+    float_max_ratio_to_arr_dist_guassian_filter_min_sigma_for_dynamic_gaussian_filter_selection = 2,
+    float_sigma_gaussian_filter_min = 8,
+    int_min_total_read_count_for_a_peak = 30 ,
+)
+# based on the output, set the confident size range
+str_confident_size_range = ourotools.get_confident_size_range( path_folder_size_norm )
 ```
 
-
+The size distribution normalization module is implemented using the `LongSummarizeSizeDistributions` and `LongCreateReferenceSizeDistribution` workflows. First, using the `LongSummarizeSizeDistributions`workflow, a full-length, UMI-deduplicated cDNA size distribution is obtained from the `valid_3p_valid_5p` barcoded BAM file (representing ***in vivo* full-length mRNAs**) for each sample. Next, the reference mRNA size distribution is constructed for all the samples using the `LongCreateReferenceSizeDistribution` workflow.
 
 
 
 ## *step 6)* Single-cell count module <a name="single-cell-count-module"></a>
 
 ```python
-ourotools.LongFilterNSplit?
+# run the single-cell count module 
+ourotools.LongExportNormalizedCountMatrix( 
+    path_folder_ref = path_folder_count_module_index, 
+    l_path_file_bam_input = l_full_length_bam,
+    l_path_folder_output = list( f'{path_folder_data}LongExportNormalizedCountMatrix_out/{name_sample}/' for name_sample in l_name_sample ),
+    l_name_distribution = l_name_sample,
+    path_folder_reference_distribution = path_folder_size_norm,
+    l_str_l_t_distribution_range_of_interest = [ ','.join( [ "raw", str_confident_size_range ] ) ],
+    flag_enforce_transcript_start_site_matching_for_long_read_during_realignment = True, 
+    flag_enforce_transcript_end_site_matching_for_long_read_during_realignment = True,  
+)
+```
+
+The single-cell long-read count module `LongExportNormalizedCountMatrix` is largely composed of three parts: [constructing an index](#count-module-index) (only required once for each set of gene, transcript, repeat elements, and regulatory element annotations and the reference genome), assigning each read to various `buckets` (each `bucket` represent one of genes, transcripts, exons, splice junctions, TE, tCRE, and individual genomic tiles), and exporting a size distribution-normalized count matrix for each `bucket` (later these count matrixes are combined into a single size distribution-normalized count matrix as an output).
+
+
+
+## *step 7)* Visualization <a name="visualization"></a>
+
+```python
+# TBD
 ```
 
 
 
+## *wrap-up)* Running the entire pipeline using a wrapper function<a name="run-entire-pipeline"></a>
+
+```python
+# version 2024-08-09 19:02:27 by Hyunsu An @ GIST-FGL
+import ourotools
+
+ourotools.run_pipeline(
+    # dataset setting
+    path_folder_data = '/home/project/Single_Cell_Full_Length_Atlas/data/pipeline/20220331_Ouroboros_Project/pipeline/20230208_Mouse_Long_Read_Single_Cell_Atlas/pipeline/20230811_mouse_long_read_single_cell_atlas_v202308/tutorial_data/20240813_ovary_testis_tutorial2/',
+    l_name_sample = [
+        'mOvary.subsampled',
+        'mTestis2.subsampled',
+    ],
+    # scRNA-seq technology-specific 
+    path_file_valid_barcode_list = '/home/project/Single_Cell_Full_Length_Atlas/data/pipeline/20210728_development_ouroboros_qc/example/3M-february-2018.txt.gz', # GEX v3 CB
+    # species-specific settings
+    path_file_minimap_index_genome = '/home/shared/ensembl/Mus_musculus/index/minimap2/Mus_musculus.GRCm38.dna.primary_assembly.k_14.idx',
+    path_file_minimap_splice_junction = '/home/shared/ensembl/Mus_musculus/Mus_musculus.GRCm38.102.paftools.bed',
+    path_file_minimap_unwanted = '/home/project/Single_Cell_Full_Length_Atlas/data/accessory_data/cDNA_depletion/index/minimap2/MT_and_rRNA_GRCm38.fa.ont.mmi',
+    path_folder_count_module_index = '/home/project/Single_Cell_Full_Length_Atlas/data/pipeline/20211116_ouroboros_short_read_public_data_mining/scarab_annotations/Mus_musculus.GRCm38.102.v0.2.4/', # path to the Ouro-Tools reference
+    # run setting
+    n_workers = 2, # employ 2 workers (since there are two samples, 2 workers are sufficient)
+    n_threads_for_each_worker = 8, # use 8 CPU cores for each worker
+    # additional settings
+    args = dict(
+        LongCreateReferenceSizeDistribution = dict(
+            float_max_ratio_to_arr_dist_guassian_filter_min_sigma_for_dynamic_gaussian_filter_selection = 2,
+            float_sigma_gaussian_filter_min = 8,
+            int_min_total_read_count_for_a_peak = 30 ,
+        ),
+        LongExportNormalizedCountMatrix = dict(
+            flag_enforce_transcript_start_site_matching_for_long_read_during_realignment = True, 
+            flag_enforce_transcript_end_site_matching_for_long_read_during_realignment = True,  
+        ),
+    ),
+)
+```
 
 
-### Building an index for Ouro-Tools' single-cell count module <a name="count-module-index"></a>
 
-Single-cell count module of Ouro-Tools utilizes <u>genome, transcriptome, and gene annotations</u> to assign reads to **genes, isoforms, and genomic bins (tiles across the genome)**. The index building process is automatic; <u>there is no needs to run a separate command in order to build the index</u>. Once Ouro-Tools processes these information before analyzing an input BAM file(s), the program saves an index in order to load the information much faster next time.
+## An Ouro-Tools count module index<a name="count-module-index"></a>
+
+The single-cell count module of Ouro-Tools utilizes <u>genome, transcriptome, and gene annotations</u> to assign reads to **genes, isoforms, and genomic bins (tiles across the genome)**. The index building process is automatic; <u>there is no needs to run a separate command in order to build the index</u>. Once Ouro-Tools processes these information before analyzing an input BAM file(s), the program saves an index in order to load the information much faster next time.
 
 We recommends using <u>***Ensembl*** reference genome, transcriptome, and gene annotations of the same version</u> (release number). 
 
 
 
-#### Pre-built index <a name="pre-built-index"></a>
+### Pre-built index <a name="pre-built-index"></a>
 
 pre-built index can be downloaded using the following links (should be extracted to a folder using **tar -xf** command):
 
@@ -306,7 +374,7 @@ pre-built index can be downloaded using the following links (should be extracted
 
 
 
-#### Building index from scratch <a name="building-index"></a>
+### Building index from scratch <a name="building-index"></a>
 
 An Ouro-Tools index can be built on-the-fly from the input genome, transcriptome, and gene annotation files. For example, below are the list of files that were used for the pre-built Ouro-Tools index "<u>*[Human (GRCh38, Ensembl version 105)](https://www.dropbox.com/s/8agizrykiorpnag/Homo_sapiens.GRCh38.105.v0.1.1.tar?dl=0)*</u>".
 
@@ -360,17 +428,58 @@ An Ouro-Tools index can be built on-the-fly from the input genome, transcriptome
 
 
 
-## *step 7)* Visualization <a name="visualization"></a>
-
-```python
-ourotools.LongFilterNSplit?
-```
 
 
+## SAM Tags <a name="SAM-tags"></a>
+
+| *SAM tag name* | *data type* | *Description*                                                | *Module name*               |
+| -------------- | ----------- | ------------------------------------------------------------ | --------------------------- |
+| *CB*           | Z           | the corrected cell barcode  sequence                         | Barcode  Extraction         |
+| *UB*           | Z           | the corrected UMI  sequence after the UMI clustering process | Barcode Extraction          |
+| *UR*           | Z           | the uncorrected UMI sequence  before the UMI clustering process | Barcode  Extraction         |
+| *XR*           | i           | the number of  errors for identification of R1 adapter (marks the 3’ end of cDNA). -1  indicates that the adapter was not identified | Barcode Extraction          |
+| *XT*           | i           | the number of errors for  identification of TSO adapter (marks the 5’ end of cDNA). -1 indicates that  the adapter was not identified | Barcode  Extraction         |
+| *CU*           | Z           | the uncorrected raw  CB-UMI sequence                         | Barcode Extraction          |
+| *IA*           | i           | the length of detected internal  poly(A) tract on the genome | Barcode  Extraction         |
+| *LE*           | i           | the total number of  genome-aligned base pairs               | Barcode Extraction          |
+| *AG*           | i           | the number of consecutive G  nucleotides, starting from the 5’ site in the aligned region of the read | Full-Length  Identification |
+| *UG*           | i           | the number of  consecutive G nucleotides, starting from the 5’ site in the unaligned region  of the read (soft-clipped sequence) | Full-Length Identification  |
+| *VS*           | i           | “1” if the 5’ site is identified  as a valid transcript start site (TSS), “0” if the 5’ site is identified as  an invalid TSS, representing 5’ sites of the PCR/RT artifacts (including 5p  degradation products of full-length transcripts) | Full-Length  Identification |
+| *AU*           | i           | the inferred number  of unreferenced G nucleotides aligned to the genome | Full-Length Identification  |
+| *XC*           | i           | the bitwise flags (see the table below for more details)     | Single-Cell  Count          |
+| *XR*           | Z           | the repeat element  ID                                       | Single-Cell Count           |
+| *YR*           | i           | the total number of base pairs overlapping  with the repeat element to which the read is confidently assigned | Single-Cell  Count          |
+| *XG*           | Z           | the gene ID                                                  | Single-Cell Count           |
+| *YG*           | i           | the total number of base pairs  overlapping with the exons of the gene to which the read is confidently assigned | Single-Cell  Count          |
+| *XP*           | Z           | the promoter ID                                              | Single-Cell Count           |
+| *YX*           | i           | the total number of base pairs  overlapping with any exons that overlap with the read | Single-Cell  Count          |
+| *YF*           | i           | the total number of  base pairs overlapping with any repeat elements that overlap with the read  (considering only filtered repeat elements) | Single-Cell Count           |
+| *XE*           | Z           | the regulatory element ID                                    | Single-Cell  Count          |
+| *YU*           | i           | the total number of  base pairs overlapping with any repeat elements that overlap with the read (considering  all repeat elements) | Single-Cell Count           |
+| *YE*           | i           | the total number of base pairs  overlapping with any regulatory elements that overlap with the read | Single-Cell  Count          |
+| *XT*           | Z           | the transcript ID  that is uniquely assigned to the read using the re-alignment process | Single-Cell Count           |
+| *ZF*           | i           | the flag that indicates the read  represents a full-length cDNA with valid 3’ and 5’ ends | Single-Cell  Count          |
 
 
 
+## Bitwise flags <a name="bitwise-flags"></a>
 
+| *Binary flag* | *Feature type* | *Description*                                                |
+| ------------- | -------------- | ------------------------------------------------------------ |
+| 0x1           | gene           | overlaps with  gene(s)                                       |
+| 0x2           | gene           | gene  assignment is ambiguous                                |
+| 0x4           | gene           | completely intronic  reads (GEX mode specific)               |
+| 0x8           | gene           | exonic reads  (GEX mode specific)                            |
+| 0x10          | promoter       | overlaps with  promoter region(s) (ATAC mode specific)       |
+| 0x20          | promoter       | promoter  assignment is ambiguous (ATAC mode specific)       |
+| 0x40          | repeats        | overlaps with  repeat element(s)                             |
+| 0x80          | repeats        | ambiguous  assignment to two or more number of repeat elements |
+| 0x100         | repeats        | the entire length  of a read overlaps with a single repeat element |
+| 0x200         | regulatory     | overlaps with  regulatory element(s)                         |
+| 0x400         | regulatory     | overlaps with both  repeat element(s) and regulatory element(s) |
+| 0x800         | regulatory     | overlaps  exclusively with regulatory element(s) (no overlaps with repeat element) |
+| 0x1000        | regulatory     | ambiguous  assignment to two or more number of regulatory elements |
+| 0x2000        | regulatory     | the entire  length of a read overlaps with a single regulatory element |
 
 
 

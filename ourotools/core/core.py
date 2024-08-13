@@ -11,6 +11,7 @@ from . import SAM
 from . import MAP
 from . import SEQ
 from . import STR
+from . import ONT
 from . import OT
 from . import biobookshelf as bk
 
@@ -27,6 +28,7 @@ from . import biobookshelf as bk
 # SAM = ourotools.SAM
 # MAP = ourotools.MAP
 # OT = ourotools.OT
+# ONT = ourotools.ONT
 # bk.Wide( 100 )
 
 """
@@ -90,7 +92,7 @@ logger = logging.getLogger("ouro-tools")
 # define version
 _version_ = "0.1.1"
 _ourotools_version_ = _version_
-_last_modified_time_ = "2024-01-23 13:55:23"
+_last_modified_time_ = "2024-08-13 15:20:28"
 
 str_release_note = [
     """
@@ -122,6 +124,9 @@ str_release_note = [
     
     # 2024-01-10 21:30:02 
     'LongExportNormalizedCountMatrix' : ('analysis_statistics.tsv.gz' output) now full-length read statistics will be exported for each feature .
+    
+    # 2024-08-13 15:20:28 
+    The entire code base was prepared for public release. Tutorial code, datasets, and documentation was prepared. Utility and wrapper functions were added.
     ##### Future implementations #####
 
     """
@@ -176,6 +181,19 @@ str_documentation = """
 
 documentation_date = '2023-12-31 17:35:07 '
 """
+
+
+# global parameter for exporting plotly graphs
+plotly_config = {
+    'displaylogo': False,
+    'displayModeBar': True, # always display the modebar
+    'toImageButtonOptions': {
+        'format': 'svg', 
+        'scale': 1,
+    }, # save svg file
+}
+
+
 
 def _get_random_integer(int_num_possible_integers: int):
     """# 2023-01-09 18:18:37
@@ -2160,7 +2178,7 @@ def _draw_bar_plot(
     fig.update_xaxes( mirror=True, ticks='outside', showline=True, linecolor='black', gridcolor='#f8f8f8' )
     fig.update_yaxes( mirror=True, ticks='outside', showline=True, linecolor='black', gridcolor='#f8f8f8' )
     if flag_save_figure and path_folder_graph is not None :
-        fig.write_html( f"{path_folder_graph}distribution.bar.{'proportion' if flag_use_proportion else 'read_count'}.{title}.html" ) # write HTML file
+        fig.write_html( f"{path_folder_graph}distribution.bar.{'proportion' if flag_use_proportion else 'read_count'}.{title}.html", config = plotly_config ) # write HTML file
     else :
         return fig
     
@@ -6306,7 +6324,7 @@ def LongClassify5pSiteProfiles(
             fig.update_layout( plot_bgcolor='white', title = f"5p Site profile: '{name_class_5p_site}' ({'valid transcription start site (TSS)' if flag_GGGG_for_label else 'invalid 5p site'}{'' if flag_no_unrefG else ' start at +' + str( int_num_aligned_G_for_label ) })" )
             fig.update_xaxes( mirror=True, ticks='outside', showline=True, linecolor='black', gridcolor='lightgrey' )
             fig.update_yaxes( mirror=True, ticks='outside', showline=True, linecolor='black', gridcolor='lightgrey' )
-            fig.write_html( f"{path_folder_graph_interactive}{name_class_5p_site}.profiles.html" ) # save the graph as a file
+            fig.write_html( f"{path_folder_graph_interactive}{name_class_5p_site}.profiles.html", config = plotly_config ) # save the graph as a file
     draw_graphs( )
     
     logger.info(f"Completed.")
@@ -6932,7 +6950,7 @@ def LongCreateReferenceSizeDistribution(
     # smoothening process using the incremental Gaussian smoothening algorithm
     float_max_ratio_to_arr_dist_guassian_filter_min_sigma_for_dynamic_gaussian_filter_selection : float = 1.25, # the maximum ratio to the 'baseline' (values to which the Guassian filter with the minimum sigma value was applied) for constraining the sigma value during the dynamic selection process.
     float_sigma_gaussian_filter_min : float = 4, # the minimum sigma value to generate during the incremental Gaussian smoothening process 
-    float_sigma_gaussian_filter_max : float = 32, # the maximum sigma value to generate during the incremental Gaussian smoothening process
+    float_sigma_gaussian_filter_max : float = 64, # the maximum sigma value to generate during the incremental Gaussian smoothening process
     int_num_guassian_filters : int = 25, # number of sigma values (standard deviation of the Gaussian filter) to generate for the incremental Gaussian smoothening algorithm
     flag_use_logspace_to_generate_sigma_values : bool = False, # a flag indicating whether to generate sigma values using log-space or linear-space (if True, use log-space)
     float_sigma_gaussian_filter_for_final_cleanup : float = 3, # a sigma value for the Guassian filter for the final smoothening process
@@ -6968,7 +6986,7 @@ def LongCreateReferenceSizeDistribution(
     # smoothening process using the incremental Gaussian smoothening algorithm
     float_max_ratio_to_arr_dist_guassian_filter_min_sigma_for_dynamic_gaussian_filter_selection : float = 1.25, # the maximum ratio to the 'baseline' (values to which the Guassian filter with the minimum sigma value was applied) for constraining the sigma value during the dynamic selection process.
     float_sigma_gaussian_filter_min : float = 4, # the minimum sigma value to generate during the incremental Gaussian smoothening process 
-    float_sigma_gaussian_filter_max : float = 32, # the maximum sigma value to generate during the incremental Gaussian smoothening process
+    float_sigma_gaussian_filter_max : float = 64, # the maximum sigma value to generate during the incremental Gaussian smoothening process
     int_num_guassian_filters : int = 25, # number of sigma values (standard deviation of the Gaussian filter) to generate for the incremental Gaussian smoothening algorithm
     flag_use_logspace_to_generate_sigma_values : bool = False, # a flag indicating whether to generate sigma values using log-space or linear-space (if True, use log-space)
     float_sigma_gaussian_filter_for_final_cleanup : float = 3, # a sigma value for the Guassian filter for the final smoothening process
@@ -7053,8 +7071,8 @@ def LongCreateReferenceSizeDistribution(
         arg_grp_gaussian_filter.add_argument(
             "-L",
             "--float_sigma_gaussian_filter_max",
-            help="(default: 32) the maximum sigma value to generate during the incremental Gaussian smoothening process",
-            default=32,
+            help="(default: 64) the maximum sigma value to generate during the incremental Gaussian smoothening process",
+            default=64,
             type=float,
         )
         arg_grp_gaussian_filter.add_argument(
@@ -7476,7 +7494,7 @@ def LongCreateReferenceSizeDistribution(
     # plot a plotly graph
     fig = px.line( df_ratio, x = 'molecule_size_in_base_pairs', y = 'correction_ratio_to_reference', color = 'name_file_distributions' )
     fig.update_yaxes( range = [ 0, float_max_correction_ratio ] )
-    fig.write_html( f'{path_folder_graph_interactive}correction_ratio_to_reference.html' ) # write a html page
+    fig.write_html( f'{path_folder_graph_interactive}correction_ratio_to_reference.html', config = plotly_config ) # write a html page
 
     ''' record the size range where correction can be performed confidently  '''
     l_l = [ ]
@@ -7549,19 +7567,20 @@ def LongCreateReferenceSizeDistribution(
             arr_peak_removed = arr_peak_removed / max_height 
             arr_smoothened = arr_smoothened / max_height 
             
-            # add traces # use Scattergl for faster interactions
-            fig_smoothened.add_trace( go.Scattergl( x = arr_x, y = arr_smoothened, mode='lines', name = name_file_distributions ) ) 
-            fig_peak_removed.add_trace( go.Scattergl( x = arr_x, y = arr_peak_removed, mode='lines', name = name_file_distributions ) ) 
+            # add traces 
+            func_scatter = go.Scatter # go.Scattergl # set the rendering method (use Scattergl for faster interactions)
+            fig_smoothened.add_trace( func_scatter( x = arr_x, y = arr_smoothened, mode='lines', name = name_file_distributions ) ) 
+            fig_peak_removed.add_trace( func_scatter( x = arr_x, y = arr_peak_removed, mode='lines', name = name_file_distributions ) ) 
             
         for fig, name_dist in zip(
             [ fig_smoothened, fig_peak_removed ],
             [ 'smoothened', 'peak_removed' ],
         ) :
-            fig.add_trace( go.Scattergl( x = arr_x, y = format_array( dict_output[ 'arr_dist_combined' ], flag_normalize = True ), mode='lines', name = 'Reference', line = { 'color' : 'black', 'width' : 10 } ) )
+            fig.add_trace( func_scatter( x = arr_x, y = format_array( dict_output[ 'arr_dist_combined' ], flag_normalize = True ), mode='lines', name = 'Reference', line = { 'color' : 'black', 'width' : 10 } ) )
             fig.update_layout( plot_bgcolor='white', title = { 'text' : f'Normalized {name_dist} distributions and the Reference distribution' } )
             fig.update_xaxes( mirror=True, ticks='outside', showline=True, linecolor='black', gridcolor='#f8f8f8' )
             fig.update_yaxes( mirror=True, ticks='outside', showline=True, linecolor='black', gridcolor='#f8f8f8' )
-            fig.write_html( f"{path_folder_graph_interactive}normalized_{name_dist}_distributions.with_the_reference.html" ) # save as a figure
+            fig.write_html( f"{path_folder_graph_interactive}normalized_{name_dist}_distributions.with_the_reference.html", config = plotly_config ) # save as a figure
     draw_graph( dict_output, int_max_molecule_size_for_visualization = int_max_molecule_size_for_visualization ) # draw graphs
         
     logger.info(f"Completed.")
@@ -7583,7 +7602,7 @@ def LongExportNormalizedCountMatrix(
     float_memory_in_GiB: float = 50,
     int_num_sam_records_for_each_chunk: int = 300000,
     str_name_gtf_attr_for_name_transcript: str = "transcript_name",
-    int_min_mapq_unique_mapped_for_gex_data: int = 255,
+    int_min_mapq_unique_mapped_for_gex_data: int = 60,
     int_min_mapq_unique_mapped_for_atac_data: int = 60,
     int_n_bases_padding_around_interval: int = 10, # deprecated
     path_file_tsv_repeatmasker_ucsc: Union[str, None] = None,
@@ -7608,12 +7627,12 @@ def LongExportNormalizedCountMatrix(
     int_bp_padding_regulatory_element_anno: int = 2000,
     float_max_prop_unfiltered_rpmk=1,
     flag_does_not_delete_sequence_and_sequence_qual: bool = False,
-    flag_skip_read_analysis_summary_output_bam_file: bool = False,
-    flag_skip_read_analysis_summary_output_tsv_file: bool = False,
+    flag_include_read_analysis_summary_output_bam_file: bool = False,
+    flag_include_read_analysis_summary_output_tsv_file: bool = False,
     flag_turn_off_catching_all_reads_by_binning: bool = False,
     int_bp_for_bins: int = 100,
     flag_exclude_reads_assigned_to_features_and_count_every_read_in_bam_during_binning: bool = False,
-    flag_include_strand_specific_counts: bool = False,
+    flag_does_not_include_strand_specific_counts: bool = False,
     verbose: bool = True,
     l_str_mode_scarab_count: list[
         Literal[
@@ -8145,14 +8164,14 @@ def LongExportNormalizedCountMatrix(
         arg_grp_bam_processing.add_argument(
             "-m",
             "--int_min_mapq_unique_mapped_for_gex_data",
-            help="int_min_mapq_unique_mapped_for_gex_data: default = 255. Minimum mapping quality of aligned reads in the input BAM file (Gene Expression data) to be included in the analysis. For gene expression data (BAM files aligned with STAR Aligner), recommended value is 255.",
-            default=255,
+            help="int_min_mapq_unique_mapped_for_gex_data: default = 60. Minimum mapping quality of aligned reads in the input BAM file (Gene Expression data) to be included in the analysis.",
+            default=60,
             type=int,
         )
         arg_grp_bam_processing.add_argument(
             "-r",
             "--int_min_mapq_unique_mapped_for_atac_data",
-            help="int_min_mapq_unique_mapped_for_atac_data: default = 60. Minimum mapping quality of aligned reads in the input BAM file (ATAC-seq data) to be included in the analysis. For ATAC data (BAM file aligned with BWA Aligner), recommended value is 60.",
+            help="int_min_mapq_unique_mapped_for_atac_data: default = 60. Minimum mapping quality of aligned reads in the input BAM file (ATAC-seq data) to be included in the analysis.",
             default=60,
             type=int,
         )
@@ -8199,8 +8218,8 @@ def LongExportNormalizedCountMatrix(
         # count matrix output
         arg_grp_bam_processing.add_argument(
             "-s",
-            "--flag_include_strand_specific_counts",
-            help="flag_include_strand_specific_counts: in addition to the typical gene and isoform counts, include count of reads aligned in antisense direction as a separate features. For other features, including repeats, regulatory elements, and genomic regions, include separate features for sense and antisense reads",
+            "--flag_does_not_include_strand_specific_counts",
+            help="flag_does_not_include_strand_specific_counts: in addition to the typical gene and isoform counts, include count of reads aligned in antisense direction as a separate features. For other features, including repeats, regulatory elements, and genomic regions, include separate features for sense and antisense reads",
             action="store_true",
         )
         
@@ -8256,14 +8275,14 @@ def LongExportNormalizedCountMatrix(
         arg_grp_bam_output = parser.add_argument_group("Annotated BAM Output")
         arg_grp_bam_output.add_argument(
             "-Q",
-            "--flag_skip_read_analysis_summary_output_bam_file",
-            help="(Default: False) set this flag to True in order to skip writing the analysis results of individual reads in the BAM file format",
+            "--flag_include_read_analysis_summary_output_bam_file",
+            help="(Default: False) set this flag to True in order to write the analysis results of individual reads in the BAM file format",
             action="store_true",
         )
         arg_grp_bam_output.add_argument(
             "-q",
-            "--flag_skip_read_analysis_summary_output_tsv_file",
-            help="(Default: False) set this flag to True in order to skip writing the analysis results of individual reads in the TSV file format",
+            "--flag_include_read_analysis_summary_output_tsv_file",
+            help="(Default: False) set this flag to True in order to write the analysis results of individual reads in the TSV file format",
             action="store_true",
         )
         arg_grp_bam_output.add_argument(
@@ -8296,7 +8315,7 @@ def LongExportNormalizedCountMatrix(
         flag_skip_exon_and_splice_junc_counting = (
             args.flag_skip_exon_and_splice_junc_counting
         )
-        flag_include_strand_specific_counts = args.flag_include_strand_specific_counts
+        flag_does_not_include_strand_specific_counts = args.flag_does_not_include_strand_specific_counts
         flag_does_not_remove_the_version_information_from_id_transcript_in_the_file_fa_transcriptome = (
             args.flag_does_not_remove_the_version_information_from_id_transcript_in_the_file_fa_transcriptome
         )
@@ -8358,11 +8377,11 @@ def LongExportNormalizedCountMatrix(
         str_name_bam_tag_cb_uncorrected = args.str_name_bam_tag_cb_uncorrected
         str_name_bam_tag_umi_corrected = args.str_name_bam_tag_umi_corrected
         str_name_bam_tag_umi_uncorrected = args.str_name_bam_tag_umi_uncorrected
-        flag_skip_read_analysis_summary_output_bam_file = (
-            args.flag_skip_read_analysis_summary_output_bam_file
+        flag_include_read_analysis_summary_output_bam_file = (
+            args.flag_include_read_analysis_summary_output_bam_file
         )
-        flag_skip_read_analysis_summary_output_tsv_file = (
-            args.flag_skip_read_analysis_summary_output_tsv_file
+        flag_include_read_analysis_summary_output_tsv_file = (
+            args.flag_include_read_analysis_summary_output_tsv_file
         )
         flag_does_not_delete_sequence_and_sequence_qual = (
             args.flag_does_not_delete_sequence_and_sequence_qual
@@ -8423,7 +8442,10 @@ def LongExportNormalizedCountMatrix(
 
         str_mappy_aligner_preset_for_realignment = args.str_mappy_aligner_preset_for_realignment
         int_length_of_polya_to_append_to_transcript_sequence_during_realignment = args.int_length_of_polya_to_append_to_transcript_sequence_during_realignment
-
+    
+    # set internal parameters
+    flag_include_strand_specific_counts = not flag_does_not_include_strand_specific_counts
+    
     """
     Start of the Scarab-Count Program
     """
@@ -8860,7 +8882,7 @@ def LongExportNormalizedCountMatrix(
                     ):
                         flag_all_output_files_exist = False
                         break
-                    if not flag_skip_read_analysis_summary_output_bam_file:
+                    if flag_include_read_analysis_summary_output_bam_file:
                         if not os.path.exists(
                             f"{path_folder_output}bam_output.export_completed.txt"
                         ):
@@ -9064,8 +9086,8 @@ def LongExportNormalizedCountMatrix(
                     "int_min_count_features_for_filtering_barcodes": int_min_count_features_for_filtering_barcodes,
                     "dict_num_manager_processes_for_each_data_object": dict_num_manager_processes_for_each_data_object,
                     "l_seqname_to_skip": l_seqname_to_skip,
-                    "flag_skip_read_analysis_summary_output_bam_file": flag_skip_read_analysis_summary_output_bam_file,
-                    "flag_skip_read_analysis_summary_output_tsv_file": flag_skip_read_analysis_summary_output_tsv_file,
+                    "flag_include_read_analysis_summary_output_bam_file": flag_include_read_analysis_summary_output_bam_file,
+                    "flag_include_read_analysis_summary_output_tsv_file": flag_include_read_analysis_summary_output_tsv_file,
                     'path_folder_reference_distribution' : path_folder_reference_distribution,
                     'l_name_distribution' : l_name_distribution,
                     'l_str_l_t_distribution_range_of_interest' : l_str_l_t_distribution_range_of_interest,
@@ -9468,7 +9490,7 @@ def LongExportNormalizedCountMatrix(
                             e["SN"] = __chromosome_name_remove_chr__(e["SN"])
                         samfile_header = pysam.AlignmentHeader.from_dict(dict_header)
                         """ open a new sam file (output BAM file) """
-                        if not flag_skip_read_analysis_summary_output_bam_file:
+                        if flag_include_read_analysis_summary_output_bam_file:
                             newsamfile = pysam.AlignmentFile(
                                 f"{path_folder_temp}{str_uuid}.analysis.{name_ref}.bam",
                                 "wb",
@@ -9482,7 +9504,7 @@ def LongExportNormalizedCountMatrix(
                     newfile_df_analysis_statistics = gzip.open(
                         f"{path_folder_temp}{str_uuid}.analysis_statistics.tsv.gz", "wb"
                     )  # for analyzing performance issues
-                    if not flag_skip_read_analysis_summary_output_tsv_file:
+                    if flag_include_read_analysis_summary_output_tsv_file:
                         newfile = gzip.open( f"{path_folder_temp}{str_uuid}.analysis.{name_ref}.tsv.gz", "wb", )
 
                     if verbose:
@@ -11753,7 +11775,7 @@ def LongExportNormalizedCountMatrix(
 
                                 """ write the analysis result to the output BAM file """
                                 if (
-                                    not flag_skip_read_analysis_summary_output_bam_file
+                                    flag_include_read_analysis_summary_output_bam_file
                                 ):
                                     """
                                     write annotated record as a tublar or SAM record
@@ -11823,7 +11845,7 @@ def LongExportNormalizedCountMatrix(
 
                                 """ write the analysis result to the output TSV file """
                                 if (
-                                    not flag_skip_read_analysis_summary_output_tsv_file
+                                    flag_include_read_analysis_summary_output_tsv_file
                                 ):
                                     newfile.write(
                                         (
@@ -11845,9 +11867,9 @@ def LongExportNormalizedCountMatrix(
                         )  # report the number of processed sam records
 
                     ''' close output files '''
-                    if not flag_skip_read_analysis_summary_output_bam_file:
+                    if flag_include_read_analysis_summary_output_bam_file:
                         newsamfile.close()
-                    if not flag_skip_read_analysis_summary_output_tsv_file:
+                    if flag_include_read_analysis_summary_output_tsv_file:
                         newfile.close()
                     for e in dict_t_distribution_range_of_interest_to_newfile_df_count :
                         dict_t_distribution_range_of_interest_to_newfile_df_count[ e ].close()
@@ -11916,7 +11938,7 @@ def LongExportNormalizedCountMatrix(
                         overwrite_existing_file=True,
                     )
                     # combine results into a single output file (initial read analysis)
-                    if not flag_skip_read_analysis_summary_output_tsv_file:
+                    if flag_include_read_analysis_summary_output_tsv_file:
                         if str_mode_scarab_count == "atac":
                             l_col = [
                                 "qname",
@@ -12016,7 +12038,7 @@ def LongExportNormalizedCountMatrix(
                 Export BAM Output
                 """
                 # combine the output bam files
-                if not flag_skip_read_analysis_summary_output_bam_file:
+                if flag_include_read_analysis_summary_output_bam_file:
                     def output_bam_file():  # off-loading a single-core work
                         logger.info(
                             f"[{path_file_bam_input}] Combining BAM Output started."
@@ -12136,7 +12158,7 @@ def ourotools(str_mode=None, **dict_args):
         elif str_mode == "LongExtractBarcodeFromBAM":
             LongExtractBarcodeFromBAM(**dict_args)
 
-""" functions that are currently not supported in the command line (only accessible in python environment, including jupyter notebook) """
+""" functions that are currently not supported in the command line """
 class ReadsToCoverage :
     """
     Receive pysam read and a weight associated with the read and write a weighted coverage as a BigWig file that uses the BedGraph format.
@@ -13333,9 +13355,177 @@ def StrandSpecificBAM(
         p.recv( ) # receive a signal indicating the worker has dismissed itself
     # pipeline completed
     return
-
-# aliases
+  
+""" aliases """
 Workers = bk.Workers
+
+""" utility and wrapper functions (not supported in the command line) """
+def get_confident_size_range( path_folder ) :
+    """
+    get confident size range for normalization of size distributions across samples
+    # 2024-08-13 15:16:24 
+    """
+    df = pd.read_csv( f"{path_folder}df_range_confident.tsv.gz", sep = '\t' )
+    int_num_samples = len( df.name.unique( ) ) # retrieve the number of samples in the tissue
+    if int_num_samples == 1 :
+        return None
+    elif len( df ) == int_num_samples : # if there is only a single best region available for each sample
+        return f"{df.start_range_of_interest.max( )}-{df.end_range_of_interest.min( )}"
+    else :
+        print( f"{name_dist = }, {name_tissue = }, more than a single best confident region available." )
+        return -1
+
+def run_pipeline( 
+    # dataset setting
+    path_folder_data,
+    l_name_sample,
+    # scRNA-seq technology-specific 
+    path_file_valid_barcode_list,
+    # species-specific settings
+    path_file_minimap_index_genome,
+    path_folder_count_module_index,
+    path_file_minimap_splice_junction = None, # optional
+    path_file_minimap_unwanted = None, # optional
+    # run setting
+    n_workers = 2, # employ 2 workers (since there are two samples, 2 workers are sufficient)
+    n_threads_for_each_worker = 8, # use 8 CPU cores for each worker
+    # additional settings
+    args = dict( ),
+) :
+    """
+    wrapper function for running the entire ouro-tools pipeline
     
+    arguments:
+    
+    # dataset setting
+    path_folder_data,
+    l_name_sample,
+    
+    # scRNA-seq technology-specific 
+    path_file_valid_barcode_list,
+    
+    # species-specific settings
+    path_file_minimap_index_genome,
+    path_folder_count_module_index,
+    path_file_minimap_splice_junction = None, # optional
+    path_file_minimap_unwanted = None, # optional
+    
+    # run setting
+    n_workers = 2, # employ 2 workers (since there are two samples, 2 workers are sufficient)
+    n_threads_for_each_worker = 8, # use 8 CPU cores for each worker
+    
+    # additional settings
+    args = dict( ),
+    
+    # 2024-08-13 16:20:33 
+    """
+    # function for retrieving keyword arguments for each module and function
+    def _get_kwargs( name_func ) :
+        if name_func in args :
+            return args[ name_func ]
+        else :
+            return dict( )
+    
+    # run LongFilterNSplit
+    LongFilterNSplit(
+        path_file_minimap_index_genome = path_file_minimap_index_genome,
+        l_path_file_minimap_index_unwanted = [ ] if path_file_minimap_unwanted is None else [ path_file_minimap_unwanted ],
+        l_path_file_fastq_input = list( f"{path_folder_data}{name_sample}.fastq.gz" for name_sample in l_name_sample ),
+        l_path_folder_output = list( f"{path_folder_data}LongFilterNSplit_out/{name_sample}/" for name_sample in l_name_sample ),
+        int_num_samples_analyzed_concurrently = n_workers,
+        n_threads = n_workers * n_threads_for_each_worker,
+        ** _get_kwargs( 'LongFilterNSplit' ),
+    )
+
+    # align using minimap2 (require that minimap2 executable can be found in PATH)
+    # below is a wrapper function for minimap2
+    Workers(
+        ONT.Minimap2_Align, # function to deploy
+        int_num_workers_for_Workers = n_workers, # create 'n_workers' number of workers
+        # below are arguments for the function 'ONT.Minimap2_Align'
+        path_file_fastq = list( f"{path_folder_data}LongFilterNSplit_out/{name_sample}/aligned_to_genome__non_chimeric__poly_A__plus_strand.fastq.gz" for name_sample in l_name_sample ), 
+        path_folder_minimap2_output = list( f"{path_folder_data}minimap2_bam_genome/{name_sample}/" for name_sample in l_name_sample ), 
+        path_file_junc_bed = path_file_minimap_splice_junction, 
+        path_file_minimap2_index = path_file_minimap_index_genome,
+        n_threads = n_threads_for_each_worker,
+        ** _get_kwargs( 'Minimap2_Align' ),
+    )
+
+    # run LongExtractBarcodeFromBAM
+    l_path_folder_barcodedbam = list( f"{path_folder_data}LongExtractBarcodeFromBAM_out/{name_sample}/" for name_sample in l_name_sample )
+    LongExtractBarcodeFromBAM(
+        path_file_valid_cb = path_file_valid_barcode_list,
+        l_path_file_bam_input = list( f"{path_folder_data}minimap2_bam_genome/{name_sample}/aligned_to_genome__non_chimeric__poly_A__plus_strand.fastq.gz.minimap2_aligned.bam" for name_sample in l_name_sample ), 
+        l_path_folder_output = l_path_folder_barcodedbam,
+        int_num_samples_analyzed_concurrently = n_workers, 
+        n_threads = n_workers * n_threads_for_each_worker,
+        ** _get_kwargs( 'LongExtractBarcodeFromBAM' ),
+    )
+
+    # run full-length ID module
+    # survey 5' sites
+    LongSurvey5pSiteFromBAM(
+        l_path_folder_input = l_path_folder_barcodedbam,
+        int_num_samples_analyzed_concurrently = n_workers, 
+        n_threads = n_workers * n_threads_for_each_worker,
+        ** _get_kwargs( 'LongSurvey5pSiteFromBAM' ),
+    )
+    # combine 5' site profiles
+    LongClassify5pSiteProfiles( 
+        l_path_folder_input = l_path_folder_barcodedbam,
+        path_folder_output = f"{path_folder_data}LongClassify5pSiteProfiles_out/",
+        n_threads = n_threads_for_each_worker,
+        ** _get_kwargs( 'LongClassify5pSiteProfiles' ),
+    )
+    # append 5' site classification results
+    LongAdd5pSiteClassificationResultToBAM(
+        path_folder_input_5p_sites = f'{path_folder_data}LongClassify5pSiteProfiles_out/',
+        l_path_folder_input_barcodedbam = l_path_folder_barcodedbam,
+        int_num_samples_analyzed_concurrently = n_workers, 
+        n_threads = n_workers * n_threads_for_each_worker,
+        ** _get_kwargs( 'LongAdd5pSiteClassificationResultToBAM' ),
+    )
+    # filter artifact reads 
+    Workers(
+        FilterArtifactReadFromBAM, # function to deploy
+        int_num_workers_for_Workers = n_workers, # create 'n_workers' number of workers
+        # below are arguments for the function 'FilterArtifactReadFromBAM'
+        path_file_bam_input = list( f'{path_folder_data}LongExtractBarcodeFromBAM_out/{name_sample}/5pSiteTagAdded/barcoded.bam' for name_sample in l_name_sample ), 
+        path_folder_output = list( f'{path_folder_data}LongExtractBarcodeFromBAM_out/{name_sample}/5pSiteTagAdded/FilterArtifactReadFromBAM_out/' for name_sample in l_name_sample ), 
+        ** _get_kwargs( 'FilterArtifactReadFromBAM' ),
+    )
+
+    # run mRNA size distribution normalization module
+    # survey the size distribution of full-length mRNAs for each sample
+    l_full_length_bam = list( f'{path_folder_data}LongExtractBarcodeFromBAM_out/{name_sample}/5pSiteTagAdded/FilterArtifactReadFromBAM_out/valid_3p_valid_5p.bam' for name_sample in l_name_sample )
+    Workers( 
+        LongSummarizeSizeDistributions,
+        int_num_workers_for_Workers = n_workers, # create 'n_workers' number of workers
+        path_file_bam_input = l_full_length_bam,
+        path_folder_output =  list( f'{path_folder_data}LongExtractBarcodeFromBAM_out/{name_sample}/5pSiteTagAdded/FilterArtifactReadFromBAM_out/valid_3p_valid_5p.LongSummarizeSizeDistributions_out/' for name_sample in l_name_sample ),
+        ** _get_kwargs( 'LongSummarizeSizeDistributions' ),
+    )
+    # normalize size distributions
+    path_folder_size_norm = f"{path_folder_data}LongCreateReferenceSizeDistribution_out/"
+    LongCreateReferenceSizeDistribution(
+        l_path_file_distributions = list( f'{path_folder_data}LongExtractBarcodeFromBAM_out/{name_sample}/5pSiteTagAdded/FilterArtifactReadFromBAM_out/valid_3p_valid_5p.LongSummarizeSizeDistributions_out/dict_arr_dist.pkl' for name_sample in l_name_sample ),
+        l_name_file_distributions = l_name_sample,
+        path_folder_output = path_folder_size_norm,
+        ** _get_kwargs( 'LongCreateReferenceSizeDistribution' ),
+    )
+    # based on the output, set the confident size range
+    str_confident_size_range = get_confident_size_range( path_folder_size_norm )
+
+    # run the single-cell count module 
+    LongExportNormalizedCountMatrix( 
+        path_folder_ref = path_folder_count_module_index, 
+        l_path_file_bam_input = l_full_length_bam,
+        l_path_folder_output = list( f'{path_folder_data}LongExportNormalizedCountMatrix_out/{name_sample}/' for name_sample in l_name_sample ),
+        l_name_distribution = l_name_sample,
+        path_folder_reference_distribution = path_folder_size_norm,
+        l_str_l_t_distribution_range_of_interest = [ ','.join( [ "raw", str_confident_size_range ] ) ],
+        ** _get_kwargs( 'LongExportNormalizedCountMatrix' ),
+    )
+
 if __name__ == "__main__":
     ourotools()  # run ouro at the top-level environment

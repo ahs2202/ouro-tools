@@ -1559,9 +1559,6 @@ def GLOB_Retrive_Strings_in_Wildcards(
     else:
         return l_l_str_in_wildcard
 
-# global setting
-int_max_num_batches_in_a_queue_for_each_worker = 2 # 2 batches distributed to each process should be optimal, while preventing pipe buffer overloading.
-
 def Multiprocessing_Batch_Generator_and_Workers(
     gen_batch,
     process_batch,
