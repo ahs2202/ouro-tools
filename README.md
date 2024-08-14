@@ -65,7 +65,7 @@ The Ouro-Tools pipeline comprises five main modules, allowing seamless integrati
 
 ![long_read_scRNAseq_intro](doc/img/long_read_scRNAseq_intro.webp)
 
-(Figure adapted from Volden & Vollmers, Genome Biol. 23:47 (2022), and made available under [Creative Commons license 4.0](https://creativecommons.org/licenses/by/4.0/))
+(Figure adapted from Volden & Vollmers, Genome Biol. 23:47 (2022), and made available under [Creative Commons license 4.0](https://creativecommons.org/licenses/by/4.0/) by Oxford Nanopore Technologies plc.)
 
 In 2013, 2019, and 2022, “single-cell sequencing,” “single-cell multimodal omics,” and “long-read sequencing” were chosen as “Method of the Year” by *Nature Methods* journal, respectively, highlighting the urgent need to understand biology at the resolution of individual cells and individual biological molecules. Long-read scRNA-seq is a method that combines the single-cell RNA sequencing and long-read sequencing ([Nanopore](https://nanoporetech.com/applications/investigations/single-cell-sequencing) and [PacBio](https://www.pacb.com/products-and-services/applications/rna-sequencing/single-cell-rna-sequencing/)) methods.
 
@@ -172,7 +172,9 @@ ourotools.LongFilterNSplit(
 
 As the first module of the Ouro-Tools pipeline, the raw long-read pre-processing module `LongFilterNSplit` has a dual function for (1) providing comprehensive quality control metrics of a long-read scRNA-seq experiment and (2) pre-processing of raw long-read sequencing data for the downstream analysis. 
 
-
+<p align="center">
+  <a href="https://github.com/ahs2202/ouro-tools"><img src="doc/img/QC-example.svg" width="850" height="412"></a>
+</p>
 
 According to the classification results, cDNA molecules are organized into separate output FASTQ files. For the cDNA molecules that contains a single (external or internal) poly(A) tail, the read is re-oriented so that it has the same orientation as its original mRNA transcript, with the poly(A) tail at its 3’ end; the resulting long-reads of cDNAs can be utilized for strand-specific long-read RNA-seq analysis.
 
@@ -215,6 +217,10 @@ ourotools.LongExtractBarcodeFromBAM(
 
 The barcode extraction module `LongExtractBarcodeFromBAM` identifies cell barcode (**CB**) and unique molecular identifier (**UMI**) sequences for each read and exports the results as a **“barcoded” BAM file**, a BAM file containing corrected CB and UMI sequences for each read using [the predefined SAM tags](#SAM-tags).
 
+<p align="center">
+  <a href="https://github.com/ahs2202/ouro-tools"><img src="doc/img/UMI-deduplication-example.svg" width="850" height="412"></a>
+</p>
+
 
 
 ## *step 4)* Biological full-length molecule identification module <a name="full-length-ID"></a>
@@ -252,6 +258,10 @@ ourotools.Workers(
 
 The biological full-length identification module collects the lengths of guanosine homopolymers at the 5’ ends of cDNAs to identify genuine TSSs that produce capped mRNAs, depleting truncated cDNA molecules *in silico*. The module is implemented as a workflow consisting of `LongSurvey5pSiteFromBAM`, `LongClassify5pSiteProfiles`, `LongAdd5pSiteClassificationResultToBAM`, and `FilterArtifactReadFromBAM`.
 
+<p align="center">
+  <a href="https://github.com/ahs2202/ouro-tools"><img src="doc/img/full-length-identification-example.svg" width="600" height="412"></a>
+</p>
+
 
 
 ## *step 5)* Size distribution normalization module <a name="size-normalization"></a>
@@ -281,6 +291,10 @@ str_confident_size_range = ourotools.get_confident_size_range( path_folder_size_
 ```
 
 The size distribution normalization module is implemented using the `LongSummarizeSizeDistributions` and `LongCreateReferenceSizeDistribution` workflows. First, using the `LongSummarizeSizeDistributions`workflow, a full-length, UMI-deduplicated cDNA size distribution is obtained from the `valid_3p_valid_5p` barcoded BAM file (representing ***in vivo* full-length mRNAs**) for each sample. Next, the reference mRNA size distribution is constructed for all the samples using the `LongCreateReferenceSizeDistribution` workflow.
+
+<p align="center">
+  <a href="https://github.com/ahs2202/ouro-tools"><img src="doc/img/size-normalization-example.svg" width="850" height="412"></a>
+</p>
 
 
 
@@ -365,6 +379,8 @@ We recommends using <u>***Ensembl*** reference genome, transcriptome, and gene a
 pre-built index can be downloaded using the following links (should be extracted to a folder using **tar -xf** command):
 
 <u>*Human (GRCh38, Ensembl version 105)*</u> : https://ouro-tools.s3.amazonaws.com/index/latest/Homo_sapiens.GRCh38.105.v0.2.4.tar
+
+*<u>Mouse (GRCm39, Ensembl version 105)</u>* : https://ouro-tools.s3.amazonaws.com/index/latest/Mus_musculus.GRCm39.105.v0.2.4.tar
 
 *<u>Mouse (GRCm38, Ensembl version 102)</u>* : https://ouro-tools.s3.amazonaws.com/index/latest/Mus_musculus.GRCm38.102.v0.2.4.tar
 
