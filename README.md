@@ -43,9 +43,11 @@ Ouro-Tools is a novel, comprehensive computational pipeline for long-read scRNA-
 
  - [*wrap-up)* Running the entire pipeline using a wrapper function](#run-entire-pipeline)
 
+ - [Pre-built indices of unwanted genomic sequences for pre-processing](#pre-built-unwanted-genomic-sequences)
+
  - [An Ouro-Tools count module index](#count-module-index)
 
-   - [Pre-built index](#pre-built-index)
+   - [Pre-built count module index](#pre-built-index)
    - [Building index from scratch](#building-index)
    - [*optional input annotations*](#optional-input-annotations)
    
@@ -152,7 +154,7 @@ path_file_minimap_unwanted = '/home/project/Single_Cell_Full_Length_Atlas/data/a
 path_folder_count_module_index = '/home/project/Single_Cell_Full_Length_Atlas/data/pipeline/20211116_ouroboros_short_read_public_data_mining/scarab_annotations/Mus_musculus.GRCm38.102.v0.2.4/' # path to the Ouro-Tools count module index
 ```
 
-To find the barcode whitelist specific to your scRNA-seq experiment, please refer to [the official 10x Genomics article](https://kb.10xgenomics.com/hc/en-us/articles/115004506263-What-is-a-barcode-whitelist). Pre-built Ouro-Tools count module index can be downloaded [here](#pre-built-index).
+To find the barcode whitelist specific to your scRNA-seq experiment, please refer to [the official 10x Genomics article](https://kb.10xgenomics.com/hc/en-us/articles/115004506263-What-is-a-barcode-whitelist). Pre-built Ouro-Tools count module index can be downloaded [here](#pre-built-index). Pre-built indices of unwanted sequences (ribosomal DNA repeats and mitochondrial DNAs) can be downloaded [here](#pre-built-unwanted-genomic-sequences).
 
 
 
@@ -173,7 +175,7 @@ ourotools.LongFilterNSplit(
 As the first module of the Ouro-Tools pipeline, the raw long-read pre-processing module `LongFilterNSplit` has a dual function for (1) providing comprehensive quality control metrics of a long-read scRNA-seq experiment and (2) pre-processing of raw long-read sequencing data for the downstream analysis. 
 
 <p align="center">
-  <a href="https://github.com/ahs2202/ouro-tools"><img src="doc/img/QC-example.svg" width="850" height="412"></a>
+  <img src="doc/img/QC-example.svg" width="850" height="412">
 </p>
 
 According to the classification results, cDNA molecules are organized into separate output FASTQ files. For the cDNA molecules that contains a single (external or internal) poly(A) tail, the read is re-oriented so that it has the same orientation as its original mRNA transcript, with the poly(A) tail at its 3’ end; the resulting long-reads of cDNAs can be utilized for strand-specific long-read RNA-seq analysis.
@@ -218,7 +220,7 @@ ourotools.LongExtractBarcodeFromBAM(
 The barcode extraction module `LongExtractBarcodeFromBAM` identifies cell barcode (**CB**) and unique molecular identifier (**UMI**) sequences for each read and exports the results as a **“barcoded” BAM file**, a BAM file containing corrected CB and UMI sequences for each read using [the predefined SAM tags](#SAM-tags).
 
 <p align="center">
-  <a href="https://github.com/ahs2202/ouro-tools"><img src="doc/img/UMI-deduplication-example.svg" width="850" height="412"></a>
+  <img src="doc/img/UMI-deduplication-example.svg" width="850" height="412">
 </p>
 
 
@@ -259,7 +261,7 @@ ourotools.Workers(
 The biological full-length identification module collects the lengths of guanosine homopolymers at the 5’ ends of cDNAs to identify genuine TSSs that produce capped mRNAs, depleting truncated cDNA molecules *in silico*. The module is implemented as a workflow consisting of `LongSurvey5pSiteFromBAM`, `LongClassify5pSiteProfiles`, `LongAdd5pSiteClassificationResultToBAM`, and `FilterArtifactReadFromBAM`.
 
 <p align="center">
-  <a href="https://github.com/ahs2202/ouro-tools"><img src="doc/img/full-length-identification-example.svg" width="600" height="412"></a>
+  <img src="doc/img/full-length-identification-example.svg" width="600" height="412">
 </p>
 
 
@@ -293,7 +295,7 @@ str_confident_size_range = ourotools.get_confident_size_range( path_folder_size_
 The size distribution normalization module is implemented using the `LongSummarizeSizeDistributions` and `LongCreateReferenceSizeDistribution` workflows. First, using the `LongSummarizeSizeDistributions`workflow, a full-length, UMI-deduplicated cDNA size distribution is obtained from the `valid_3p_valid_5p` barcoded BAM file (representing ***in vivo* full-length mRNAs**) for each sample. Next, the reference mRNA size distribution is constructed for all the samples using the `LongCreateReferenceSizeDistribution` workflow.
 
 <p align="center">
-  <a href="https://github.com/ahs2202/ouro-tools"><img src="doc/img/size-normalization-example.svg" width="850" height="412"></a>
+  <img src="doc/img/size-normalization-example.svg" width="850" height="412">
 </p>
 
 
@@ -366,6 +368,16 @@ ourotools.run_pipeline(
 
 
 
+## Pre-built indices of unwanted genomic sequences for pre-processing<a name="pre-built-unwanted-genomic-sequences"></a>
+
+The pre-built indices of unwanted sequences can be downloaded using the following links:
+
+*<u>Human (GRCh38)</u>* : [Minimap2-index-file](https://ouro-tools.s3.amazonaws.com/miscellaneous/MT_and_rRNA_GRCh38.fa.ont.mmi), [FASTA-file](https://ouro-tools.s3.amazonaws.com/miscellaneous/MT_and_rRNA_GRCh38.fa), [GTF-file](https://ouro-tools.s3.amazonaws.com/miscellaneous/MT_and_rRNA_GRCh38.gtf)
+
+*<u>Mouse (GRCm38)</u>* : [Minimap2-index-file](https://ouro-tools.s3.amazonaws.com/miscellaneous/MT_and_rRNA_GRCm38.fa.ont.mmi), [FASTA-file](https://ouro-tools.s3.amazonaws.com/miscellaneous/MT_and_rRNA_GRCm38.fa), [GTF-file](https://ouro-tools.s3.amazonaws.com/miscellaneous/MT_and_rRNA_GRCm38.gtf)
+
+
+
 ## An Ouro-Tools count module index<a name="count-module-index"></a>
 
 The single-cell count module of Ouro-Tools utilizes <u>genome, transcriptome, and gene annotations</u> to assign reads to **genes, isoforms, and genomic bins (tiles across the genome)**. The index building process is automatic; <u>there is no needs to run a separate command in order to build the index</u>. Once Ouro-Tools processes these information before analyzing an input BAM file(s), the program saves an index in order to load the information much faster next time.
@@ -378,21 +390,21 @@ We recommends using <u>***Ensembl*** reference genome, transcriptome, and gene a
 
 pre-built index can be downloaded using the following links (should be extracted to a folder using **tar -xf** command):
 
-<u>*Human (GRCh38, Ensembl version 105)*</u> : https://ouro-tools.s3.amazonaws.com/index/latest/Homo_sapiens.GRCh38.105.v0.2.4.tar
+[*<u>Human (GRCh38, Ensembl version 105)</u>*](https://ouro-tools.s3.amazonaws.com/index/latest/Homo_sapiens.GRCh38.105.v0.2.4.tar)
 
-*<u>Mouse (GRCm39, Ensembl version 105)</u>* : https://ouro-tools.s3.amazonaws.com/index/latest/Mus_musculus.GRCm39.105.v0.2.4.tar
+[*<u>Mouse (GRCm39, Ensembl version 105)</u>*](https://ouro-tools.s3.amazonaws.com/index/latest/Mus_musculus.GRCm39.105.v0.2.4.tar)
 
-*<u>Mouse (GRCm38, Ensembl version 102)</u>* : https://ouro-tools.s3.amazonaws.com/index/latest/Mus_musculus.GRCm38.102.v0.2.4.tar
+[*<u>Mouse (GRCm38, Ensembl version 102)</u>*](https://ouro-tools.s3.amazonaws.com/index/latest/Mus_musculus.GRCm38.102.v0.2.4.tar)
 
-<u>*Zebrafish (GRCz11, Ensembl version 104)*</u> : https://ouro-tools.s3.amazonaws.com/index/latest/Danio_rerio.GRCz11.104.v0.2.4.tar
+[*<u>Zebrafish (GRCz11, Ensembl version 104)</u>*](https://ouro-tools.s3.amazonaws.com/index/latest/Danio_rerio.GRCz11.104.v0.2.4.tar)
 
-*<u>Thale cress (TAIR10, Ensembl Plant version 56)</u>* : https://ouro-tools.s3.amazonaws.com/index/latest/Arabidopsis_thaliana.TAIR10.56.v0.2.4.tar
+[*<u>Thale cress (TAIR10, Ensembl Plant version 56)</u>*](https://ouro-tools.s3.amazonaws.com/index/latest/Arabidopsis_thaliana.TAIR10.56.v0.2.4.tar)
 
 
 
 ### Building index from scratch <a name="building-index"></a>
 
-An Ouro-Tools index can be built on-the-fly from the input genome, transcriptome, and gene annotation files. For example, below are the list of files that were used for the pre-built Ouro-Tools index "<u>*[Human (GRCh38, Ensembl version 105)](https://www.dropbox.com/s/8agizrykiorpnag/Homo_sapiens.GRCh38.105.v0.1.1.tar?dl=0)*</u>".
+An Ouro-Tools index can be built on-the-fly from the input genome, transcriptome, and gene annotation files. For example, below are the list of files that were used for the pre-built Ouro-Tools index "<u>*[Human (GRCh38, Ensembl version 105)](https://ouro-tools.s3.amazonaws.com/index/latest/Homo_sapiens.GRCh38.105.v0.2.4.tar)*</u>".
 
 
 

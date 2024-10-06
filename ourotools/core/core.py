@@ -7634,7 +7634,7 @@ def LongExportNormalizedCountMatrix(
     flag_exclude_reads_assigned_to_features_and_count_every_read_in_bam_during_binning: bool = False,
     flag_does_not_include_strand_specific_counts: bool = False,
     verbose: bool = True,
-    l_str_mode_scarab_count: list[
+    l_str_mode_ourotools_count_count: list[
         Literal[
             "gex5prime-single-end",
             "gex5prime-paired-end",
@@ -7699,9 +7699,9 @@ def LongExportNormalizedCountMatrix(
     """
     perform secondary analysis of cell-ranger output (barcoded BAM)
 
-    l_str_mode_scarab_count : list[ Literal[ "gex5prime-single-end", 'gex5prime-paired-end', "gex3prime-single-end", 'gex3prime', 'gex', 'gex5prime', 'atac', 'multiome' ] ] = [ 'gex3prime' ], # list of scarab_count operation mode
+    l_str_mode_ourotools_count_count : list[ Literal[ "gex5prime-single-end", 'gex5prime-paired-end', "gex3prime-single-end", 'gex3prime', 'gex', 'gex5prime', 'atac', 'multiome' ] ] = [ 'gex3prime' ], # list of ourotools_count_count operation mode
 
-    scidx : Union[ dict, None ] = None, # a loaded scarab index object. if given, the object will be used instead loading the index from the disk.
+    scidx : Union[ dict, None ] = None, # a loaded ourotools_count index object. if given, the object will be used instead loading the index from the disk.
     path_file_fa_for_cram : Union[ str, None ] = None, # path to the fasta file used for CRAM. If the fasta file has not been indexed, it will be automatically indexed
     flag_does_not_collect_variant_information : bool = False, # does not collect the variant information at all. it will improve performance at the cost of the reduced output information.
     flag_output_variant_information_with_annotations : bool = False, # If True, record variants for each individual feature (gene, isoform, genome bin, etc.). If False, variant information will be recorded for only the 'variant' feature type (require 'path_file_vcf_for_filtering_variant' argument to be active).
@@ -7781,7 +7781,7 @@ def LongExportNormalizedCountMatrix(
     # if pre-loaded 'scidx' is given, this argument will be ignored.
 
     returns
-    a loaded scarab-count index ('scidx')
+    a loaded ourotools_count index ('scidx')
     
     # 2024-01-10 21:28:50 
     """
@@ -7794,7 +7794,7 @@ def LongExportNormalizedCountMatrix(
         # command line arguments
         parser = argparse.ArgumentParser(
             description=str_description,
-            usage="scarab count",
+            usage="ourotools LongExportNormalizedCountMatrix",
             formatter_class=argparse.RawTextHelpFormatter,
         )
         parser.add_argument("count")
@@ -7802,19 +7802,19 @@ def LongExportNormalizedCountMatrix(
         arg_grp_general.add_argument(
             "-b",
             "--l_path_file_bam_input",
-            help="A barcoded BAM file (or a list of such files, separated by spaces), sorted by read alignment position, from cellranger (GEX, ATAC, or ARC for multiome data) or similar pipelines. To process more than one samples, paths of multiple BAM files can be given. For a multiome sample, two barcoded BAM file paths (the BAM file path for the GEX data comes first, followed by the BAM file path for the ATAC data) should be given for each sample (with an appropriate argument for the '--l_str_mode_scarab_count' argument)",
+            help="A barcoded BAM file (or a list of such files, separated by spaces), sorted by read alignment position, from cellranger (GEX, ATAC, or ARC for multiome data) or similar pipelines. To process more than one samples, paths of multiple BAM files can be given. For a multiome sample, two barcoded BAM file paths (the BAM file path for the GEX data comes first, followed by the BAM file path for the ATAC data) should be given for each sample (with an appropriate argument for the '--l_str_mode_ourotools_count_count' argument)",
             nargs="*",
         )
         arg_grp_general.add_argument(
             "-o",
             "--l_path_folder_output",
-            help="(default: scarab_output/ subdirectory of the folder where an input BAM file for the sample resides. For a multiome sample, scarab_output/ subdirectory of the folder where an input GEX BAM file resides) a directory of an output folder or a list of output folders, separated by spaces. The number of output folders should be same as the number of samples",
+            help="(default: ourotools_count_output/ subdirectory of the folder where an input BAM file for the sample resides. For a multiome sample, ourotools_count_output/ subdirectory of the folder where an input GEX BAM file resides) a directory of an output folder or a list of output folders, separated by spaces. The number of output folders should be same as the number of samples",
             nargs="*",
         )
         arg_grp_general.add_argument(
             "-i",
-            "--l_str_mode_scarab_count",
-            help="one of [ 'gex', 'atac', 'multiome' ] (default: 'gex') an operating mode of scarab short-read. 'gex' for gene expression profiling, 'atac' for chromatin accessibility profiling, 'multiome' for gene expression profiling and chromatin accessibility profiling for the same single cells. If more than a single scarab count mode is used for different samples (e.g. 'gex' for the first sample and 'atac' for the second sample), multiple arguments separated by a space can be given. If multiple operating modes are given, the number of modes should be same as the number of samples",
+            "--l_str_mode_ourotools_count_count",
+            help="one of [ 'gex', 'atac', 'multiome' ] (default: 'gex') an operating mode of ourotools_count short-read. 'gex' for gene expression profiling, 'atac' for chromatin accessibility profiling, 'multiome' for gene expression profiling and chromatin accessibility profiling for the same single cells. If more than a single ourotools_count mode is used for different samples (e.g. 'gex' for the first sample and 'atac' for the second sample), multiple arguments separated by a space can be given. If multiple operating modes are given, the number of modes should be same as the number of samples",
             default=["gex"],
             nargs="*",
         )
@@ -7826,7 +7826,7 @@ def LongExportNormalizedCountMatrix(
         arg_grp_general.add_argument(
             "-t",
             "--n_threads",
-            help="n_threads (default : 16) scarab-count pipeline is scalable upto ~50 threads (processes). The use of Python Multiprocessing Manager process to share some of data across workers limits the number of processes.",
+            help="n_threads (default : 16) ourotools_count pipeline is scalable upto ~50 threads (processes). The use of Python Multiprocessing Manager process to share some of data across workers limits the number of processes.",
             default=16,
             type=int,
         )
@@ -8128,7 +8128,7 @@ def LongExportNormalizedCountMatrix(
         arg_grp_variant.add_argument(
             "-f",
             "--int_min_num_of_reads_for_filtering_genomic_variant",
-            help="(int_min_num_of_reads_for_filtering_genomic_variant) (default: 10) minimum number of UMI counts required to include the information about the detected genomic variation in the output count matrix. Setting this value to a negative number (e.g. -1) will disable the behavior of 'scarab' exporting genomic variation information into the count matrix, which can significantly increase the run time and the size of the output count matrix for a typical 'int_min_num_of_reads_for_filtering_genomic_variant' value between 1~10. ",
+            help="(int_min_num_of_reads_for_filtering_genomic_variant) (default: 10) minimum number of UMI counts required to include the information about the detected genomic variation in the output count matrix. Setting this value to a negative number (e.g. -1) will disable the behavior of 'ourotools_count' exporting genomic variation information into the count matrix, which can significantly increase the run time and the size of the output count matrix for a typical 'int_min_num_of_reads_for_filtering_genomic_variant' value between 1~10. ",
             default=10,
             type=int,
         )
@@ -8255,7 +8255,7 @@ def LongExportNormalizedCountMatrix(
         arg_grp_bam_processing.add_argument(
             "-X",
             "--flag_use_gene_isoform_and_intron_assignment_from_10x_cellranger",
-            help="(Default: False) flag_use_gene_isoform_and_intron_assignment_from_10x_cellranger. Setting this flag to True will disable exon and splice-junction counting behavior, due to a possible inconsistency between reference annotations used in cellranger and scarab",
+            help="(Default: False) flag_use_gene_isoform_and_intron_assignment_from_10x_cellranger. Setting this flag to True will disable exon and splice-junction counting behavior, due to a possible inconsistency between reference annotations used in cellranger and ourotools_count",
             action="store_true",
         )
         arg_grp_bam_processing.add_argument(
@@ -8330,7 +8330,7 @@ def LongExportNormalizedCountMatrix(
         int_min_mapq_unique_mapped_for_atac_data = (
             args.int_min_mapq_unique_mapped_for_atac_data
         )
-        l_str_mode_scarab_count = args.l_str_mode_scarab_count
+        l_str_mode_ourotools_count_count = args.l_str_mode_ourotools_count_count
         verbose = args.verbose
         l_path_file_bam_input = args.l_path_file_bam_input
         l_path_folder_output = args.l_path_folder_output
@@ -8447,11 +8447,11 @@ def LongExportNormalizedCountMatrix(
     flag_include_strand_specific_counts = not flag_does_not_include_strand_specific_counts
     
     """
-    Start of the Scarab-Count Program
+    Start of the Ouro-Tools Count Pipeline
     """
     logger.info(str_description)
     logger.info(
-        "Scarab Short Read: secondary analysis of 10X barcoded BAM file for isoform and misc. annotation analysis"
+        "LongExportNormalizedCountMatrix: Comprehensive analysis of barcoded BAM file for quantifying isoforms, TEs, and unannotated genomic loci"
     )
     logger.info(f"Program Started.")
 
@@ -8468,7 +8468,7 @@ def LongExportNormalizedCountMatrix(
             "Required argument(s) is missing. to view help message, type -h or --help"
         )
         return -1
-    set_valid_str_mode_scarab_count = {
+    set_valid_str_mode_ourotools_count_count = {
         "gex5prime-single-end",
         "gex5prime-paired-end",
         "gex3prime-single-end",
@@ -8477,49 +8477,49 @@ def LongExportNormalizedCountMatrix(
         "gex5prime",
         "atac",
         "multiome",
-    }  # define a valid set of 'str_mode_scarab_count'
+    }  # define a valid set of 'str_mode_ourotools_count_count'
     if (
         sum(
-            str_mode_scarab_count not in set_valid_str_mode_scarab_count
-            for str_mode_scarab_count in l_str_mode_scarab_count
+            str_mode_ourotools_count_count not in set_valid_str_mode_ourotools_count_count
+            for str_mode_ourotools_count_count in l_str_mode_ourotools_count_count
         )
         > 0
     ):
         logger.error(
-            f"invalid 'str_mode_scarab_count' mode detected. Only one of {set_valid_str_mode_scarab_count} can be used. exiting"
+            f"invalid 'str_mode_ourotools_count_count' mode detected. Only one of {set_valid_str_mode_ourotools_count_count} can be used. exiting"
         )
         return -1
-    # replace short-hand to the full-length scarab_count mode
-    dict_str_mode_scarab_count_short_hand = {
+    # replace short-hand to the full-length ourotools_count_count mode
+    dict_str_mode_ourotools_count_count_short_hand = {
         "gex3prime": "gex3prime-single-end",
         "gex": "gex3prime-single-end",
         "gex5prime": "gex5prime-single-end",
     }  # define mapping
-    l_str_mode_scarab_count = list(
-        dict_str_mode_scarab_count_short_hand[e]
-        if e in dict_str_mode_scarab_count_short_hand
+    l_str_mode_ourotools_count_count = list(
+        dict_str_mode_ourotools_count_count_short_hand[e]
+        if e in dict_str_mode_ourotools_count_count_short_hand
         else e
-        for e in l_str_mode_scarab_count
-    )  # replace short-hand to the full-length scarab_count mode
+        for e in l_str_mode_ourotools_count_count
+    )  # replace short-hand to the full-length ourotools_count_count mode
     if (
-        len(l_str_mode_scarab_count) == 1
-    ):  # if only a single operating mode for scarab count has been given, apply (broadcast) the operating mode to all samples
-        l_str_mode_scarab_count = list(l_str_mode_scarab_count) * len(
+        len(l_str_mode_ourotools_count_count) == 1
+    ):  # if only a single operating mode for ourotools_count has been given, apply (broadcast) the operating mode to all samples
+        l_str_mode_ourotools_count_count = list(l_str_mode_ourotools_count_count) * len(
             l_path_folder_output
         )
-    if len(l_path_folder_output) != len(l_str_mode_scarab_count):
+    if len(l_path_folder_output) != len(l_str_mode_ourotools_count_count):
         logger.error(
-            "the number of samples are not equal to the number of given Scarab operating modes (the 'l_str_mode_scarab_count' argument), exiting"
+            "the number of samples are not equal to the number of given ouro-tools operating modes (the 'l_str_mode_ourotools_count_count' argument), exiting"
         )
         return -1
     # check the number of input BAM files
     int_num_of_expected_input_bam_files = sum(
-        2 if str_mode_scarab_count == "multiome" else 1
-        for str_mode_scarab_count in l_str_mode_scarab_count
-    )  # calculate the number of expected input BAM files based on the given 'l_str_mode_scarab_count' argument.
+        2 if str_mode_ourotools_count_count == "multiome" else 1
+        for str_mode_ourotools_count_count in l_str_mode_ourotools_count_count
+    )  # calculate the number of expected input BAM files based on the given 'l_str_mode_ourotools_count_count' argument.
     if len(l_path_file_bam_input) != int_num_of_expected_input_bam_files:
         logger.error(
-            f"the number of given input BAM files are {len( l_path_file_bam_input )}, which is different from the expected number of input BAM files (expected {int_num_of_expected_input_bam_files} files) from the given 'l_str_mode_scarab_count' argument, exiting"
+            f"the number of given input BAM files are {len( l_path_file_bam_input )}, which is different from the expected number of input BAM files (expected {int_num_of_expected_input_bam_files} files) from the given 'l_str_mode_ourotools_count_count' argument, exiting"
         )
         return -1
 
@@ -8549,14 +8549,14 @@ def LongExportNormalizedCountMatrix(
             l_path_file_bam_input[::-1]
         )  # reverse the input BAM file paths so that pop operation yield the element located at the front
         l_path_folder_output = []
-        for str_mode_scarab_count in l_str_mode_scarab_count:
+        for str_mode_ourotools_count_count in l_str_mode_ourotools_count_count:
             path_file_bam_input = l_path_file_bam_input_reversed.pop()
             if (
-                str_mode_scarab_count == "multiome"
+                str_mode_ourotools_count_count == "multiome"
             ):  # consume one more input BAM file path (a file path for ATAC-seq data) for a 'multiome' sample
                 _ = l_path_file_bam_input_reversed.pop()
             path_folder_output = (
-                f"{path_file_bam_input.rsplit( '/', 1 )[ 0 ]}scarab_output/"
+                f"{path_file_bam_input.rsplit( '/', 1 )[ 0 ]}ourotools_count_output/"
             )
             l_path_folder_output.append(path_folder_output)
 
@@ -8785,7 +8785,7 @@ def LongExportNormalizedCountMatrix(
         )  # no limit for the number of works that can be submitted.
 
         """
-        Run scarab count for each sample
+        Run ourotools_count for each sample
         """
         def _reverse_list( l ) :
             ''' # 2023-08-29 22:49:13 
@@ -8794,16 +8794,16 @@ def LongExportNormalizedCountMatrix(
             return deepcopy( l[::-1] )
         l_path_file_bam_input_reversed = _reverse_list( l_path_file_bam_input ) # reverse the input BAM file paths so that pop operation yield the element located at the front
         l_l_t_distribution_range_of_interest_reversed = _reverse_list( l_l_t_distribution_range_of_interest )
-        for str_mode_scarab_count_for_the_current_sample, path_folder_output_for_the_current_sample, name_distribution in zip( l_str_mode_scarab_count, l_path_folder_output, l_name_distribution ) :  # retrieve scarab count operating mode and an output folder for the current sample
-            """settings for each scarab count operating mode"""
+        for str_mode_ourotools_count_count_for_the_current_sample, path_folder_output_for_the_current_sample, name_distribution in zip( l_str_mode_ourotools_count_count, l_path_folder_output, l_name_distribution ) :  # retrieve ourotools_count operating mode and an output folder for the current sample
+            """settings for each ourotools_count operating mode"""
             if (
-                str_mode_scarab_count_for_the_current_sample == "multiome"
+                str_mode_ourotools_count_count_for_the_current_sample == "multiome"
             ):  # Multiome run mode
                 l_path_file_bam_input_for_the_current_sample = [
                     l_path_file_bam_input_reversed.pop(),
                     l_path_file_bam_input_reversed.pop(),
                 ]  # retrieve two samples for the multiome sample
-                l_str_mode_scarab_count_for_the_current_sample = [
+                l_str_mode_ourotools_count_count_for_the_current_sample = [
                     "gex3prime-single-end",
                     "atac",
                 ]
@@ -8824,13 +8824,13 @@ def LongExportNormalizedCountMatrix(
                     None, None
                 ]
             elif (
-                str_mode_scarab_count_for_the_current_sample[:4] == "atac"
+                str_mode_ourotools_count_count_for_the_current_sample[:4] == "atac"
             ):  # ATAC run mode
                 l_path_file_bam_input_for_the_current_sample = [
                     l_path_file_bam_input_reversed.pop()
                 ]  # retrieve one sample for the atac sample
-                l_str_mode_scarab_count_for_the_current_sample = [
-                    str_mode_scarab_count_for_the_current_sample
+                l_str_mode_ourotools_count_count_for_the_current_sample = [
+                    str_mode_ourotools_count_count_for_the_current_sample
                 ]
                 l_path_folder_output_for_the_current_sample = [
                     path_folder_output_for_the_current_sample
@@ -8843,13 +8843,13 @@ def LongExportNormalizedCountMatrix(
                 ]
                 l_arr_ratio_to_ref_for_the_current_sample = [ dict_name_sample_to_arr_ratio_to_ref[ name_distribution ], ] if flag_size_distribution_based_normalization_is_applied else [ None, ]
             elif (
-                str_mode_scarab_count_for_the_current_sample[:3] == "gex"
+                str_mode_ourotools_count_count_for_the_current_sample[:3] == "gex"
             ):  # GEX run mode
                 l_path_file_bam_input_for_the_current_sample = [
                     l_path_file_bam_input_reversed.pop()
                 ]  # retrieve one sample for the gex sample
-                l_str_mode_scarab_count_for_the_current_sample = [
-                    str_mode_scarab_count_for_the_current_sample
+                l_str_mode_ourotools_count_count_for_the_current_sample = [
+                    str_mode_ourotools_count_count_for_the_current_sample
                 ]
                 l_path_folder_output_for_the_current_sample = [
                     path_folder_output_for_the_current_sample
@@ -8890,7 +8890,7 @@ def LongExportNormalizedCountMatrix(
                             break
 
                 # check the existence of the output folder for the current sample
-                if str_mode_scarab_count_for_the_current_sample == "multiome":
+                if str_mode_ourotools_count_count_for_the_current_sample == "multiome":
                     if not os.path.exists(
                         f"{path_folder_output_for_the_current_sample}count_matrix.export_completed.txt"
                     ):
@@ -8958,14 +8958,14 @@ def LongExportNormalizedCountMatrix(
             """
             for (
                 path_file_bam_input,
-                str_mode_scarab_count,
+                str_mode_ourotools_count_count,
                 path_folder_output,
                 int_min_mapq_unique_mapped,
                 arr_ratio_to_ref,
                 l_t_distribution_range_of_interest,
             ) in zip(
                 l_path_file_bam_input_for_the_current_sample,
-                l_str_mode_scarab_count_for_the_current_sample,
+                l_str_mode_ourotools_count_count_for_the_current_sample,
                 l_path_folder_output_for_the_current_sample,
                 l_int_min_mapq_unique_mapped_for_the_current_sample,
                 l_arr_ratio_to_ref_for_the_current_sample,
@@ -8975,7 +8975,7 @@ def LongExportNormalizedCountMatrix(
                 path_file_bam_input = os.path.abspath(path_file_bam_input)
                 if path_folder_output is None:  # set default 'path_folder_output'
                     path_folder_output = (
-                        f"{path_file_bam_input.rsplit( '/', 1 )[ 0 ]}scarab_output/"
+                        f"{path_file_bam_input.rsplit( '/', 1 )[ 0 ]}ourotools_count_output/"
                     )
                 path_folder_output = os.path.abspath(path_folder_output)
                 path_folder_output += "/"
@@ -8992,7 +8992,7 @@ def LongExportNormalizedCountMatrix(
                         logger.info( f"[Output folder Already Exists] the output folder {path_folder_output} contains a valid count matrix file. Therefore, the output folder will be skipped." )
                         continue  # skip if the pipeline has been completed for the output folder
                     else:
-                        """if required output files does not exist or the an intermediate file exists, remove the entire output folder, and rerun Scarab"""
+                        """if required output files does not exist or the an intermediate file exists, remove the entire output folder, and rerun the pipeline"""
                         if ( len(glob.glob(f"{path_folder_output}*/")) > 0 ):  # detect a folder inside the output folder and report the presence of the existing folders.
                             logger.info( f"[Output folder Already Exists] the output folder {path_folder_output} does not contain a valid count matrix file. The output folder will be cleaned and the pipeline will start anew." )
                         # delete the folders inside the output folder
@@ -9183,19 +9183,19 @@ def LongExportNormalizedCountMatrix(
                 )
 
                 """ load local settings """
-                flag_is_mode_scarab_count_atac = str_mode_scarab_count == "atac"
+                flag_is_mode_ourotools_count_count_atac = str_mode_ourotools_count_count == "atac"
                 flag_is_5prime, flag_is_paired_end = None, None  # initialize the fiags
                 # retrieve a flag indiciating whether to export filter excluding internal polyA primed reads
-                flag_export_full_length_only_count_as_a_separate_feature = not ( flag_is_mode_scarab_count_atac or flag_skip_full_length_feature_counting )
-                if not flag_is_mode_scarab_count_atac:
-                    flag_is_5prime = "gex5prime" in str_mode_scarab_count
-                    flag_is_paired_end = "paired-end" in str_mode_scarab_count
+                flag_export_full_length_only_count_as_a_separate_feature = not ( flag_is_mode_ourotools_count_count_atac or flag_skip_full_length_feature_counting )
+                if not flag_is_mode_ourotools_count_count_atac:
+                    flag_is_5prime = "gex5prime" in str_mode_ourotools_count_count
+                    flag_is_paired_end = "paired-end" in str_mode_ourotools_count_count
 
-                """ define internal parameters according to the scarab count modes """
+                """ define internal parameters according to the ourotools_count modes """
                 flag_use_gene_assignment_from_10x_cellranger_for_the_current_bam_file = flag_use_gene_assignment_from_10x_cellranger  # retrieve 'flag_use_gene_assignment_from_10x_cellranger_for_the_current_bam_file'
                 # for a header line for annotated count matrix
                 l_col_df_count = ["barcode", "feature", "id_feature", "read_count"] # define 'l_col_df_count'
-                if flag_is_mode_scarab_count_atac:
+                if flag_is_mode_ourotools_count_count_atac:
                     """data columns"""
                     # a list of names of columns for defining unique molecules assigned to a single feature for ATAC reads (following 10X cellranger ATAC > v1.2)
                     l_col_for_identifying_unique_molecules = [
@@ -9303,7 +9303,7 @@ def LongExportNormalizedCountMatrix(
                     # a list of names of columns that will be added as BAM tags to the output BAM file # should be a contiguous subset of 'l_col'
                     l_name_col_newanno = l_col[ -14 : ]
 
-                # shared settings across scarab modes
+                # shared settings across ourotools_count modes
                 dict_name_col_newanno_to_sam_tag_name = {
                     "int_flag_classification": ("XC", "i"),
                     "id_rpmk": ("XR", "Z"),
@@ -9614,18 +9614,18 @@ def LongExportNormalizedCountMatrix(
                         refend_anno,
                         id_anno,
                         annotation_type="miscellaneous",
-                        str_mode_scarab_count="gex",
+                        str_mode_ourotools_count_count="gex",
                     ):
                         """# 2022-04-16 21:17:19
                         initialized data for miscellaneous annotation
 
                         refstart_anno, refend_anno : 0-based coordinates
 
-                        'str_mode_scarab_count' : 'atac' or 'gex'
+                        'str_mode_ourotools_count_count' : 'atac' or 'gex'
                         """
                         dict_data = dict()
                         dict_data["id_anno"] = id_anno
-                        dict_data["mode_scarab_count"] = str_mode_scarab_count
+                        dict_data["mode_ourotools_count_count"] = str_mode_ourotools_count_count
                         dict_data["annotation_type"] = annotation_type
                         dict_data["refname_anno"] = refname_anno
                         dict_data["refstart_anno"] = refstart_anno
@@ -9709,7 +9709,7 @@ def LongExportNormalizedCountMatrix(
                         df = df[ l_col_df_count ]  # reorder columns
                         return df # return the resulting dataframe containing count data
                     
-                    l_col_for_composing_df_count = [ ] if flag_is_mode_scarab_count_atac else [ 'flag_full_length_with_valid_3p_and_5p_ends' ] # define a additional list of columns for composing 'df_count'
+                    l_col_for_composing_df_count = [ ] if flag_is_mode_ourotools_count_count_atac else [ 'flag_full_length_with_valid_3p_and_5p_ends' ] # define a additional list of columns for composing 'df_count'
                     def _process_gene_and_isoform_data( id_anno : str, dict_data : dict ):
                         """ # 2023-08-28 16:25:33 
                         Flush data for gene and isoform
@@ -10187,7 +10187,7 @@ def LongExportNormalizedCountMatrix(
                         """# 2023-01-07 23:12:08
                         flush data for miscellaneous annotation
                         assumes uniquely aligned reads
-                        required the following columns defined in the 'l_col_for_counting' (which changes depending on the scarab count modes)
+                        required the following columns defined in the 'l_col_for_counting' (which changes depending on the ourotools_count modes)
                         
                         id_anno # name of the annotation
                         dict_data # dictionary data of the annotation
@@ -10693,7 +10693,7 @@ def LongExportNormalizedCountMatrix(
                                 """ assign 'int_pos_of_read_determining_feature_assignment' """
                                 int_pos_of_read_determining_feature_assignment = (
                                     (refend - 1 if (flag & 1 << 4) else refstart)
-                                    if flag_is_mode_scarab_count_atac
+                                    if flag_is_mode_ourotools_count_count_atac
                                     else int((refstart + refend) / 2)
                                 )  # the middle position will be used to identify genomic region that represent the current read most accurately
 
@@ -10751,7 +10751,7 @@ def LongExportNormalizedCountMatrix(
                                         _empty_bucket( id_anno, )
 
                                 """
-                                Overall Structure of Scarab short-read
+                                Overall Structure of Ouro-Tools Count module
 
                                 reads are classified, and 'reads' object initialized for each feature
                                 at the end of the analysis of the read, the data of the read is appended to all the features of the 'reads' object, which will be converted to as a count matrix once each feature is flushed.
@@ -10798,7 +10798,7 @@ def LongExportNormalizedCountMatrix(
 
                                 """ for ATAC-seq analysis only consider the cut site (more specifically, the base next to the cut site that is included in the read) """
                                 if (
-                                    flag_is_mode_scarab_count_atac
+                                    flag_is_mode_ourotools_count_count_atac
                                 ):  # use the region containing the cutsite for 'l_start_end_read' and 'l_seg'
                                     l_start_end_read = [
                                         int_pos_of_read_determining_feature_assignment,
@@ -10812,7 +10812,7 @@ def LongExportNormalizedCountMatrix(
                                 check overlap with promoter regions (ATAC mode specific)
                                 """
                                 if (
-                                    flag_is_mode_scarab_count_atac
+                                    flag_is_mode_ourotools_count_count_atac
                                 ):  # specific to ATAC-seq data
                                     float_time_start = (
                                         time.time()
@@ -10874,7 +10874,7 @@ def LongExportNormalizedCountMatrix(
                                                     end_promoter,
                                                     id_promoter,
                                                     "promoter",
-                                                    str_mode_scarab_count,
+                                                    str_mode_ourotools_count_count,
                                                 )
 
                                             """ increament the time passed to process the read to the total wall time for the gene """
@@ -10977,7 +10977,7 @@ def LongExportNormalizedCountMatrix(
                                                         )  # add the number of base pairs of overlap to the gene_id to which the current exon belongs to
                                                 """ (GEX mode specific) if the strand to which read was aligned is different from the gene annotation strand, filter out the gene_id from the possible list of gene_ids that can be assigned to the current read. if strand specific sequencing information is not available, does not filter possible list of genes using the information """
                                                 if (
-                                                    not ( flag_is_mode_scarab_count_atac or flag_include_read_aligned_to_opposite_strand ) # if 'flag_include_read_aligned_to_opposite_strand' is True, ignore the strand information of the read.
+                                                    not ( flag_is_mode_ourotools_count_count_atac or flag_include_read_aligned_to_opposite_strand ) # if 'flag_include_read_aligned_to_opposite_strand' is True, ignore the strand information of the read.
                                                 ):
                                                     strand_read = (
                                                         "-"
@@ -11071,7 +11071,7 @@ def LongExportNormalizedCountMatrix(
                                         id_gene not in reads["data"]
                                     ):  # if a gene newly encountered
                                         if (
-                                            flag_is_mode_scarab_count_atac
+                                            flag_is_mode_ourotools_count_count_atac
                                         ):  # when processing ATAC data, ignore isoform information, and initialize data as 'miscellaneous annotation'
                                             __Initialize_misc_anno_data__(
                                                 reads,
@@ -11080,7 +11080,7 @@ def LongExportNormalizedCountMatrix(
                                                 end_gene,
                                                 id_gene,
                                                 "gene",
-                                                str_mode_scarab_count,
+                                                str_mode_ourotools_count_count,
                                             )
                                         else:
                                             """initialize gene and isoform data"""
@@ -11093,10 +11093,10 @@ def LongExportNormalizedCountMatrix(
                                             )
                                     """ (GEX mode specific) """
                                     if (
-                                        not flag_is_mode_scarab_count_atac
+                                        not flag_is_mode_ourotools_count_count_atac
                                     ):  # analyze transcript information, including isoform assignment
                                         """
-                                        if 'flag_use_isoform_assignment_from_10x_cellranger' is True, the splice junciton counting and exon counting will not be performed because the transcript annotations used in cellranger and Scarab might be different.
+                                        if 'flag_use_isoform_assignment_from_10x_cellranger' is True, the splice junciton counting and exon counting will not be performed because the transcript annotations used in cellranger and the current pipeline might be different.
                                         """
                                         """ align current read to known transcript sequences from given fasta sequences and assign id_tx to the read (if isoform assignment from 10x cellranger is not used) """
                                         if (
@@ -11400,11 +11400,11 @@ def LongExportNormalizedCountMatrix(
                                                     end_rpmk,
                                                     id_rpmk,
                                                     "rpmk",
-                                                    str_mode_scarab_count,
+                                                    str_mode_ourotools_count_count,
                                                 )
 
                                             """ (GEX mode specific) calculate proportion of filtered repeatmasker features of the read """
-                                            if not flag_is_mode_scarab_count_atac:
+                                            if not flag_is_mode_ourotools_count_count_atac:
                                                 # count bases overlapping repeatmasker features
                                                 int_base_filtered_rpmk_count = 0
                                                 for (
@@ -11524,12 +11524,12 @@ def LongExportNormalizedCountMatrix(
                                                         end_reg,
                                                         id_reg,
                                                         "regulatory_region",
-                                                        str_mode_scarab_count,
+                                                        str_mode_ourotools_count_count,
                                                     )
 
                                                 """ (GEX mode specific) calculate proportion of regulatory element of the read """
                                                 if (
-                                                    not flag_is_mode_scarab_count_atac
+                                                    not flag_is_mode_ourotools_count_count_atac
                                                 ):
                                                     # count bases overlapping regulatory element features
                                                     int_base_reg_count = 0
@@ -11634,7 +11634,7 @@ def LongExportNormalizedCountMatrix(
                                                     end,
                                                     id_anno,
                                                     "variant",
-                                                    str_mode_scarab_count,
+                                                    str_mode_ourotools_count_count,
                                                 )  # for variant annotation, start and end position of the annotation will be set as the reference position of the variant
 
                                 """ 
@@ -11642,7 +11642,7 @@ def LongExportNormalizedCountMatrix(
                                 front) existing annotation from the input BAM file
                                 rear) new annotations added by the current program
                                 """
-                                if flag_is_mode_scarab_count_atac:
+                                if flag_is_mode_ourotools_count_count_atac:
                                     l_data = [
                                         qname,
                                         int_mapq,
@@ -11719,7 +11719,7 @@ def LongExportNormalizedCountMatrix(
                                             end_gene,
                                             id_anno,
                                             "exon_and_splice_junc",
-                                            str_mode_scarab_count,
+                                            str_mode_ourotools_count_count,
                                         )  # for exon and splice_junc annotation, start and end position of the annotation will be set as that of the gene to which read has been assigned to.
                                 """ distribute the information about the current read to the data containers of the matched features """
                                 l_id_anno_valid = list(
@@ -11939,7 +11939,7 @@ def LongExportNormalizedCountMatrix(
                     )
                     # combine results into a single output file (initial read analysis)
                     if flag_include_read_analysis_summary_output_tsv_file:
-                        if str_mode_scarab_count == "atac":
+                        if str_mode_ourotools_count_count == "atac":
                             l_col = [
                                 "qname",
                                 "mapq",
@@ -12067,7 +12067,7 @@ def LongExportNormalizedCountMatrix(
                     workers.submit_work(output_bam_file)
 
             """ for multiome sample, rename feature names (adding '|mode=atac' suffix at the end of feature name) and combine count matrices """
-            if str_mode_scarab_count_for_the_current_sample == "multiome":
+            if str_mode_ourotools_count_count_for_the_current_sample == "multiome":
 
                 def combine_count_matrices_for_multiome():  # off-loading a single-core work
                     path_folder_mtx_gex = f"{path_folder_output_for_the_current_sample}gex/filtered_feature_bc_matrix/"
