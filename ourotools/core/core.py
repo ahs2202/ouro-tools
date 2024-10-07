@@ -12335,13 +12335,14 @@ class ReadsToCoverage :
         '''
         add a read to the coverage.
         reads added to a single 'ReadsToCoverage' object should be in a sorted order (sorted by chromosome name matched with given 'pysam_header' and sorted by the reference start position)
-        
+
+        pysam_read : # pysam read object. Alternatively, a tuple with the following components can be given through the argument: (pysam_read.reference_name, pysam_read.reference_start, pysam_read.cigartuples)
         float_weight : float = 1, # default weight would be 1
-        # 2024-01-06 19:45:03 
+        # 2024-10-07
         '''
         r = pysam_read
         # retrieve read properties
-        name_chr, r_st, cigartuples = r.reference_name, r.reference_start, r.cigartuples
+        name_chr, r_st, cigartuples = r if isinstance( r, tuple ) else r.reference_name, r.reference_start, r.cigartuples # directly parse the tuple
         if name_chr != self._buffer_name_chr : # if chromosome has changed, 
             self.flush_buffer( flag_flush_all = True ) # flush all buffer
             self.initialize_buffer( name_chr, r_st ) # initialize new buffer using the properties of the current read
@@ -12443,8 +12444,9 @@ def SplitBAM(
     t_distribution_range_of_interest : Union[ List[ int ], None ] = None, # define a range of distribution of interest for exporting normalized coverage.
     name_tag_length : str = 'LE', # the total length of genomic regions that are actually covered by the read, excluding spliced introns (the sum of exons).
     flag_strand_specific : bool = False, # if True, create separate BAM files and coverage BigWig files for + strand and - strand reads.
+    flag_export_tss_and_tes_coverage : bool = False, # if True, create two additional BigWig coverage files containing (size-distribution-normalized) transcript start site (TSS) and transcript end site (TES) usage information. The locations of TSS and TES correspond to alignment start position (first base pair aligned to the genome) or alignment end position (last base pair aligned to the genome) for non-reverse-complemented and reverse-complemented reads, respectively.
 ) :
-    """ # 2024-01-23 12:10:49 
+    """ # 2024-10-07 
     A scalable pipeline employing multiprocessing for faster splitting of a barcoded BAM file to multiple BAM files, each containing the list of cell barcodes of the cells belonging to each 'name_cluster' (representing a cell type) or even a single-cell (a separate BAM file for each a single cell-barcode).
     Features:
     - use multiple processes to increase the performance
@@ -12471,6 +12473,9 @@ def SplitBAM(
     
     # -------- Strand specific BAM ---------
     flag_strand_specific : bool = False, # if True, create separate BAM files and coverage BigWig files for + strand and - strand reads.
+
+    # -------- Export Transcript Start Site (TSS) and Transcript End Site (TES) information as coverages --------
+    flag_export_tss_and_tes_coverage : bool = False, # if True, create two additional BigWig coverage files containing (size-distribution-normalized) transcript start site (TSS) and transcript end site (TES) usage information. The locations of TSS and TES correspond to alignment start position (first base pair aligned to the genome) or alignment end position (last base pair aligned to the genome) for non-reverse-complemented and reverse-complemented reads, respectively.
 
     """
     ''' prepare : retrieve file header, preprocess name_clus, and group 'name_clus' values for each worker process. '''
@@ -12525,38 +12530,42 @@ def SplitBAM(
         
 
     def _write_bam_of_name_clus( p_in, p_out ) :
-        ''' # 2023-11-05 17:44:33 
+        ''' # 2024-10-07
         for writing bam files for a list of 'name_clus'
         '''
         ''' prepare : create output files '''
         set_name_clus = p_in.recv( ) # retrieve a list of cluster names
-        l_path_file_bam = [ ] # collect the paths of output BAM files
+        l_path_file_bam = [ ] # collect the paths of output BAM files for indexing 
         """
-        structure of l_newsamfile and l_coverage_writer for 'dict_name_clus_to_l_newsamfile' and 'dict_name_clus_to_l_coverage_writer'
-        # if flag_strand_specific == True
-        [ strand == '-' , strand == '+' ]
-        # if flag_strand_specific == False
-        [ strand == '-' | strand == '+' ]
+        structure of keys for dict_newsamfile, dict_coverage_writer in 'dict_name_clus_to_dict_newsamfile' and 'dict_name_clus_to_dict_coverage_writer'
+        ( strand (one of { '.plus_strand', '.minus_strand', '' (if flag_strand_specific == False) }), coverage_data_type (one of { '.TSS', '.TES', '' (i.e., '.transcript_body' ) }) )
         """
-        dict_name_clus_to_l_newsamfile = dict( ) # mapping between name_clus to the newsamfile
-        dict_name_clus_to_l_coverage_writer = dict( ) # mapping between name_clus to the coverage writer
+        l_coverage_data_type = [ '.TSS', '.TES', '' ] if flag_export_tss_and_tes_coverage else [ '' ]
+        dict_name_clus_to_dict_newsamfile = dict( ) # mapping between name_clus to the newsamfile
+        dict_name_clus_to_dict_coverage_writer = dict( ) # mapping between name_clus to the coverage writer
         for name_clus in set_name_clus :
             ''' initialize the paths of output BAM/coverage files '''
             # initialize the prefixes
             path_file_bam_prefix = f"{path_folder_output}{name_clus}"
             path_file_bw_prefix = f"{path_folder_output}{name_clus}{'.size_distribution_normalized' if flag_perform_size_distribution_normalization_for_coverage_calculation else ''}"
-            if flag_strand_specific : # output strand-specific output files
-                l_path_file_bam_for_name_clus = [ f'{path_file_bam_prefix}.minus_strand.bam', f'{path_file_bam_prefix}.plus_strand.bam' ]
-                l_path_file_bw_for_name_clus = [ f'{path_file_bw_prefix}.minus_strand.bw', f'{path_file_bw_prefix}.plus_strand.bw' ]
-            else :
-                l_path_file_bam_for_name_clus = [ f'{path_file_bam_prefix}.bam' ]
-                l_path_file_bw_for_name_clus = [ f"{path_file_bw_prefix}.bw" ]
             
             ''' initialize output files '''
-            dict_name_clus_to_l_newsamfile[ name_clus ] = list( pysam.AlignmentFile( path_file_bam, 'wb', header = sam_header ) for path_file_bam in l_path_file_bam_for_name_clus ) # collect the newsamfiles
-            l_path_file_bam.extend( l_path_file_bam_for_name_clus ) # collect paths of output BAM files
+            # initialize the output dictionaries
+            dict_name_clus_to_dict_newsamfile[ name_clus ] = dict( )
             if flag_export_coverages :
-                dict_name_clus_to_l_coverage_writer[ name_clus ] = list( ReadsToCoverage( path_file_bw, sam_header ) for path_file_bw in l_path_file_bw_for_name_clus ) # collect the newsamfile
+                dict_name_clus_to_dict_coverage_writer[ name_clus ] = dict( ) 
+
+            # iterate output file types
+            for strand_type in [ '.plus_strand', '.minus_strand' ] if flag_strand_specific else [ '' ] :
+                # collect sam output file
+                path_file_bam = f'{path_file_bam_prefix}{strand_type}.bam'
+                dict_name_clus_to_dict_newsamfile[ name_clus ][ strand_type, '' ] = pysam.AlignmentFile( path_file_bam, 'wb', header = sam_header ) # collect the newsamfile
+                l_path_file_bam.append( path_file_bam ) # collect the path of output BAM file
+                # collect coverage output files
+                for coverage_data_type in l_coverage_data_type :
+                    path_file_bw = f'{path_file_bam_prefix}{strand_type}{coverage_data_type}.bw' # define output file names
+                    if flag_export_coverages :
+                        dict_name_clus_to_dict_coverage_writer[ name_clus ][ strand_type, coverage_data_type ] = ReadsToCoverage( path_file_bw, sam_header ) # collect the new coverage file
 
         ''' work : retrieve records and write the records to output BAM files '''
         while True :
@@ -12565,22 +12574,36 @@ def SplitBAM(
                 break
             for name_clus, str_r, flag_is_plus_strand, data in batch : # parse the batch
                 r = pysam.AlignedSegment.fromstring( str_r, sam_header ) # compose a pysam record
-                int_idx_output_file = int( flag_is_plus_strand ) if flag_strand_specific else 0 # retrieve index of the output file based on the strand information of the read
-                dict_name_clus_to_l_newsamfile[ name_clus ][ int_idx_output_file ].write( r ) # write the record to the output BAM file
+                strand_type = ( '.plus_strand' if flag_is_plus_strand, '.minus_strand' ) if flag_strand_specific else '' # retrieve index of the output file based on the strand information of the read
+                # write sam record
+                dict_name_clus_to_dict_newsamfile[ name_clus ][ strand_type, '' ].write( r ) # write the record to the output BAM file
+                # write coverage records
                 if flag_export_coverages : # write the record to the output BigWig file
+                    # retrieve the weight for coverage update
                     if flag_perform_size_distribution_normalization_for_coverage_calculation :
                         int_total_aligned_length = data # parse data
                         if int_molecule_size_min <= int_total_aligned_length <= int_molecule_size_max : # if the molecule size satisfy the size range of interest
-                            dict_name_clus_to_l_coverage_writer[ name_clus ][ int_idx_output_file ].add_read( r, float_weight = arr_ratio_to_ref[ int_total_aligned_length ] ) # update the coverage using a size-distribution-normalizedweight 
+                            float_weight = arr_ratio_to_ref[ int_total_aligned_length ] # retrieve size-distribution-normalized weight
+                        else :
+                            float_weight = 0 # does not use the 'invalid' read to update the coverage data
                     else :
-                        dict_name_clus_to_l_coverage_writer[ name_clus ][ int_idx_output_file ].add_read( r ) # update the coverage using the default weight (1)
+                        float_weight = 1 # update the coverage using the default weight (1)
+                    # update the coverage data
+                    if float_weight > 0 : # if 'float_weight' is valid, use 'float_weight' to update the coverage data
+                        dict_name_clus_to_dict_coverage_writer[ name_clus ][ strand_type, '' ].add_read( r, float_weight = float_weight ) # update the coverage using a size-distribution-normalizedweight 
+                        if flag_export_tss_and_tes_coverage :
+                            ref_name, ref_st, ref_en = r.reference_name, r.reference_start, r.reference_end # retrieve read info
+                            dict_name_clus_to_dict_coverage_writer[ name_clus ][ strand_type, '.TSS' ].add_read( ( ref_name, ref_st if flag_is_plus_strand else ref_en - 1, ( ( 0, 1 ), ) ), float_weight = float_weight ) # update the TSS coverage using a size-distribution-normalizedweight 
+                            dict_name_clus_to_dict_coverage_writer[ name_clus ][ strand_type, '.TES' ].add_read( ( ref_name, ref_en if flag_is_plus_strand else ref_st - 1, ( ( 0, 1 ), ) ), float_weight = float_weight ) # update the TES coverage using a size-distribution-normalizedweight 
 
         ''' post-process : close files and index the files '''
-        for name_clus in dict_name_clus_to_l_newsamfile :
-            for newsamfile in dict_name_clus_to_l_newsamfile[ name_clus ] :
+        for name_clus in dict_name_clus_to_dict_newsamfile :
+            for k in dict_name_clus_to_dict_newsamfile[ name_clus ] :
+                newsamfile = dict_name_clus_to_dict_newsamfile[ name_clus ][ k ]
                 newsamfile.close( ) # close the output BAM file
-        for name_clus in dict_name_clus_to_l_coverage_writer :
-            for coverage_writer in dict_name_clus_to_l_coverage_writer[ name_clus ] :
+        for name_clus in dict_name_clus_to_dict_coverage_writer :
+            for k in dict_name_clus_to_dict_coverage_writer[ name_clus ] :
+                coverage_writer = dict_name_clus_to_dict_coverage_writer[ name_clus ][ k ]
                 coverage_writer.close( ) # close the output BigWig file
 
         for path_file_bam in l_path_file_bam :
