@@ -12342,7 +12342,7 @@ class ReadsToCoverage :
         '''
         r = pysam_read
         # retrieve read properties
-        name_chr, r_st, cigartuples = r if isinstance( r, tuple ) else r.reference_name, r.reference_start, r.cigartuples # directly parse the tuple
+        name_chr, r_st, cigartuples = r if isinstance( r, tuple ) else ( r.reference_name, r.reference_start, r.cigartuples ) # directly parse the tuple
         if name_chr != self._buffer_name_chr : # if chromosome has changed, 
             self.flush_buffer( flag_flush_all = True ) # flush all buffer
             self.initialize_buffer( name_chr, r_st ) # initialize new buffer using the properties of the current read
@@ -12383,6 +12383,54 @@ class ReadsToCoverage :
         
         self._idx_current_pos_in_a_buffer = en_in_buffer # update the current position in a buffer
         self.flush_buffer( ) # write the records
+        
+def merge_bigwigs( path_file_bw_output : str, l_path_file_bw_input : List[ str ], int_window_size_for_a_batch : int = 10_000_000 ) :
+    '''
+    merge bigwig files into a single bigwig file.
+    Assumes all input chromosomes shares the same set of chromosome names.
+    
+    path_file_bw_output : str, 
+    l_path_file_bw_input : List[ str ], 
+    int_window_size_for_a_batch : int = 10_000_000,
+    # 2024-01-07 03:46:59 
+    '''
+    import pyBigWig
+
+    # exit if input is invalid
+    if len( l_path_file_bw_input ) == 0 :
+        return -1
+
+    l_bw = list( pyBigWig.open( e ) for e in l_path_file_bw_input ) # open bigwig files
+    dict_name_chr_to_len = l_bw[ 0 ].chroms( ) # retrieve chromosome information
+    l_name_chr = list( dict_name_chr_to_len ) # retrieve list of chromosomes
+
+    # open the coverage file
+    coverage_writer = ReadsToCoverage( path_file_bw_output, pysam_header = list( ( name_chr, dict_name_chr_to_len[ name_chr ] ) for name_chr in l_name_chr ) ) # initialize the coverage writer
+
+    for name_chr in l_name_chr : # for each chr, combine coverage values and write a BigWig file
+        len_chr = dict_name_chr_to_len[ name_chr ] # retrieve the length of the chromosome
+        ''' update the coverage for each batch '''
+        for i in range( len_chr // int_window_size_for_a_batch ) : # process each batch
+            arr = np.zeros( int_window_size_for_a_batch, dtype = float ) # initialize the data container 
+            for bw in l_bw : # for each input BigWig file
+                arr_from_an_input_bw = np.array( bw.values( name_chr, i * int_window_size_for_a_batch, ( i + 1 ) * int_window_size_for_a_batch ) )
+                arr_from_an_input_bw[ np.isnan( arr_from_an_input_bw ) ] = 0 # replace np.nan to 0
+                if len( arr_from_an_input_bw ) > 0 : # when a bigwig file lack a data for a chromosome, it returns an empty list
+                    arr += arr_from_an_input_bw
+            coverage_writer.add_region( name_chr, i * int_window_size_for_a_batch, arr ) # update the coverage
+        ''' update the coverage for the last batch '''
+        if (len_chr % int_window_size_for_a_batch) != 0 : # process the last batch
+            st_remaining = ( len_chr // int_window_size_for_a_batch ) * int_window_size_for_a_batch # the start position of the remaining portion of the current chromosome
+            arr = np.zeros( len_chr - st_remaining, dtype = float ) # initialize the data container 
+            for bw in l_bw : # for each input BigWig file
+                arr_from_an_input_bw = np.array( bw.values( name_chr, st_remaining, len_chr ) )
+                arr_from_an_input_bw[ np.isnan( arr_from_an_input_bw ) ] = 0 # replace np.nan to 0
+                if len( arr_from_an_input_bw ) > 0 : # when a bigwig file lack a data for a chromosome, it returns an empty list
+                    arr += arr_from_an_input_bw
+            coverage_writer.add_region( name_chr, st_remaining, arr ) # update the coverage
+
+    # close the coverage file
+    coverage_writer.close( ) # close the output file
         
 def merge_bigwigs( path_file_bw_output : str, l_path_file_bw_input : List[ str ], int_window_size_for_a_batch : int = 10_000_000 ) :
     '''
@@ -12528,7 +12576,6 @@ def SplitBAM(
             raise RuntimeError( "for size distribution-normalized coverage output, please set 't_distribution_range_of_interest'" )
         int_molecule_size_min, int_molecule_size_max = t_distribution_range_of_interest # parse 't_distribution_range_of_interest'
         
-
     def _write_bam_of_name_clus( p_in, p_out ) :
         ''' # 2024-10-07
         for writing bam files for a list of 'name_clus'
@@ -12574,7 +12621,7 @@ def SplitBAM(
                 break
             for name_clus, str_r, flag_is_plus_strand, data in batch : # parse the batch
                 r = pysam.AlignedSegment.fromstring( str_r, sam_header ) # compose a pysam record
-                strand_type = ( '.plus_strand' if flag_is_plus_strand, '.minus_strand' ) if flag_strand_specific else '' # retrieve index of the output file based on the strand information of the read
+                strand_type = ( '.plus_strand' if flag_is_plus_strand else '.minus_strand' ) if flag_strand_specific else '' # retrieve index of the output file based on the strand information of the read
                 # write sam record
                 dict_name_clus_to_dict_newsamfile[ name_clus ][ strand_type, '' ].write( r ) # write the record to the output BAM file
                 # write coverage records
@@ -12593,8 +12640,8 @@ def SplitBAM(
                         dict_name_clus_to_dict_coverage_writer[ name_clus ][ strand_type, '' ].add_read( r, float_weight = float_weight ) # update the coverage using a size-distribution-normalizedweight 
                         if flag_export_tss_and_tes_coverage :
                             ref_name, ref_st, ref_en = r.reference_name, r.reference_start, r.reference_end # retrieve read info
-                            dict_name_clus_to_dict_coverage_writer[ name_clus ][ strand_type, '.TSS' ].add_read( ( ref_name, ref_st if flag_is_plus_strand else ref_en - 1, ( ( 0, 1 ), ) ), float_weight = float_weight ) # update the TSS coverage using a size-distribution-normalizedweight 
-                            dict_name_clus_to_dict_coverage_writer[ name_clus ][ strand_type, '.TES' ].add_read( ( ref_name, ref_en if flag_is_plus_strand else ref_st - 1, ( ( 0, 1 ), ) ), float_weight = float_weight ) # update the TES coverage using a size-distribution-normalizedweight 
+                            dict_name_clus_to_dict_coverage_writer[ name_clus ][ strand_type, '.TSS' ].add_read( ( ref_name, ref_st if flag_is_plus_strand else ( ref_en - 1 ), ( ( 0, 1 ), ) ), float_weight = float_weight ) # update the TSS coverage using a size-distribution-normalizedweight 
+                            dict_name_clus_to_dict_coverage_writer[ name_clus ][ strand_type, '.TES' ].add_read( ( ref_name, ref_en if flag_is_plus_strand else ( ref_st - 1 ), ( ( 0, 1 ), ) ), float_weight = float_weight ) # update the TES coverage using a size-distribution-normalizedweight 
 
         ''' post-process : close files and index the files '''
         for name_clus in dict_name_clus_to_dict_newsamfile :
@@ -12704,8 +12751,9 @@ def SplitBAMs(
     t_distribution_range_of_interest : Union[ List[ str ], str, None ] = None, # define a range of distribution of interest for exporting normalized coverage.
     name_tag_length : str = 'LE', # the total length of genomic regions that are actually covered by the read, excluding spliced introns (the sum of exons).
     flag_strand_specific : bool = False, # if True, create separate BAM files and coverage BigWig files for + strand and - strand reads.
+    flag_export_tss_and_tes_coverage : bool = False, # if True, create two additional BigWig coverage files containing (size-distribution-normalized) transcript start site (TSS) and transcript end site (TES) usage information. The locations of TSS and TES correspond to alignment start position (first base pair aligned to the genome) or alignment end position (last base pair aligned to the genome) for non-reverse-complemented and reverse-complemented reads, respectively.
 ) :
-    """ # 2024-01-23 12:36:08 
+    """ # 2024-10-07
     A pipeline employing multiprocessing for faster splitting of barcoded BAM files of a single cell dataset to multiple BAM files, each containing records of cells belonging to a single 'name_cluster' (a single cell type)
     
     Features:
@@ -12741,6 +12789,9 @@ def SplitBAMs(
     
     # -------- Strand specific BAM ---------
     flag_strand_specific : bool = False, # if True, create separate BAM files and coverage BigWig files for + strand and - strand reads.
+
+    # -------- Export Transcript Start Site (TSS) and Transcript End Site (TES) information as coverages --------
+    flag_export_tss_and_tes_coverage : bool = False, # if True, create two additional BigWig coverage files containing (size-distribution-normalized) transcript start site (TSS) and transcript end site (TES) usage information. The locations of TSS and TES correspond to alignment start position (first base pair aligned to the genome) or alignment end position (last base pair aligned to the genome) for non-reverse-complemented and reverse-complemented reads, respectively.
     """
     # create the output folder
     os.makedirs( path_folder_output, exist_ok = True )
@@ -12781,50 +12832,53 @@ def SplitBAMs(
                 't_distribution_range_of_interest' : t_distribution_range_of_interest,
                 'name_tag_length' : name_tag_length,
                 'flag_strand_specific' : flag_strand_specific,
+                'flag_export_tss_and_tes_coverage' : flag_export_tss_and_tes_coverage,
             },
         )
                     
     # wait all pipelines to be completed
     pipelines.wait_all()
     
-    ''' define the list of suffixes '''
-    l_str_suffix = [ '.minus_strand', '.plus_strand', ] if flag_strand_specific else [ '' ] # no suffix if 'flag_strand_specific' == False
+    ''' define the list of output types '''
+    l_strand_type = [ '.minus_strand', '.plus_strand', ] if flag_strand_specific else [ '' ] # no strand_type if 'flag_strand_specific' == False
+    l_coverage_data_type = [ '.TSS', '.TES', '' ] if flag_export_tss_and_tes_coverage else [ '' ]
     
-    ''' survey the output files '''
+    ''' survey the output BAM files '''
     # retrieve a list of temporary output BAM files
     l_df = [ ]
-    for str_suffix in l_str_suffix : # collect the list of temporary output BAM files for each 'str_suffix'
-        df = bk.GLOB_Retrive_Strings_in_Wildcards( f'{path_folder_output}*/*{str_suffix}.bam' )
-        df[ 'str_suffix' ] = str_suffix
+    for strand_type in l_strand_type : # collect the list of temporary output BAM files for each 'strand_type'
+        df = bk.GLOB_Retrive_Strings_in_Wildcards( f'{path_folder_output}*/*{strand_type}.bam' )
+        df[ 'strand_type' ] = strand_type
         l_df.append( df )
     df_file_bam = pd.concat( l_df )
     df_file_bam.rename( columns = { 'wildcard_1' : 'name_clus' }, inplace = True )
     l_name_clus = df_file_bam.name_clus.unique( ) # retrieve list of name_clus
     
-    ''' combine temporary output BigWig files '''
-    if flag_export_coverages :
-        name_type_coverage = 'size_distribution_normalized' if flag_perform_size_distribution_normalization_for_coverage_calculation else 'bam' # retrieve type of the coverage
-        for str_suffix in l_str_suffix :
-            for name_clus in l_name_clus : # for each 'name_clus'
-                # run 'merge_bigwigs' for the BigWig files of the current 'name_clus'
-                pipelines.submit_work( 
-                    merge_bigwigs, 
-                    kwargs = { 
-                        'path_file_bw_output' : f'{path_folder_output}{name_clus}.{name_type_coverage}{str_suffix}.bw',
-                        'l_path_file_bw_input' : glob.glob( f'{path_folder_output}*/{name_clus}.{name_type_coverage}{str_suffix}.bw' ),
-                    },
-                )
-            
     ''' combine temporary output BAM files ''' # does not use multiprocessing to not overwhelm the file system I/O
-    for str_suffix in l_str_suffix : # for each 'str_suffix'
+    for strand_type in l_strand_type : # for each 'strand_type'
         for name_clus in l_name_clus : # for each 'name_clus'
-            l_path_file_output_temp = bk.PD_Select( df_file_bam, name_clus = name_clus, str_suffix = str_suffix ).path.values # retrieve the list of temporary output files
-            path_file_bam_output = f"{path_folder_output}{name_clus}{str_suffix}.bam"
+            l_path_file_output_temp = bk.PD_Select( df_file_bam, name_clus = name_clus, strand_type = strand_type ).path.values # retrieve the list of temporary output files
+            path_file_bam_output = f"{path_folder_output}{name_clus}{strand_type}.bam"
             pysam.merge( '--threads', str( min( int_num_threads, 10 ) ), '-c', '-p', path_file_bam_output, * l_path_file_output_temp ) # merge splitted BAM files into a single output BAM file
             for path_file in l_path_file_output_temp : # delete the temporary output files
                 os.remove( path_file )
             pysam.index( path_file_bam_output ) # index the output file
-        
+
+    ''' combine temporary output BigWig files '''
+    if flag_export_coverages :
+        normalization_type = '.size_distribution_normalized' if flag_perform_size_distribution_normalization_for_coverage_calculation else '' # retrieve type of the coverage
+        for strand_type in l_strand_type :
+            for coverage_data_type in l_coverage_data_type :
+                for name_clus in l_name_clus : # for each 'name_clus'
+                    # run 'merge_bigwigs' for the BigWig files of the current 'name_clus'
+                    pipelines.submit_work( 
+                        merge_bigwigs, 
+                        kwargs = { 
+                            'path_file_bw_output' : f'{path_folder_output}{name_clus}{normalization_type}{strand_type}{coverage_data_type}.bw',
+                            'l_path_file_bw_input' : glob.glob( f'{path_folder_output}*/{name_clus}{normalization_type}{strand_type}{coverage_data_type}.bw' ),
+                        },
+                    )
+                
     # wait all works to be completed
     pipelines.wait_all()
         
