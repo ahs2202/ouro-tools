@@ -12383,55 +12383,7 @@ class ReadsToCoverage :
         
         self._idx_current_pos_in_a_buffer = en_in_buffer # update the current position in a buffer
         self.flush_buffer( ) # write the records
-        
-def merge_bigwigs( path_file_bw_output : str, l_path_file_bw_input : List[ str ], int_window_size_for_a_batch : int = 10_000_000 ) :
-    '''
-    merge bigwig files into a single bigwig file.
-    Assumes all input chromosomes shares the same set of chromosome names.
-    
-    path_file_bw_output : str, 
-    l_path_file_bw_input : List[ str ], 
-    int_window_size_for_a_batch : int = 10_000_000,
-    # 2024-01-07 03:46:59 
-    '''
-    import pyBigWig
 
-    # exit if input is invalid
-    if len( l_path_file_bw_input ) == 0 :
-        return -1
-
-    l_bw = list( pyBigWig.open( e ) for e in l_path_file_bw_input ) # open bigwig files
-    dict_name_chr_to_len = l_bw[ 0 ].chroms( ) # retrieve chromosome information
-    l_name_chr = list( dict_name_chr_to_len ) # retrieve list of chromosomes
-
-    # open the coverage file
-    coverage_writer = ReadsToCoverage( path_file_bw_output, pysam_header = list( ( name_chr, dict_name_chr_to_len[ name_chr ] ) for name_chr in l_name_chr ) ) # initialize the coverage writer
-
-    for name_chr in l_name_chr : # for each chr, combine coverage values and write a BigWig file
-        len_chr = dict_name_chr_to_len[ name_chr ] # retrieve the length of the chromosome
-        ''' update the coverage for each batch '''
-        for i in range( len_chr // int_window_size_for_a_batch ) : # process each batch
-            arr = np.zeros( int_window_size_for_a_batch, dtype = float ) # initialize the data container 
-            for bw in l_bw : # for each input BigWig file
-                arr_from_an_input_bw = np.array( bw.values( name_chr, i * int_window_size_for_a_batch, ( i + 1 ) * int_window_size_for_a_batch ) )
-                arr_from_an_input_bw[ np.isnan( arr_from_an_input_bw ) ] = 0 # replace np.nan to 0
-                if len( arr_from_an_input_bw ) > 0 : # when a bigwig file lack a data for a chromosome, it returns an empty list
-                    arr += arr_from_an_input_bw
-            coverage_writer.add_region( name_chr, i * int_window_size_for_a_batch, arr ) # update the coverage
-        ''' update the coverage for the last batch '''
-        if (len_chr % int_window_size_for_a_batch) != 0 : # process the last batch
-            st_remaining = ( len_chr // int_window_size_for_a_batch ) * int_window_size_for_a_batch # the start position of the remaining portion of the current chromosome
-            arr = np.zeros( len_chr - st_remaining, dtype = float ) # initialize the data container 
-            for bw in l_bw : # for each input BigWig file
-                arr_from_an_input_bw = np.array( bw.values( name_chr, st_remaining, len_chr ) )
-                arr_from_an_input_bw[ np.isnan( arr_from_an_input_bw ) ] = 0 # replace np.nan to 0
-                if len( arr_from_an_input_bw ) > 0 : # when a bigwig file lack a data for a chromosome, it returns an empty list
-                    arr += arr_from_an_input_bw
-            coverage_writer.add_region( name_chr, st_remaining, arr ) # update the coverage
-
-    # close the coverage file
-    coverage_writer.close( ) # close the output file
-        
 def merge_bigwigs( path_file_bw_output : str, l_path_file_bw_input : List[ str ], int_window_size_for_a_batch : int = 10_000_000 ) :
     '''
     merge bigwig files into a single bigwig file.
