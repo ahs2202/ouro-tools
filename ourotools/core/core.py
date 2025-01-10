@@ -58,14 +58,15 @@ import io
 import pysam
 import intervaltree
 import ast
+import inspect
+from bitarray import bitarray ## binary arrays
+import collections
 
 # prepare asynchronous operations
 import asyncio
 import nest_asyncio
 
 nest_asyncio.apply()
-
-from bitarray import bitarray  ## binary arrays
 
 from tqdm import tqdm as progress_bar  # for progress bar
 
@@ -141,15 +142,6 @@ str_release_note = [
 `88b    d88'  `88.    .8'   888  `88b.  `88b    d88'              888      `88b    d88' `88b    d88'  888       o oo     .d8P 
  `Y8bood8P'     `YbodP'    o888o  o888o  `Y8bood8P'              o888o      `Y8bood8P'   `Y8bood8P'  o888ooooood8 8""88888P'  
  
- 
- _______  __   __  ______    _______         _______  _______  _______  ___      _______ 
-|       ||  | |  ||    _ |  |       |       |       ||       ||       ||   |    |       |
-|   _   ||  | |  ||   | ||  |   _   | ____  |_     _||   _   ||   _   ||   |    |  _____|
-|  | |  ||  |_|  ||   |_||_ |  | |  ||____|   |   |  |  | |  ||  | |  ||   |    | |_____ 
-|  |_|  ||       ||    __  ||  |_|  |         |   |  |  |_|  ||  |_|  ||   |___ |_____  |
-|       ||       ||   |  | ||       |         |   |  |       ||       ||       | _____| |
-|_______||_______||___|  |_||_______|         |___|  |_______||_______||_______||_______|
-
 
  ______     __  __     ______     ______     ______   ______     ______     __         ______    
 /\  __ \   /\ \/\ \   /\  == \   /\  __ \   /\__  _\ /\  __ \   /\  __ \   /\ \       /\  ___\   
@@ -12158,6 +12150,10 @@ def ourotools(str_mode=None, **dict_args):
         elif str_mode == "LongExtractBarcodeFromBAM":
             LongExtractBarcodeFromBAM(**dict_args)
 
+# set entry point
+if __name__ == "__main__":
+    ourotools()  # run ouro at the top-level environment
+
 """ functions that are currently not supported in the command line """
 class ReadsToCoverage :
     """
@@ -12168,14 +12164,20 @@ class ReadsToCoverage :
     
     path_file_bw : str, # path to the output bw file
     pysam_header, # pysam header object. Alternatively, a Python list containing a tuple ( name_chr, len_chr ) can be given. (e.g., [ ( 'chr1', 1000 ), ( 'chr2' , 2000) ])
-    int_initial_buffer_size : int = 1_000_000,
-    # 2024-01-07 01:25:47 
+    int_initial_buffer_size : int = 1_000_000, # the initial buffer size in the number of base pairs
+    flag_assumes_records_are_sorted_by_start_position : bool = True, # By default, assumes the records are sorted by their start position and shift of the start position will automatically trigger flush operations to write the coverage data to the output bigwig file. If records are not sorted by the start position and a large variation of the start position is expected (however, this variation cannot exceed the half of 'int_min_safe_distance_for_automatic_flushing', implying that the records are still needed to be partially sorted in the ascending order by their start positions), set this flag to False, which will make the writer to flush coverage data based on the safe distance (see 'int_min_safe_distance_for_automatic_flushing' argument description).
+    int_min_safe_distance_for_automatic_flushing : int = 3_000_000, # based on the largest gene in the human, dystrophin, which spans 2.3Mbp. If 'flag_assumes_records_are_sorted_by_start_position' is True, 'int_min_safe_distance_for_automatic_flushing' will be automatically set to 0, as using "safe distance" will not be required when flushing the buffer.
+    int_buffer_flush_frequency : int = 100_000, # flush coverage data in the buffer for every 'int_buffer_flush_frequency' number of base pairs.
+    # 2024-10-22
     """
     def __init__( 
         self, 
         path_file_bw : str, 
         pysam_header, 
         int_initial_buffer_size : int = 1_000_000,
+        flag_assumes_records_are_sorted_by_start_position : bool = True, # By default, assumes the records are sorted by their start position and shift of the start position will automatically trigger flush operations to write the coverage data to the output bigwig file. If records are not sorted by the start position, set this flag to False, which will make the writer to flush coverage data based on the safe distance (see 'int_min_safe_distance_for_automatic_flushing' argument description).
+        int_min_safe_distance_for_automatic_flushing : int = 3_000_000, # based on the largest gene in the human, dystrophin, which spans 2.3Mbp.
+        int_buffer_flush_frequency : int = 100_000, # flush coverage data in the buffer for every 'int_buffer_flush_frequency' number of base pairs.
     ) :
         import pyBigWig # import required package
         self._path_file_bw = path_file_bw
@@ -12190,6 +12192,11 @@ class ReadsToCoverage :
         # initialize properties
         self._buffer_name_chr = None
         self._flag_closed = False
+        # add settings
+        # read-only properties
+        self.__sorted = flag_assumes_records_are_sorted_by_start_position
+        self.__safe_dist = 0 if self.__sorted else int_min_safe_distance_for_automatic_flushing
+        self.__flush_freq = int_buffer_flush_frequency
     def initialize_buffer( self, name_chr : str, start : int ) :
         """
         initialize the buffer for the given 'name_chr' and 'start'
@@ -12197,91 +12204,144 @@ class ReadsToCoverage :
         start : int # start position of the chromosome (0-based coordinates)
         # 2024-01-06 19:44:59 
         """
+        # set buffer size and start position
+        buffer_size = self._int_initial_buffer_size + self.__safe_dist # add 'self.__safe_dist' as the padding
+        buffer_start = start - self.__safe_dist # buffer start can be negative
         # create a new buffer
-        self._buffer = np.zeros( self._int_initial_buffer_size, dtype = float )
+        self._buffer = np.zeros( buffer_size, dtype = float )
         # initialize the buffer
         self._buffer_name_chr = name_chr
-        self._buffer_start = start
+        self._buffer_start = buffer_start
         self._buffer_size = len( self._buffer )
         self._idx_current_pos_in_a_buffer = 0
         self._idx_start_pos_of_unwritten_portion_of_the_buffer = 0
         self._buffer_first_entry_added = False
-    def expand_buffer( self, int_required_size : int ) :
+    def recreate_buffer( self, int_new_buffer_size = None ) :
         """
-        int_required_size : int # the minimum required size of the buffer
+        int_new_buffer_size # the minimum required free size of the buffer. By default, the buffer will be recreated using the current buffer size.
         
-        increase the size of the buffer
-        # 2024-01-06 20:30:41 
+        recreate the buffer. The size of the buffer can be also changed during the operation.
+        # 2024-10-22
         """
-        int_size_remaining = self._buffer_size - self._idx_start_pos_of_unwritten_portion_of_the_buffer # retrieve the remaining size of the buffer
-        int_new_buffer_size = ( int_required_size - self._idx_start_pos_of_unwritten_portion_of_the_buffer ) * 3 # calculate the new buffer size based on the minimum required size of the buffer
+        # set default arguments
+        if int_new_buffer_size == None :
+            int_new_buffer_size = self._buffer_size # reuse existing buffer size
+
+        # create new buffer
         buffer_new = np.zeros( int_new_buffer_size, dtype = float ) # create a new buffer
+
+        # copy currently unwritten portion of the buffer to the new buffer
+        int_size_remaining = self._buffer_size - self._idx_start_pos_of_unwritten_portion_of_the_buffer # retrieve the remaining size of the buffer
         buffer_new[ : int_size_remaining ] = self._buffer[ - int_size_remaining : ] # copy buffer content to the new buffer
+        
+        # update the attributes
         self._buffer_start = self._buffer_start + self._idx_start_pos_of_unwritten_portion_of_the_buffer # update buffer start position
         self._buffer = buffer_new
         self._buffer_size = int_new_buffer_size
         self._idx_current_pos_in_a_buffer = self._idx_current_pos_in_a_buffer - self._idx_start_pos_of_unwritten_portion_of_the_buffer # update 'idx_current_pos_in_a_buffer'
-        self._idx_start_pos_of_unwritten_portion_of_the_buffer = 0
-    def flush_buffer( self, flag_flush_all : bool = False, flag_add_first_entry : bool = True, flag_add_last_entry : bool = True ) :
+        self._idx_start_pos_of_unwritten_portion_of_the_buffer = 0 # update idx_start_pos_of_unwritten_portion_of_the_buffer
+    def expand_buffer( self, int_required_size : int ) :
+        """
+        increase the size of the buffer
+        
+        # 2024 10 21
+        """
+        if self._buffer_size >= int_required_size : # if current buffer size is larger than the required size, exit
+            return
+        self.recreate_buffer( int_new_buffer_size = int_required_size )
+    def flush_buffer( self, int_new_pos = None, flag_flush_all : bool = False, flag_add_first_entry : bool = True, flag_add_last_entry : bool = True, float_min_proportion_written_data : float = 0.7 ) -> int :
         '''
         flush the buffer and write coverages to the currently opened BigWig file
-        
+
+        int_new_pos = None, # When this function is called, coverage data of all positions of the buffer prior to the current position will be written to the storage (i.e., flushing). if 'int_new_pos' is larger than 'self._idx_current_pos_in_a_buffer', 'self._idx_current_pos_in_a_buffer' will be updated using 'int_new_pos', and data will be flushed. Even though 'self._idx_current_pos_in_a_buffer' can be modified outside this method, it is recommended to update the attribute using this method. if 'flag_flush_all' = True, any value can be given and this argument will be ignored.
         flag_flush_all : bool = False, # if True, move the current position in the buffer to the end of the buffer and flush all the values in the buffer.
         flag_add_first_entry : bool = True, # if True and currently no entry has been added for the current chromosome, add the first entry containing a zero value when a non-zero value entry is added for the first time for the chromosome.
         flag_add_last_entry : bool = True, # if True and 'flag_flush_all' is also True, add the last entry containing a zero value for the current chromosome
-        # 2024-01-07 01:59:09 
+        float_min_proportion_written_data : float = 0.7, # When the proportion of written data in the buffer becomes larger than the given argument after flushing the data to the storage, the buffer will be recreated.
+
+        # return the number of records written
+        # 2024-10-23 
         '''
         if self._buffer_name_chr is None : # if buffer has not been initialized, exit
             return 0
         
         if flag_flush_all :
             self._idx_current_pos_in_a_buffer = self._buffer_size # change the current position to the end of the buffer so that all values will be flushed.
+        else : # if flushing all data in the buffer is not required, consider self.__flush_freq whether to determine whether to flush the buffer or not.
+            # if the current position cannot be updated, exit
+            if int_new_pos <= self._idx_current_pos_in_a_buffer :
+                return 0
+    
+            # update the current position
+            self._idx_current_pos_in_a_buffer = int_new_pos
 
-        if self._idx_start_pos_of_unwritten_portion_of_the_buffer == self._idx_current_pos_in_a_buffer : # if there is no writtable data, exit
+            # consider self.__flush_freq whether to determine whether to flush the buffer or not.
+            if ( self._idx_current_pos_in_a_buffer - self._idx_start_pos_of_unwritten_portion_of_the_buffer ) < self.__flush_freq : # if the unwritten portion of data is below 'self.__flush_freq', exit
+                return 0
+
+        # if there is no writtable data, exit
+        if self._idx_start_pos_of_unwritten_portion_of_the_buffer == self._idx_current_pos_in_a_buffer : 
             return 0
         
-        # collect the records to write
-        bf = self._buffer
-        l_val, l_st, l_en = [ ], [ ], [ ] # initialize the lists of bedGraph records
-        val_prev = bf[ self._idx_start_pos_of_unwritten_portion_of_the_buffer ] # initialize 'val_prev'
-        st_prev = self._idx_start_pos_of_unwritten_portion_of_the_buffer # initialize 'st_prev' (an index position in the buffer)
-        for idx in range( self._idx_start_pos_of_unwritten_portion_of_the_buffer, self._idx_current_pos_in_a_buffer ) :
-            val = bf[ idx ]
-            if val_prev != val : # if a value has change, 
-                # add a record
-                l_val.append( val_prev )
-                l_st.append( st_prev + self._buffer_start )
-                l_en.append( idx + self._buffer_start )
-                # initialize the next record
-                val_prev = val
-                st_prev = idx
-        int_num_records_written = len( l_val ) # retrieve the number of records written
+        # search positions where values change
+        st_target_region = self._idx_start_pos_of_unwritten_portion_of_the_buffer
+        en_target_region = self._idx_current_pos_in_a_buffer
+        bf = self._buffer[ st_target_region : en_target_region ]
+        bf_diff = np.diff( bf ) 
+        arr_pos_change = np.where( bf_diff )[ 0 ] + 1
+
+        # exit when no changes could be found
+        int_num_records_written = len( arr_pos_change ) # retrieve the number of records written
         if int_num_records_written == 0 : # exit when there is no records to write
             return 0
-        
+
+        # compose values
+        l_val = [ bf[ 0 ] ]
+        l_val.extend( bf[ arr_pos_change ][ : -1 ] )
+
+        # compose end positions
+        arr_en = arr_pos_change + ( st_target_region + self._buffer_start )
+        l_en = list( arr_en )
+
+        # compose start positions
+        l_st = [ st_target_region + self._buffer_start ]
+        l_st.extend( arr_en[ : -1 ] )
+
         # add the first entry
         if not self._buffer_first_entry_added and flag_add_first_entry :
-            pos_end_first_entry = l_st[ 0 ]
-            if pos_end_first_entry > 0 : # add the first entry only when the end position is larger than 0
-                self._bw.addEntries( [ self._buffer_name_chr ], [ 0 ], ends = [ pos_end_first_entry ], values = [ 0.0 ] ) # add the first entry containing a zero value # values should be [0.0] to avoid error ([0] will cause an error)
+            st_first = l_st[ 0 ]
+            if st_first > 0 : # add the first entry only when the first start position is larger than 0
+                int_num_records_written += 1
+                self._bw.addEntries( [ self._buffer_name_chr ], [ 0 ], ends = [ st_first ], values = [ 0.0 ] ) # add the first entry containing a zero value # values should be [0.0] to avoid error ([0] will cause an error)
+            elif st_first < 0 : # modify the first entry when the first start position is smaller than 0 (due to positive 'safe-distance', negative start position could be possible)
+                l_st[ 0 ] = 0 # start position of the first entry should be 0
             self._buffer_first_entry_added = True # update the flag, which prevent adding the first entry until a new buffer has been initialized.
         
         # write the records
-        self._bw.addEntries([ self._buffer_name_chr ] * int_num_records_written, l_st, ends = l_en, values = l_val ) # write records for the current chromosome
+        try :
+            self._bw.addEntries([ self._buffer_name_chr ] * len( l_st ), l_st, ends = l_en, values = l_val ) # write records for the current chromosome
+        except :
+            logger.info( f"{ self._buffer_name_chr = }, {len( l_st ) = }, {l_st[ : 100 ] = }, {l_en[ : 100 ] = }, {l_val[ : 100 ] = }" )
         
-        # add the last entry
+        # add the last entry (usually when all reacords for the chromosome has been collected)
         if flag_flush_all and flag_add_last_entry :
             len_chr, pos_start_last_entry = self._dict_name_chr_to_len[ self._buffer_name_chr ], l_en[ -1 ]
             if pos_start_last_entry < len_chr :
+                int_num_records_written += 1
                 self._bw.addEntries( [ self._buffer_name_chr ], [ pos_start_last_entry ], ends = [ len_chr ], values = [ 0.0 ] ) # add the last entry containing a zero value
                 
         # update the current unwritten position
         self._idx_start_pos_of_unwritten_portion_of_the_buffer = l_en[ -1 ] - self._buffer_start
+
+        # When the proportion of unwritten data in the buffer becomes smaller than the given argument after flushing the data to the storage, the buffer will be recreated.
+        if ( self._idx_start_pos_of_unwritten_portion_of_the_buffer / self._buffer_size ) > float_min_proportion_written_data : 
+            self.recreate_buffer( ) # recreate the buffer
+        
         return int_num_records_written # return the number of records written
     def close( self ) :
         """ 
         flush the buffer and close the bigwig file
-        # 2024-01-06 21:19:45 
+        # 2024-10-22
         """
         if self._flag_closed :
             raise RuntimeError( 'close on the already closed BigWig file' )
@@ -12299,7 +12359,16 @@ class ReadsToCoverage :
         """
         self.close( )
     def __repr__( self ) :
-        return f"<ReadsToCoverage object of {self._path_file_bw}, (current buffer name_chr={self._buffer_name_chr} start={self._buffer_start}, pos={self._idx_current_pos_in_a_buffer}, and size={self._buffer_size}>"
+        '''
+        represent the object
+        # 2024 10-20
+        '''
+        str_automatic_flushing_description = 'automatic flushing based on ' + ( 'start positions of given records' if self.__flag_assumes_records_are_sorted_by_start_position else f'safe distance ({self.__int_min_safe_distance_for_automatic_flushing:,} bp)' )
+        if self._buffer_name_chr == None :
+            str_repr = f"<ReadsToCoverage object of {self._path_file_bw}, (buffer ready to be initialized) {(str_automatic_flushing_description)}>"
+        else :
+            str_repr = f"<ReadsToCoverage object of {self._path_file_bw}, (current buffer name_chr={self._buffer_name_chr} start={self._buffer_start}, pos={self._idx_current_pos_in_a_buffer}, and size={self._buffer_size} {(str_automatic_flushing_description)})>"
+        return str_repr
     def retrieve_mapped_segments(
         self,
         cigartuples,
@@ -12331,61 +12400,70 @@ class ReadsToCoverage :
                 )
             )
         return l_seg
-    def add_read( self, pysam_read, float_weight : float = 1.0 ) :
+    def add_read( self, pysam_read, float_weight : float = 1.0, flag_flush_buffer : bool = True ) :
         '''
         add a read to the coverage.
-        reads added to a single 'ReadsToCoverage' object should be in a sorted order (sorted by chromosome name matched with given 'pysam_header' and sorted by the reference start position)
+        (reads added to a single 'ReadsToCoverage' object should be in a sorted order (sorted by the reference start position) if 'flag_assumes_records_are_sorted_by_start_position' == True.)
 
         pysam_read : # pysam read object. Alternatively, a tuple with the following components can be given through the argument: (pysam_read.reference_name, pysam_read.reference_start, pysam_read.cigartuples)
         float_weight : float = 1, # default weight would be 1
-        # 2024-10-07
+        flag_flush_buffer : bool = True, # If True, the proportion of the buffer before the alignment start position of the read will be flushed, assuming the 'add_read' method is being called using the reads sorted by the alignment start position of the read.
+        # 2024-10-22
         '''
         r = pysam_read
         # retrieve read properties
         name_chr, r_st, cigartuples = r if isinstance( r, tuple ) else ( r.reference_name, r.reference_start, r.cigartuples ) # directly parse the tuple
+        
+        # prepare the buffer 
         if name_chr != self._buffer_name_chr : # if chromosome has changed, 
             self.flush_buffer( flag_flush_all = True ) # flush all buffer
             self.initialize_buffer( name_chr, r_st ) # initialize new buffer using the properties of the current read
+            
         l_seg = self.retrieve_mapped_segments( cigartuples, r_st ) # retrieve segments of the current read
         
+        # update the buffer
         for st, en in l_seg : # for each segment, update the coverage 
             st_in_buffer, en_in_buffer = st - self._buffer_start, en - self._buffer_start # retrieve positions in the buffer
             if en_in_buffer > self._buffer_size :
-                self.expand_buffer( en_in_buffer )
+                self.expand_buffer( en_in_buffer * 2 ) # geometrically increase the size of the buffer
                 st_in_buffer, en_in_buffer = st - self._buffer_start, en - self._buffer_start # re-calculate the positions in the buffer
             self._buffer[ st_in_buffer : en_in_buffer ] += float_weight # update the buffer
-        
-        r_st_in_buffer = r_st - self._buffer_start # calculate the position in the buffer
-        if r_st_in_buffer > self._idx_current_pos_in_a_buffer : # if the position (reference start, which is used for sorting the BAM file) of a read exceeds the current position in the buffer
-            self._idx_current_pos_in_a_buffer = r_st_in_buffer # update the current position in a buffer
-            self.flush_buffer( ) # write the records
-    def add_region( self, name_chr : str, reference_start : int, values ) :
+
+        # The proportion of the buffer before the alignment start position of the read will be flushed, assuming the 'add_read' method is being called using the reads sorted by the alignment start position of the read.
+        if flag_flush_buffer :
+            self.flush_buffer( r_st - self._buffer_start - self.__safe_dist ) # calculate the position in the buffer # if the position (reference start, which is used for sorting the BAM file) of a read exceeds the current position in the buffer # update the current position in a buffer # write the records
+    def add_region( self, name_chr : str, reference_start : int, values, flag_flush_buffer : bool = True ) :
         '''
         add a region to the coverage.
         region added to a single 'ReadsToCoverage' object should be in a sorted order (sorted by chromosome name matched with given 'pysam_header' and sorted by the reference start position)
         
         name_chr : str, 
         reference_start : int, 
-        values
-        # 2024-01-07 01:17:51 
+        values,
+        flag_flush_buffer : bool = True, # If True, the proportion of the buffer before the start position of the region will be flushed, assuming the 'add_region' method is being called using the regions sorted by the start position.
+        # 2024-10-22
         '''
         r_st = reference_start
         r_en = r_st + len( values )
+
+        # prepare the buffer 
         if name_chr != self._buffer_name_chr : # if chromosome has changed, 
             self.flush_buffer( flag_flush_all = True ) # flush all buffer
             self.initialize_buffer( name_chr, r_st ) # initialize new buffer using the properties of the current read
         
         st_in_buffer, en_in_buffer = r_st - self._buffer_start, r_en - self._buffer_start # retrieve positions in the buffer
         if en_in_buffer > self._buffer_size :
-            self.expand_buffer( en_in_buffer )
+            self.expand_buffer( en_in_buffer * 2 ) # geometrically increase the size of the buffer
             st_in_buffer, en_in_buffer = r_st - self._buffer_start, r_en - self._buffer_start # re-calculate the positions in the buffer
         self._buffer[ st_in_buffer : en_in_buffer ] += values # update the buffer
-        
-        self._idx_current_pos_in_a_buffer = en_in_buffer # update the current position in a buffer
-        self.flush_buffer( ) # write the records
+
+        # The proportion of the buffer before the start position of the region will be flushed, assuming the 'add_region' method is being called using the regions sorted by the start position.
+        if flag_flush_buffer :
+            self.flush_buffer( st_in_buffer - self.__safe_dist ) # if the position (reference start) of a region exceeds the current position in the buffer # update the current position in a buffer # write the records
 
 def merge_bigwigs( path_file_bw_output : str, l_path_file_bw_input : List[ str ], int_window_size_for_a_batch : int = 10_000_000 ) :
     '''
+    (deprecated)
     merge bigwig files into a single bigwig file.
     Assumes all input chromosomes shares the same set of chromosome names.
     
@@ -12432,6 +12510,92 @@ def merge_bigwigs( path_file_bw_output : str, l_path_file_bw_input : List[ str ]
     # close the coverage file
     coverage_writer.close( ) # close the output file
 
+def merge_bigwigs_in_bedgraph_format( path_file_bw_output : str, l_path_file_bw_input : List[ str ] ) :
+    '''
+    Efficiently merge bigwig files in bedgraph format into a single bigwig file in bedgraph format.
+    Assumes all input bigwig files shares the same set of chromosome names.
+    
+    path_file_bw_output : str, 
+    l_path_file_bw_input : List[ str ], 
+    # 2024-10-24 02:01 by IEUM
+    '''
+    import pyBigWig
+    import intervaltree
+
+    # exit if input is invalid
+    if len( l_path_file_bw_input ) == 0 :
+        return -1
+
+    # open input and output files
+    l_bw = list( pyBigWig.open( i, 'r' ) for i in l_path_file_bw_input )
+    bw_new = pyBigWig.open( path_file_bw_output, "w" )
+    
+    # add header to the output file
+    dict_chr_len = l_bw[ 0 ].chroms( ) # retrieve chromosome lengths from one of the input BigWig files
+    l_chr = list( ( k, dict_chr_len[ k ] ) for k in dict_chr_len ) # retrieve chromosome list
+    bw_new.addHeader( l_chr ) # add header
+    
+    # for each chromosome, merge BigWig BedGraph interval records and write records to the output BigWig file.
+    for name_chr, int_chr_len_curr in l_chr : # retrieve length of the current chromosome
+        # retrieve intervals from all input bigwig files in bedGraph formats (default format of pyBigWig)
+        df_intv = pd.concat( list( pd.DataFrame( bw.intervals( name_chr ), columns = [ 'st', 'en', 'val' ] ) for bw in l_bw ), ignore_index = True )
+        
+        # handle a chromosome with no records
+        if len( df_intv ) == 0 : 
+            bw_new.addEntries( chroms = [ name_chr ], starts = [ 0 ], ends = [ int_chr_len_curr ], values = [ 0.0 ] ) # add a record indicating the zero coverage for the chromosome
+            continue
+        
+        # pre-process intervals
+        df_intv = df_intv[ df_intv.val != 0 ] # exclude intervals with 0 values
+        df_intv.sort_values( 'st', ignore_index = True, inplace = True ) # sort by start position
+        df_intv = df_intv.groupby( [ 'st', 'en' ] ).sum( ).reset_index( drop = False ) # merge identical intervals
+        
+        # build an interval tree of the intervals
+        it = intervaltree.IntervalTree.from_tuples( list( df_intv.itertuples( index = False, name = None ) ) )
+        
+        # retrieve list of unique positions
+        set_pos_unique = set( df_intv.st.values )
+        set_pos_unique.update( df_intv.en.values )
+        arr_pos_unique = np.sort( list( set_pos_unique ) )
+        
+        # initialize new entries
+        l_st_new, l_en_new, l_val_new = [ ], [ ], [ ] 
+        
+        # if needed, add first record
+        if arr_pos_unique[ 0 ] != 0 :
+            l_st_new.append( 0 )
+            l_en_new.append( arr_pos_unique[ 0 ] )
+            l_val_new.append( 0.0 )
+        
+        for st, en in zip( arr_pos_unique[ : -1 ], arr_pos_unique[ 1 : ] ) : # iterate middle positions of unique intervals
+            # search overlapped intervals using the middle point
+            set_i_overlapped = it[ ( st + en ) / 2 ]
+        
+            # determine the coverage 
+            n_i_overlapped = len( set_i_overlapped )
+            if n_i_overlapped == 0 : 
+                val = 0.0 # a zero coverage region
+            elif n_i_overlapped < 10000 :
+                val = sum( i[ 2 ] for i in set_i_overlapped )
+            else :
+                val = np.sum( i[ 2 ] for i in set_i_overlapped )
+        
+            # add a record for the current interval
+            l_st_new.append( st )
+            l_en_new.append( en )
+            l_val_new.append( val )
+        
+        # if needed, add last record
+        if arr_pos_unique[ -1 ] != int_chr_len_curr :
+            l_st_new.append( arr_pos_unique[ -1 ] )
+            l_en_new.append( int_chr_len_curr )
+            l_val_new.append( 0.0 )
+    
+        # add records
+        bw_new.addEntries( chroms = [ name_chr ] * len( l_st_new ), starts = l_st_new, ends = l_en_new, values = l_val_new )
+    
+    bw_new.close( )
+    
 def SplitBAM( 
     path_file_bam_input : str, 
     path_folder_output : str, 
@@ -12446,7 +12610,7 @@ def SplitBAM(
     flag_strand_specific : bool = False, # if True, create separate BAM files and coverage BigWig files for + strand and - strand reads.
     flag_export_tss_and_tes_coverage : bool = False, # if True, create two additional BigWig coverage files containing (size-distribution-normalized) transcript start site (TSS) and transcript end site (TES) usage information. The locations of TSS and TES correspond to alignment start position (first base pair aligned to the genome) or alignment end position (last base pair aligned to the genome) for non-reverse-complemented and reverse-complemented reads, respectively.
 ) :
-    """ # 2024-10-07 
+    """ 
     A scalable pipeline employing multiprocessing for faster splitting of a barcoded BAM file to multiple BAM files, each containing the list of cell barcodes of the cells belonging to each 'name_cluster' (representing a cell type) or even a single-cell (a separate BAM file for each a single cell-barcode).
     Features:
     - use multiple processes to increase the performance
@@ -12477,6 +12641,7 @@ def SplitBAM(
     # -------- Export Transcript Start Site (TSS) and Transcript End Site (TES) information as coverages --------
     flag_export_tss_and_tes_coverage : bool = False, # if True, create two additional BigWig coverage files containing (size-distribution-normalized) transcript start site (TSS) and transcript end site (TES) usage information. The locations of TSS and TES correspond to alignment start position (first base pair aligned to the genome) or alignment end position (last base pair aligned to the genome) for non-reverse-complemented and reverse-complemented reads, respectively.
 
+    # 2024-10-24 2:10 by IEUM
     """
     ''' prepare : retrieve file header, preprocess name_clus, and group 'name_clus' values for each worker process. '''
     # import packages
@@ -12562,9 +12727,9 @@ def SplitBAM(
                 l_path_file_bam.append( path_file_bam ) # collect the path of output BAM file
                 # collect coverage output files
                 for coverage_data_type in l_coverage_data_type :
-                    path_file_bw = f'{path_file_bam_prefix}{strand_type}{coverage_data_type}.bw' # define output file names
+                    path_file_bw = f'{path_file_bw_prefix}{strand_type}{coverage_data_type}.bw' # define output file names
                     if flag_export_coverages :
-                        dict_name_clus_to_dict_coverage_writer[ name_clus ][ strand_type, coverage_data_type ] = ReadsToCoverage( path_file_bw, sam_header ) # collect the new coverage file
+                        dict_name_clus_to_dict_coverage_writer[ name_clus ][ strand_type, coverage_data_type ] = ReadsToCoverage( path_file_bw, sam_header, flag_assumes_records_are_sorted_by_start_position = coverage_data_type == '' ) # collect the new coverage file # for TSS and TES coverages, the records are expected to be not sorted by reference start position.
 
         ''' work : retrieve records and write the records to output BAM files '''
         while True :
@@ -12592,8 +12757,10 @@ def SplitBAM(
                         dict_name_clus_to_dict_coverage_writer[ name_clus ][ strand_type, '' ].add_read( r, float_weight = float_weight ) # update the coverage using a size-distribution-normalizedweight 
                         if flag_export_tss_and_tes_coverage :
                             ref_name, ref_st, ref_en = r.reference_name, r.reference_start, r.reference_end # retrieve read info
-                            dict_name_clus_to_dict_coverage_writer[ name_clus ][ strand_type, '.TSS' ].add_read( ( ref_name, ref_st if flag_is_plus_strand else ( ref_en - 1 ), ( ( 0, 1 ), ) ), float_weight = float_weight ) # update the TSS coverage using a size-distribution-normalizedweight 
-                            dict_name_clus_to_dict_coverage_writer[ name_clus ][ strand_type, '.TES' ].add_read( ( ref_name, ref_en if flag_is_plus_strand else ( ref_st - 1 ), ( ( 0, 1 ), ) ), float_weight = float_weight ) # update the TES coverage using a size-distribution-normalizedweight 
+                            ref_S, ref_E = ref_st, ( ref_en - 1 ) # 0-based coordinates of start and end positions
+                            ref_TSS, ref_TES = ( ref_S, ref_E ) if flag_is_plus_strand else ( ref_E, ref_S )
+                            dict_name_clus_to_dict_coverage_writer[ name_clus ][ strand_type, '.TSS' ].add_read( ( ref_name, ref_TSS, ( ( 0, 1 ), ) ), float_weight = float_weight ) # update the TSS coverage using a size-distribution-normalizedweight 
+                            dict_name_clus_to_dict_coverage_writer[ name_clus ][ strand_type, '.TES' ].add_read( ( ref_name, ref_TES, ( ( 0, 1 ), ) ), float_weight = float_weight ) # update the TES coverage using a size-distribution-normalizedweight 
 
         ''' post-process : close files and index the files '''
         for name_clus in dict_name_clus_to_dict_newsamfile :
@@ -12689,12 +12856,13 @@ def SplitBAM(
         p.recv( ) # receive a signal indicating the worker has dismissed itself
     # pipeline completed
     return
-
+    
 def SplitBAMs( 
     dict__path_file_bam_input__to__dict_cb_to_name_clus : dict, 
     path_folder_output : str, 
     name_tag_cb : str = 'CB', 
     int_num_threads : int = 5,
+    int_num_pipelines : int = 3, # the maximum number of independent pipelines that could be run simultaneously
     int_max_num_files_for_each_process : int = 700,
     int_num_worker_processes : int = 100,
     flag_export_coverages : bool = False, # export size-distribution-normalized coverages of the output BAM files. if 'path_folder_reference_distribution' is not given, the coverage of each BAM file will be exported as-is.
@@ -12705,7 +12873,7 @@ def SplitBAMs(
     flag_strand_specific : bool = False, # if True, create separate BAM files and coverage BigWig files for + strand and - strand reads.
     flag_export_tss_and_tes_coverage : bool = False, # if True, create two additional BigWig coverage files containing (size-distribution-normalized) transcript start site (TSS) and transcript end site (TES) usage information. The locations of TSS and TES correspond to alignment start position (first base pair aligned to the genome) or alignment end position (last base pair aligned to the genome) for non-reverse-complemented and reverse-complemented reads, respectively.
 ) :
-    """ # 2024-10-07
+    """
     A pipeline employing multiprocessing for faster splitting of barcoded BAM files of a single cell dataset to multiple BAM files, each containing records of cells belonging to a single 'name_cluster' (a single cell type)
     
     Features:
@@ -12727,6 +12895,8 @@ def SplitBAMs(
     name_tag_cb : str = 'CB' # name of the SAM tag containing the corrected cell barcode
     
     int_num_threads : int = 5 # the number of threads for merging BAM files of the same cluster name (cell type)
+
+    int_num_pipelines : int = 3, # the maximum number of independent pipelines that could be run simultaneously.
     
     int_max_num_files_for_each_process : int = 700, # max number of file descriptors (an output BAM file or a pipe object) that can be opened in a single process.
     
@@ -12744,13 +12914,14 @@ def SplitBAMs(
 
     # -------- Export Transcript Start Site (TSS) and Transcript End Site (TES) information as coverages --------
     flag_export_tss_and_tes_coverage : bool = False, # if True, create two additional BigWig coverage files containing (size-distribution-normalized) transcript start site (TSS) and transcript end site (TES) usage information. The locations of TSS and TES correspond to alignment start position (first base pair aligned to the genome) or alignment end position (last base pair aligned to the genome) for non-reverse-complemented and reverse-complemented reads, respectively.
+
+    # 2024-10-24 2:10 by IEUM
     """
     # create the output folder
     os.makedirs( path_folder_output, exist_ok = True )
     
     ''' Initiate pipelines for processing individual BAM file separately. '''
     logger.info(f"Started.")
-    pipelines = bk.Offload_Works( None ) # no limit for the number of works that can be submitted.
     
     # initialize flags 
     flag_perform_size_distribution_normalization_for_coverage_calculation = flag_export_coverages and isinstance( path_folder_reference_distribution, str ) and os.path.exists( f"{path_folder_reference_distribution}dict_output.pickle" )
@@ -12761,7 +12932,23 @@ def SplitBAMs(
         dict_name_file_distribution_to_arr_ratio_to_ref = dict( ( name_file_dist, arr_ratio_to_ref ) for name_file_dist, arr_ratio_to_ref in zip( dict_output[ 'setting' ][ 'l_name_file_distributions' ], dict_output[ 'l_arr_ratio_to_ref' ] ) ) # retrieve name_file_distribution > arr_ratio_to_ref mapping
     
     ''' run 'SplitBAM' for individual BAM files '''
-    for path_file_bam_input in dict__path_file_bam_input__to__dict_cb_to_name_clus : # run 'SplitBAM' for each input BAM file separately
+    # initialize 'dict_kwargs_for_workers'
+    dict_kwargs_for_workers = { 
+        'path_file_bam_input' : [ ], 
+        'path_folder_output' : [ ], 
+        'dict_cb_to_name_clus' : [ ], 
+        'name_tag_cb' : name_tag_cb, 
+        'int_max_num_files_for_each_process' : int_max_num_files_for_each_process, 
+        'int_num_worker_processes' : int_num_worker_processes,
+        'flag_export_coverages' : flag_export_coverages,
+        'arr_ratio_to_ref' : [ ],
+        't_distribution_range_of_interest' : t_distribution_range_of_interest,
+        'name_tag_length' : name_tag_length,
+        'flag_strand_specific' : flag_strand_specific,
+        'flag_export_tss_and_tes_coverage' : flag_export_tss_and_tes_coverage,
+    }
+    # collect arguments for running 'SplitBAM' for each input BAM file separately
+    for path_file_bam_input in dict__path_file_bam_input__to__dict_cb_to_name_clus : 
         str_uuid_file_bam_input = bk.UUID( ) # retrieve UUID of the input bam file
         # retrieve 'arr_ratio_to_ref' for size_distribution_normalization during coverage_calculation
         if flag_perform_size_distribution_normalization_for_coverage_calculation :
@@ -12770,26 +12957,13 @@ def SplitBAMs(
         else :
             arr_ratio_to_ref = None
         # run 'SplitBAM' for the current BAM file
-        pipelines.submit_work( 
-            SplitBAM, 
-            kwargs = { 
-                'path_file_bam_input' : path_file_bam_input, 
-                'path_folder_output' : f'{path_folder_output}temp_{str_uuid_file_bam_input}/', 
-                'dict_cb_to_name_clus' : dict__path_file_bam_input__to__dict_cb_to_name_clus[ path_file_bam_input ], 
-                'name_tag_cb' : name_tag_cb, 
-                'int_max_num_files_for_each_process' : int_max_num_files_for_each_process, 
-                'int_num_worker_processes' : int_num_worker_processes,
-                'flag_export_coverages' : flag_export_coverages,
-                'arr_ratio_to_ref' : arr_ratio_to_ref,
-                't_distribution_range_of_interest' : t_distribution_range_of_interest,
-                'name_tag_length' : name_tag_length,
-                'flag_strand_specific' : flag_strand_specific,
-                'flag_export_tss_and_tes_coverage' : flag_export_tss_and_tes_coverage,
-            },
-        )
-                    
+        dict_kwargs_for_workers[ 'path_file_bam_input' ].append( path_file_bam_input )
+        dict_kwargs_for_workers[ 'path_folder_output' ].append( f'{path_folder_output}temp_{str_uuid_file_bam_input}/' )
+        dict_kwargs_for_workers[ 'dict_cb_to_name_clus' ].append( dict__path_file_bam_input__to__dict_cb_to_name_clus[ path_file_bam_input ] )
+        dict_kwargs_for_workers[ 'arr_ratio_to_ref' ].append( arr_ratio_to_ref )
+
     # wait all pipelines to be completed
-    pipelines.wait_all()
+    bk.Workers( SplitBAM, int_num_workers_for_Workers = int_num_pipelines, ** dict_kwargs_for_workers )
     
     ''' define the list of output types '''
     l_strand_type = [ '.minus_strand', '.plus_strand', ] if flag_strand_specific else [ '' ] # no strand_type if 'flag_strand_specific' == False
@@ -12815,31 +12989,32 @@ def SplitBAMs(
             for path_file in l_path_file_output_temp : # delete the temporary output files
                 os.remove( path_file )
             pysam.index( path_file_bam_output ) # index the output file
-
+    
     ''' combine temporary output BigWig files '''
     if flag_export_coverages :
+        # initialize 'dict_kwargs_for_workers'
+        dict_kwargs_for_workers = {
+            'path_file_bw_output' : [ ],
+            'l_path_file_bw_input' : [ ],
+        }
+
+        # collect arguments for running 'merge_bigwigs' for the BigWig files of the current 'name_clus'
         normalization_type = '.size_distribution_normalized' if flag_perform_size_distribution_normalization_for_coverage_calculation else '' # retrieve type of the coverage
         for strand_type in l_strand_type :
             for coverage_data_type in l_coverage_data_type :
                 for name_clus in l_name_clus : # for each 'name_clus'
-                    # run 'merge_bigwigs' for the BigWig files of the current 'name_clus'
-                    pipelines.submit_work( 
-                        merge_bigwigs, 
-                        kwargs = { 
-                            'path_file_bw_output' : f'{path_folder_output}{name_clus}{normalization_type}{strand_type}{coverage_data_type}.bw',
-                            'l_path_file_bw_input' : glob.glob( f'{path_folder_output}*/{name_clus}{normalization_type}{strand_type}{coverage_data_type}.bw' ),
-                        },
-                    )
+                    dict_kwargs_for_workers[ 'path_file_bw_output' ].append( f'{path_folder_output}{name_clus}{normalization_type}{strand_type}{coverage_data_type}.bw' )
+                    dict_kwargs_for_workers[ 'l_path_file_bw_input' ].append( glob.glob( f'{path_folder_output}*/{name_clus}{normalization_type}{strand_type}{coverage_data_type}.bw' ) )
                 
-    # wait all works to be completed
-    pipelines.wait_all()
+        # wait all works to be completed
+        bk.Workers( merge_bigwigs_in_bedgraph_format, int_num_workers_for_Workers = int_num_pipelines, ** dict_kwargs_for_workers )
         
     # remove temporary output files
     for path_folder in bk.GLOB_Retrive_Strings_in_Wildcards( f"{path_folder_output}temp_*/" ).path.values :
         shutil.rmtree( path_folder )
         
     logger.info(f"Completed.")
-
+    
 def DeduplicateBAM( 
     path_file_bam_input : str, # an input Barcoded BAM file to split
     path_folder_output : str, # the output folder where splitted BAM files will be exported
@@ -13556,5 +13731,3522 @@ def run_pipeline(
         ** _get_kwargs( 'LongExportNormalizedCountMatrix' ),
     )
 
-if __name__ == "__main__":
-    ourotools()  # run ouro at the top-level environment
+'''
+ROBIN Algorithm - Discover cell type specific transcriptomic marker features, reference-free, with size-distribution-normalization feature
+
+(Font: Modular)
+ ______    _______  _______  ___   __    _ 
+|    _ |  |       ||  _    ||   | |  |  | |
+|   | ||  |   _   || |_|   ||   | |   |_| |
+|   |_||_ |  | |  ||       ||   | |       |
+|    __  ||  |_|  ||  _   | |   | |  _    |
+|   |  | ||       || |_|   ||   | | | |   |
+|___|  |_||_______||_______||___| |_|  |__|
+
+
+(Font: ANSI Shadow)
+
+██████╗  ██████╗ ██████╗ ██╗███╗   ██╗
+██╔══██╗██╔═══██╗██╔══██╗██║████╗  ██║
+██████╔╝██║   ██║██████╔╝██║██╔██╗ ██║
+██╔══██╗██║   ██║██╔══██╗██║██║╚██╗██║
+██║  ██║╚██████╔╝██████╔╝██║██║ ╚████║
+╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═╝╚═╝  ╚═══╝
+
+
+(Font: Electronic)
+
+ ▄▄▄▄▄▄▄▄▄▄▄  ▄▄▄▄▄▄▄▄▄▄▄  ▄▄▄▄▄▄▄▄▄▄  ▄▄▄▄▄▄▄▄▄▄▄  ▄▄        ▄ 
+▐░░░░░░░░░░░▌▐░░░░░░░░░░░▌▐░░░░░░░░░░▌▐░░░░░░░░░░░▌▐░░▌      ▐░▌
+▐░█▀▀▀▀▀▀▀█░▌▐░█▀▀▀▀▀▀▀█░▌▐░█▀▀▀▀▀▀▀█░▌▀▀▀▀█░█▀▀▀▀ ▐░▌░▌     ▐░▌
+▐░▌       ▐░▌▐░▌       ▐░▌▐░▌       ▐░▌    ▐░▌     ▐░▌▐░▌    ▐░▌
+▐░█▄▄▄▄▄▄▄█░▌▐░▌       ▐░▌▐░█▄▄▄▄▄▄▄█░▌    ▐░▌     ▐░▌ ▐░▌   ▐░▌
+▐░░░░░░░░░░░▌▐░▌       ▐░▌▐░░░░░░░░░░▌     ▐░▌     ▐░▌  ▐░▌  ▐░▌
+▐░█▀▀▀▀█░█▀▀ ▐░▌       ▐░▌▐░█▀▀▀▀▀▀▀█░▌    ▐░▌     ▐░▌   ▐░▌ ▐░▌
+▐░▌     ▐░▌  ▐░▌       ▐░▌▐░▌       ▐░▌    ▐░▌     ▐░▌    ▐░▌▐░▌
+▐░▌      ▐░▌ ▐░█▄▄▄▄▄▄▄█░▌▐░█▄▄▄▄▄▄▄█░▌▄▄▄▄█░█▄▄▄▄ ▐░▌     ▐░▐░▌
+▐░▌       ▐░▌▐░░░░░░░░░░░▌▐░░░░░░░░░░▌▐░░░░░░░░░░░▌▐░▌      ▐░░▌
+ ▀         ▀  ▀▀▀▀▀▀▀▀▀▀▀  ▀▀▀▀▀▀▀▀▀▀  ▀▀▀▀▀▀▀▀▀▀▀  ▀        ▀▀ 
+                                                                
+                                
+''' 
+# developing
+l_development_log_for_ROBIN = [
+    """
+    # 2024-12-13 23:51 by Hyunsu An (IEUM An) (ahs2202)
+    Completed implementing of the gene assignment module based on the given list of external reference annotation inputs to individual read-clusters for an easier biological interpretation of the read clustering result.
+    # 2024-12-15 02:50 by Hyunsu An (IEUM An) (ahs2202)
+    During [the second iteration], now external reference annotation (ERA) entries can be analyzed along side with the 'raw' read-cluster data, allowing the identification of de novo transcriptomic features during the read-cluster analysis (RCA).
+    """
+]
+#--- components for processing external annotation ---#
+if True : 
+    class GeneTranscriptExonAnnotationKeyError( Exception ):
+        # raised when the required 'attr' keys are missing for the supposed gene/transcript/exon input annotation.
+        pass 
+    
+    def load_annotation_input_file( dict_setting_of_input_annotation_file : dict, flag_drop_the_chr_prefix_from_seqname : bool = True ) :
+        """
+        load and preprocess a given annotation input file
+        
+        dict_setting_of_input_annotation_file : dict, # a dictionary containing information for loading and preprocessing a given annotation input file.
+        flag_drop_the_chr_prefix_from_seqname = True, # a boolean flag whether to drop the 'chr' prefix from the sequence names.
+    
+        
+        # detailed descriptions of 'dict_setting_of_input_annotation_file' argument, using Ensembl GTF file as an example.
+        For the input field with [unique] property (which are marked with [unique]), if the identifier values are not unique, it will be modified to include the suffix #1, #2, #3,... so that the identifiers becomes unique among the input files. If it has not been given, the aforementioned suffix will be used as the identifier.
+        {
+            'path' : f"{path_folder_anno}Mus_musculus.GRCm38.102.gtf.gz", # path to the annotation file (currently, only GTF or GFF file formats are supported) # [required]
+            'id' : "ensembl.102", # [unique] string identifier of the annotation file. 
+            'attr' : {
+                'gene_id' : "gene_id", # [unique] [required for the "gene/transcript/exon" annotation. If not unique, gene/transcripts/exons belonging to the gene will be dropped]
+                'gene_name' : "gene_name", # [unique]
+                'gene_type' : "gene_biotype", [default: "unknown"]
+                # attribute names related to the transcripts can be optionally given for the "gene/transcript/exon" annotation. 'gene', 'transcript', 'exon' features (values of the thrid GTF/GFF column) will be processed accordingly. Of note, for "gene" annotation, the values of the thrid GTF/GFF column will be ignored.
+                'transcript_id' : "transcript_id", # [unique] [required for the "gene/transcript/exon" annotation. If not unique, transcript/exons belonging to the transcript will be dropped]
+                'transcript_name' : "transcript_name", # [unique]
+                'transcript_type' : "transcript_biotype", [default: "unknown"]
+            },
+            # to select/deselect/filter specific values in the attributes or the feature column (the thrid GTF/GFF column), following functionalities can be used
+            'select' : {
+            },
+            'deselect' : {
+            },
+            'exclude_below' : {
+            },
+            'exclude_above' : {
+            }
+            # to include/exclude specific genes using the values derived from the GTF/GFF columns excluding the attribute column, the following functionality can be used.
+            'gene_filter' : {
+                # filter genes using gene length
+                'min_len' : 100,
+            },
+        },
+        
+        # 2024-12-03 - 2024-12-05 12:42 IEUM An
+        """
+        ns = bk.deepcopy( dict_setting_of_input_annotation_file ) # use dictionary as a namespace
+        
+        path_file_input = ns[ 'path' ] # retrieve the path
+        
+        # read the annotation
+        df_anno = bk.GTF_Read( path_file_input, remove_chr_from_seqname = flag_drop_the_chr_prefix_from_seqname ) # also, annotations will be sorted by 'seqname' and 'ref_start' values in that order, making further sorting operation unnecessary
+        
+        # classify the annotation
+        attr = ns[ 'attr' ]
+        set_name_col = set( df_anno.columns.values ) # retrieve a set of column names of the input annotation
+        def check_attr_key_validity( key ) :
+            """
+            check the validity of the attribute key name. (1) the key should be presented in the input 'attr' argument. (2) the key should exist in the input annotation file as one of the attribute keys.
+            
+            2024-12-06 17:52 by IEUM An
+            """
+            return ( key in attr ) and ( attr[ key ] in set_name_col )
+        set_feature_for_gene_transcript_exon_annotation = { 'gene', 'transcript', 'exon', } # define a set of features required for the gene/transcript/exon annotation.
+        flag_gene_transcript_exon_annotation = set( df_anno.feature.values ).issuperset( set_feature_for_gene_transcript_exon_annotation ) # retrieve 'flag_gene_transcript_exon_annotation' # if False, it indicate the annotation is gene annotation # 'gene_id' and 'transcript_id' attribute is required for the "gene/transcript/exon" annotation.
+        # by default, KeyError will be raised if the input annotation appear to be gene/transcript/exon annotation but 'gene_id' and 'transcript_id' has not been set.
+        if flag_gene_transcript_exon_annotation :
+            if not ( check_attr_key_validity( 'gene_id' ) and check_attr_key_validity( 'transcript_id' ) ) :
+                raise GeneTranscriptExonAnnotationKeyError( "It appears gene/transcript/exon annotation has been given, however, required attribute key names for 'gene_id' and 'transcript_id' have not been given or not present in the attribute keys of the input annotation." )
+                
+        ns[ 'flag_gene_transcript_exon_annotation' ] = flag_gene_transcript_exon_annotation # update the namespace
+        
+        # currently, for gene/transcript/exon annotation, entries describing features other than 'gene', 'transcript', 'exon' will be discarded
+        if flag_gene_transcript_exon_annotation :
+            df_anno = bk.PD_Select( df_anno, feature = set_feature_for_gene_transcript_exon_annotation ) # exclude entries with the feature types other than the features defined in 'set_feature_for_gene_transcript_exon_annotation'
+        
+        # add 'id', 'name', and 'type' columns
+        def make_values_unique( arr_value , str_format : str = "{value}#{duplicate_index}", flag_drop_duplicates : bool = False ) :
+            """
+            arr_value, # array of (sorted) string values. Alternatively, an integer indicating the number of output values can be given instead if the values are unavailable (assumes all values are identical to '')
+            str_format : str = "{value}#{duplicate_index}", # the format string for the duplicated input values to construct the output value. {value} indicate the input value, while {duplicate_index} indicates 1-based coordinates of the duplicated values in the order they appear (for example, if "some_redundant_value" is repeated 3 times, the three values will become "some_redundant_value#1", "some_redundant_value#2", "some_redundant_value#3")
+            flag_drop_duplicates : bool = False, # instead marking the duplicate string values based on the "str_format" argument, np.nan will be returned for the duplicated (non-unique) string values
+            
+            2024-12-04 14:15 by IEUM An
+            """
+            # (special case) handle when an integer value has been given
+            if isinstance( arr_value, int ) :
+                n = arr_value # interpret 'arr_value' as the number of values
+                return list( str_format.format( value = '', duplicate_index = i ) for i in range( 1, n + 1 ) ) # 1 based coordinate
+            # handle when (sorted) string values are given
+            dict_count = bk.COUNTER( arr_value ) # count the number of occurrences for each unique value
+            # initialize 
+            dict_counter = dict( )
+            l_unique_value = [ ] 
+            for value in arr_value :
+                l_unique_value.append( ( np.nan if flag_drop_duplicates else str_format.format( value = value, duplicate_index = ( ( dict_counter[ value ] + 1 ) if value in dict_counter else 1 ) ) ) if dict_count[ value ] > 1 else value ) # if flag_drop_duplicates == True, instead marking the duplicate string values based on the "str_format" argument, np.nan will be used for the duplicated (non-unique) string values
+                # update dict_counter
+                if value not in dict_counter :
+                    dict_counter[ value ] = 1
+                else :
+                    dict_counter[ value ] += 1
+            # return the output value
+            return l_unique_value
+        if flag_gene_transcript_exon_annotation :
+            # for gene/transcript/exon annotation
+            # Of note, for entries containing exon features, since more than one exon_id are often assigned to the same exon (defined by genomic coordinates, not accounting to which transcript this exon belongs to). Therefore, since long-reads represent individual transcripts and genes are defined by the interpretations of the long-reads, it appears collecting only gene/transcript information from the existing annotation would be appropriate.
+            assert( check_attr_key_validity( 'gene_id' ) and check_attr_key_validity( 'transcript_id' ) ) # 'gene_id' and 'transcript_id' attribute is required for the "gene/transcript/exon" annotation.
+            # process gene information, including identifiers
+            df_anno_gene = bk.PD_Select( df_anno, feature = 'gene' ) # maintain a subset of 'df_anno' containing only genes
+            n = len( df_anno_gene ) # retrieve the number of entries
+            df_anno_gene[ '_gene_id' ] = make_values_unique( df_anno_gene[ attr[ 'gene_id' ] ], flag_drop_duplicates = True ) # 'gene_id' is required for the "gene/transcript/exon" annotation. # also, 'gene_id' should be unique for the "gene/transcript/exon" annotation.
+            df_anno_gene[ '_gene_name' ] = make_values_unique( df_anno_gene[ attr[ 'gene_name' ] ] ) if check_attr_key_validity( 'gene_name' ) else df_anno_gene[ '_gene_id' ]
+            df_anno_gene[ '_gene_type' ] = df_anno_gene[ attr[ 'gene_type' ] ] if check_attr_key_validity( 'gene_type' ) else np.full( n, 'unknown', dtype = object )
+            df_anno_gene.dropna( subset = [ '_gene_id' ], inplace = True ) # drop entries without unique identifiers
+            dict_gene_info = dict( ( gene_id, ( gene_name, gene_type ) ) for gene_id, gene_name, gene_type in df_anno_gene[ [ '_gene_id', '_gene_name', '_gene_type' ] ].values ) # compose a dictionary containing gene information
+            # process transcript information, including identifiers
+            df_anno_transcript = bk.PD_Select( df_anno, feature = 'transcript' ) # maintain a subset of 'df_anno' containing only transcript
+            n = len( df_anno_transcript ) # retrieve the number of entries
+            df_anno_transcript[ '_transcript_id' ] = make_values_unique( df_anno_transcript[ attr[ 'transcript_id' ] ], flag_drop_duplicates = True ) # 'transcript_id' is required for the "gene/transcript/exon" annotation. # also, 'transcript_id' should be unique for the "gene/transcript/exon" annotation.
+            df_anno_transcript[ '_transcript_name' ] = make_values_unique( df_anno_transcript[ attr[ 'transcript_name' ] ] ) if check_attr_key_validity( 'transcript_name' ) else df_anno_gene[ '_transcript_id' ]
+            df_anno_transcript[ '_transcript_type' ] = df_anno_transcript[ attr[ 'transcript_type' ] ] if check_attr_key_validity( 'transcript_type' ) else np.full( n, 'unknown', dtype = object )
+            df_anno_transcript.dropna( subset = [ '_transcript_id' ], inplace = True ) # drop entries without unique identifiers
+            dict_transcript_info = dict( ( transcript_id, ( transcript_name, transcript_type ) ) for transcript_id, transcript_name, transcript_type in df_anno_transcript[ [ '_transcript_id', '_transcript_name', '_transcript_type' ] ].values ) # compose a dictionary containing transcript information
+            # apply the processed gene/transcript information to the entire annotation
+            def get_info_with_id( dict_info, str_id ) :
+                """
+                2024-12-04 22:45 by IEUM An
+                """
+                if isinstance( str_id, str ) and ( str_id in dict_info ) : # valid id has been given
+                    return [ str_id, ] + list( dict_info[ str_id ] )
+                else : # invalid id has been given
+                    return [ np.nan ] * 3
+            # add gene/transcript information
+            df_anno = df_anno.join( pd.DataFrame( 
+                list( get_info_with_id( dict_gene_info, gene_id ) + get_info_with_id( dict_transcript_info, transcript_id ) for gene_id, transcript_id in df_anno[ [ attr[ 'gene_id' ], attr[ 'transcript_id' ] ] ].values ),
+                index = df_anno.index.values,
+                columns = [ '_gene_id', '_gene_name', '_gene_type', '_transcript_id', '_transcript_name', '_transcript_type', ],
+            ) )
+            df_anno = df_anno[ ( ~ pd.isnull( df_anno[ [ '_gene_id', '_transcript_id' ] ].values ) ).sum( axis = 1 ) > 0 ] # drop records without gene or transcript id
+        else :
+            # for "gene" annotation
+            n = len( df_anno ) # retrieve the number of entries
+            df_anno[ '_gene_id' ] = make_values_unique( df_anno[ attr[ 'gene_id' ] ] ) if check_attr_key_validity( 'gene_id' ) else make_values_unique( n )
+            df_anno[ '_gene_name' ] = make_values_unique( df_anno[ attr[ 'gene_name' ] ] ) if check_attr_key_validity( 'gene_name' ) else df_anno[ '_gene_id' ]
+            df_anno[ '_gene_type' ] = df_anno[ attr[ 'gene_type' ] ] if check_attr_key_validity( 'gene_type' ) else np.full( n, 'unknown', dtype = object )
+        
+        
+        # select/deselect/filter specific entries
+        if 'select' in ns :
+            df_anno = bk.PD_Select( df_anno, ** ns[ 'select' ] )
+        if 'deselect' in ns :
+            df_anno = bk.PD_Select( df_anno, ** ns[ 'deselect' ], deselect = True )
+        def add_suffix_to_kwargs( kwargs, suffix : str ) :
+            """
+            2024-12-03 23:10 by IEUM An
+            """
+            kwargs_modified = dict( ( k + suffix, kwargs[ k ] ) for k in kwargs )
+            return kwargs_modified
+        if 'exclude_below' in ns :
+            df_anno = bk.PD_Threshold( df_anno, ** add_suffix_to_kwargs( ns[ 'exclude_below' ], 'b' ) )
+        if 'exclude_above' in ns :
+            df_anno = bk.PD_Threshold( df_anno, ** add_suffix_to_kwargs( ns[ 'exclude_above' ], 'a' ) )
+        
+        # filter specific genes
+        if 'gene_filter' in ns :
+            gene_filter = ns[ 'gene_filter' ]
+            if flag_gene_transcript_exon_annotation :
+                # for gene/transcript/exon annotation
+                df_anno_gene = bk.PD_Select( df_anno, feature = 'gene' ) # retrieve a subset of 'df_anno' containing only genes
+                # fiter with gene length
+                if 'min_len' in gene_filter :
+                    arr_gene_length = df_anno_gene[ 'end' ].values - df_anno_gene[ 'start' ].values
+                    df_anno_gene = df_anno_gene[ arr_gene_length >= gene_filter[ 'min_len' ] ]
+                # apply to the entire annotation
+                df_anno = bk.PD_Select( df_anno, _gene_id = set( df_anno_gene[ '_gene_id' ].values ) ) # only include '_gene_id' of the filtered genes
+            else :
+                # for "gene" annotation
+                # fiter with gene length
+                if 'min_len' in gene_filter :
+                    arr_gene_length = df_anno[ 'end' ].values - df_anno[ 'start' ].values
+                    df_anno = df_anno[ arr_gene_length >= gene_filter[ 'min_len' ] ]
+        # store the resulting annotation into the namespace
+        ns[ 'df_anno' ] = df_anno
+    
+        # return the result
+        return ns
+    
+    def load_annotation_input_files( l_annotation_input_files : list, flag_drop_the_chr_prefix_from_seqname : bool = True, str_format_default_id : str = "input_annotation#{index_of_annotation}", ) :
+        """
+        load and preprocess a list of given annotation input files
+        
+        l_annotation_input_files : list, # list of 'dict_setting_of_input_annotation_file'. check the documentation of 'load_annotation_input_file' method for more details.
+            # However, when a string value containing path to the input annotation file instead of 'dict_setting_of_input_annotation_file', following default values will be used to initialize 'dict_setting_of_input_annotation_file':
+            # 'id' : "input_annotation#{index_of_annotation}", # for example, "input_annotation#1", "input_annotation#2", and so on, where 'index_of_annotation' is 1-based index of the input annotation files. This default format string can be changed using the 'str_format_default_id' argument.
+            # 'attr' : {
+            #    'gene_id' : "gene_id", 
+            #    'gene_name' : "gene_name", 
+            #    'transcript_id' : "transcript_id", 
+            #    'transcript_name' : "transcript_name", 
+            #},
+        flag_drop_the_chr_prefix_from_seqname = True, # a boolean flag whether to drop the 'chr' prefix from the sequence names.
+        
+        # 2024-12-03 - 2024-12-05 21:32 IEUM An
+        """
+        for index_of_annotation, ns in enumerate( l_annotation_input_files ) : # ns = namespace
+            # convert simple string input to a dictionary
+            if isinstance( ns, str ) :
+                ns = { 'path' : ns, }
+            # add default values
+            # add default 'id'
+            if 'id' not in ns :
+                ns[ 'id' ] = str_format_default_id.format( index_of_annotation = index_of_annotation )
+            # add default 'attr' keys
+            default_attr = {
+                'gene_id' : "gene_id", 
+                'gene_name' : "gene_name", 
+                'transcript_id' : "transcript_id", 
+                'transcript_name' : "transcript_name", 
+            }
+            # initialize 'attr'
+            if 'attr' not in ns :
+                ns[ 'attr' ] = dict( )
+            ns[ 'attr' ] = { ** default_attr, ** ns[ 'attr' ] } # the given values will overwrite the default values.
+    
+            # update the list
+            l_annotation_input_files[ index_of_annotation ] = ns
+        
+        l_annotation = list( load_annotation_input_file( ns, flag_drop_the_chr_prefix_from_seqname = flag_drop_the_chr_prefix_from_seqname ) for ns in l_annotation_input_files )
+        return l_annotation
+
+#--- core components of ROBIN modules ---#
+if True : # code folding
+    def concurrent_merge_sort_using_pipe(
+        pipe_sender,
+        *l_pipe_receiver,
+        int_max_num_pipe_for_each_worker : int = 8,
+        int_buffer_size : int = 100,
+    ):
+        """
+        inputs:
+        'pipe_sender' : a pipe through which sorted decorated mtx records will be send. when all records are parsed, None will be given.
+        'l_pipe_receiver' : list of pipes through which decorated mtx records will be received. when all records are parsed, these pipes should return None.
+        'int_max_num_pipe_for_each_worker' : maximum number of input pipes for each worker. this argument and the number of input pipes together will determine the number of threads used for sorting
+        'int_buffer_size' : the number of entries for each batch that will be given to 'pipe_sender'. increasing this number will reduce the overhead associated with interprocess-communication through pipe, but will require more memory usage
+    
+        returns:
+        l_p : list of processes for all the workers that will be used for sorting
+        # 2022-07-27 06:50:22 by IEUM
+        """
+        import heapq
+    
+        # parse arguments
+        int_max_num_pipe_for_each_worker = int(int_max_num_pipe_for_each_worker)
+        # handle when no input pipes are given
+        if len(l_pipe_receiver) == 0:
+            pipe_sender.send(None)  # notify the end of records
+            return -1
+    
+        int_num_merging_layers = int(
+            np.ceil(math.log(len(l_pipe_receiver), int_max_num_pipe_for_each_worker))
+        )  # retrieve the number of merging layers.
+    
+        def __pipe_receiver_to_iterator(pipe_receiver):
+            """# 2022-07-25 00:59:22
+            convert pipe_receiver to iterator
+            """
+            while True:
+                l_r = pipe_receiver.recv()  # retrieve a batch of records
+                if l_r is None : # detect the end of stream
+                    break
+                for r in l_r:  # iterate through record by record, and yield each record
+                    yield r
+    
+        def __sorter(pipe_sender, *l_pipe_receiver):
+            """# 2022-07-25 00:57:56"""
+            # handle when no input pipes are given
+            if len(l_pipe_receiver) == 0:
+                pipe_sender.send(None)
+    
+            # perform merge sorting
+            l_buffer = []  # initialize a buffer
+            for r in heapq.merge(
+                *list(map(__pipe_receiver_to_iterator, l_pipe_receiver))
+            ):  # convert pipe to iterator
+                l_buffer.append(r)  # add a parsed record to the buffer
+                # flush the buffer
+                if len(l_buffer) >= int_buffer_size:  # if the buffer is full
+                    pipe_sender.send(l_buffer)  # return record in a sorted order
+                    l_buffer = []  # initialize the buffer
+            if len(l_buffer) > 0:  # if there are some records remaining in the buffer
+                pipe_sender.send(l_buffer)  # send the buffer
+            pipe_sender.send(None)  # notify the end of records
+    
+        l_p = (
+            []
+        )  # initialize the list that will contain all the processes that will be used for sorting.
+        while (
+            len(l_pipe_receiver) > int_max_num_pipe_for_each_worker
+        ):  # perform merge operations for each layer until all input pipes can be merged using a single worker (perform merge operations for all layers except for the last layer)
+            l_pipe_receiver_for_the_next_layer = (
+                []
+            )  # initialize the list of receiving pipes for the next layer, which will be collected while initializing workers for the current merging layer
+            for index_worker_in_a_layer in range(
+                int(np.ceil(len(l_pipe_receiver) / int_max_num_pipe_for_each_worker))
+            ):  # iterate through the workers of the current merging layer
+                pipe_sender_for_a_worker, pipe_receiver_for_a_worker = mp.Pipe()
+                l_pipe_receiver_for_the_next_layer.append(
+                    pipe_receiver_for_a_worker
+                )  # collect receiving end of pipes for the initiated workers
+                l_p.append(
+                    mp.Process(
+                        target=__sorter,
+                        args=[pipe_sender_for_a_worker]
+                        + list(
+                            l_pipe_receiver[
+                                index_worker_in_a_layer
+                                * int_max_num_pipe_for_each_worker : (
+                                    index_worker_in_a_layer + 1
+                                )
+                                * int_max_num_pipe_for_each_worker
+                            ]
+                        ),
+                    )
+                )
+            l_pipe_receiver = (
+                l_pipe_receiver_for_the_next_layer  # initialize the next layer
+            )
+        # retrieve a worker for the last merging layer
+        l_p.append(mp.Process(target=__sorter, args=[pipe_sender] + list(l_pipe_receiver)))
+        return l_p  # return the list of processes
+    
+    def retrieve_mapped_segments(
+        cigartuples,
+        pos_start,
+    ) :
+        """
+        return l_seq for given cigartuples (returned by pysam cigartuples) and 'pos_start' (0-based coordinates, assuming pos_start is 0-based coordinate)
+        # 2024-01-06 20:09:55 by IEUM
+        """
+        l_seg, start, int_aligned_length = list(), pos_start, 0
+        for operation, length in cigartuples:
+            if operation in {0, 2, 7, 8}:  # 'MD=X'
+                int_aligned_length += length
+            elif (
+                operation == 3
+            ):  # 'N' if splice junction appears, split the region and make a record
+                l_seg.append(
+                    (
+                        start,
+                        (start + int_aligned_length),
+                    )
+                )  # set the end position
+                start = start + int_aligned_length + length  # set the next start position
+                int_aligned_length = 0
+        if int_aligned_length > 0:
+            l_seg.append(
+                (
+                    start,
+                    (start + int_aligned_length),
+                )
+            )
+        return l_seg
+    
+    def mapped_segments_to_bitarray( ref_st, ref_en, l_seg ) :
+        """
+        convert mapped segments to bitarray
+        # 2024-10-29
+        """
+        # initialize the bitarray
+        ba = bitarray( ref_en - ref_st ) 
+        ba.setall( 0 )
+        for st, en in l_seg :
+            ba[ st - ref_st : en - ref_st ] = 1 # modify bitarray
+        return ba # return the bitarray
+    
+    def bitarray_to_mapped_segments( ref_st, ba, background = 0 ) -> list :
+        """
+        convert bitarray to mapped segments
+        find segment of a given bitarray for the given background 'background'. for example, when background = 0, find segment of 1
+    
+        # 2022-06-22 18:36:45 by IEUM An
+        updated to a new implementation that does not require generating a copy of the bitarray.
+    
+        # 2024-10-29 by IEUM An
+        """
+        # initialize
+        l_int_pos = []
+        state_of_interest = (background + 1) % 2 # (toggle bit) look for a non-background state
+        int_pos = 0
+    
+        while True:
+            int_pos = ba.find(state_of_interest, int_pos)
+            if int_pos < 0:
+                break
+            l_int_pos.append( ref_st + int_pos ) # add the offset 'ref_st'
+            state_of_interest = ( state_of_interest + 1 ) % 2 # toggle the state of interest
+        if len(l_int_pos) % 2 != 0:
+            l_int_pos.append( ref_st + len(ba)) # add the offset 'ref_st'
+        l_seg = np.array(l_int_pos).reshape(
+            (int(len(l_int_pos) / 2), 2)
+        ) # reshape a list of int_pos to list of segments
+        return l_seg
+    
+    def probabilistic_clustering_of_reads( 
+        ref_st, 
+        ref_en, 
+        l_r, 
+        random_seed = 42, 
+        int_min_num_base_pairs_overlapped_for_cluster_assignment : int = 10, 
+        float_min_prop_of_fusion_transcript_read_count_to_smaller_cluster_read_count_for_merging : float = 0.1,
+        flag_trim_outliers : bool = False,
+        float_min_coverage_relative_to_max_to_represent_clus_during_trimming : float = 0.01,
+        t_cluster_structures = None, # [for post-processing of 'composite' set of clusters, see 'cluster_reads_with_bootstrapping' code for more detail] if cluster structures are already known, count the number of reads for each cluster and identify fusion transcripts. For normal clustering operation, this argument should be set to None. 
+    ) :
+        """
+        cluster reads with a given random seed, using a linear time complexity algorithm.
+    
+        ref_st, # start position of the current clump of reads
+        ref_en, # end position of the current clump of reads
+        l_r, # list of reads (specifically, list of ( ic, l_seg, float_weight ) tuples, where 'ic' is the cell identifier, 'l_seg' is list of the mapped segments of each read, and 'float_weight' is the weight for each read).
+        random_seed = 42 # random seed to shuffle the reads
+        int_min_num_base_pairs_overlapped_for_cluster_assignment : int = 10, # the minimum number of base pairs overlapped with the representation of a cluster in order to assign each read to the cluster.
+        float_min_prop_of_fusion_transcript_read_count_to_smaller_cluster_read_count_for_merging : float = 0.1, # during the merging operation, two (or more) number of clusters will be merged if the number of reads supporting the presence of fusion transcripts between two read clusters is larger than the number of reads in the smallest read cluster times 'float_min_prop_of_fusion_transcript_read_count_to_smaller_cluster_read_count_for_merging'. For example, for merging of cluster 1 with 100 reads and cluster 2 with 1000 reads, detecting 10 reads supporting fusion transcripts between cluster 1 and cluster 2 will be sufficient to initiate merging between the two clusters.
+        flag_trim_outliers : bool = False, # for trimming outliers during the construction of a representative bitarray mask for each cluster profile update. Please refer to 'float_min_coverage_relative_to_max_to_represent_clus_during_trimming' for more details. By default, False
+        float_min_coverage_relative_to_max_to_represent_clus_during_trimming : float = 0.01, # minimum ratio of the coverage at the current position to the max coverage in order for the current position to be incooperated into the bitarray representation of the cluster
+        t_cluster_structures = None, # if cluster structures are already known, count the number of reads for each cluster and identify fusion transcripts
+        
+        # 2024-10-29 ~ 2024-11-13 01:30 by IEUM AN
+        """
+        # identify the run mode
+        flag_evaluate_known_clusters = t_cluster_structures is not None
+    
+        # initialize the run
+        len_clump = ref_en - ref_st # length of the read clump
+        n_reads = len( l_r ) # retrieve number of reads
+        arr_idx = np.arange( 0, n_reads, 1 ) # intialize indices of reads
+    
+        ### initial clustering operation
+        # initialize databases
+        l_clus = [ ] # initialize read cluster database
+        """
+        structure of read cluster object
+        (1) [1] [bitarray] representative bitarray representation of the read cluster
+            [2] [(64 bit) int arrays] the raw coverage of the read cluster, which is used for building the representative bitarray representation of the read cluster
+        (2) [list] the list of indices of reads assigned to the read cluster
+        (3) [set] a set of indices of clusters that the current cluster represent (initially the set only contains itself, but will include other clusters or becomes an empty set once the cluster-merging operation begins). 
+        """
+        l_idx_r_fusion = [ ] # list of indices of reads that are likely 'fusion' transcripts   
+        
+        if not flag_evaluate_known_clusters :
+            # randomly iterate through reads when clustering operation is performed
+            # initialize the random number generator (takes ~20 us)
+            rng = np.random.default_rng( random_seed ) 
+            rng.shuffle( arr_idx ) # randomly shuffle the reads
+        else :
+            # initialize the read cluster database with the known cluster structures
+            flag_trim_outliers = False # the mask will not be updated using the outlier detection algorithm
+            l_t_cluster_structure = list( t_cluster_structures )
+            l_clus = list(
+                [
+                    [ 
+                        mapped_segments_to_bitarray( ref_st, ref_en, list( t_cluster_structure ) ),
+                        None, # flag_trim_outliers = False
+                    ],
+                    list( ), # empty list
+                    None, # no cluster ID assignment during the initial clustering operation
+                ]
+                for t_cluster_structure in l_t_cluster_structure 
+            )
+    
+        # perform read clustering
+        for idx in arr_idx : # iterate through randomly shuffled indices of reads
+            l_seg = l_r[ idx ][ 1 ] # retrieve mapped segments of the current read
+            ba_r = mapped_segments_to_bitarray( ref_st, ref_en, l_seg ) # retrieve bitarray representation of the current reads
+    
+            # initialize before iteration of clusters
+            l_idx_clus_assigned = [ ]
+            # iterate through read clusters
+            for idx_clus, clus in enumerate( l_clus ) : 
+                # check overlap with the current cluster
+                if ( clus[ 0 ][ 0 ] & ba_r ).count( ) >= int_min_num_base_pairs_overlapped_for_cluster_assignment :
+                    l_idx_clus_assigned.append( idx_clus ) # update the cluster assignment
+                # if 'fusion' transcript has been detected, exit the loop immediately (will be collectively analyzed in the later steps)
+                if len( l_idx_clus_assigned ) > 1 :
+                    break
+    
+            # determine the cluster assignment of the read
+            int_num_clus_overlapped = len( l_idx_clus_assigned ) # retrieve the number of clusters overlapped
+            if int_num_clus_overlapped == 1 : # most likely
+                # if the current read was successfully assigned to a single cluster, update the cluster database
+                clus = l_clus[ l_idx_clus_assigned[ 0 ] ] # retrieve the cluster
+                # update the representation
+                if flag_trim_outliers :
+                    # update the coverage
+                    cov = clus[ 0 ][ 1 ]
+                    for st, en in l_seg :
+                        cov[ st - ref_st : en - ref_st ] += 1 # update coverage
+                    clus[ 0 ][ 1 ] = cov 
+                    # perform trimming
+                    max_cov = cov.max( ) # retrieve the max coverage
+                    clus[ 0 ][ 0 ] = BA.to_bitarray( ( cov / max_cov ) >= float_min_coverage_relative_to_max_to_represent_clus_during_trimming ) # update the bitarray representation of the cluster
+                else :
+                    # perform simple OR operation to update the bitarray representation
+                    clus[ 0 ][ 0 ] = clus[ 0 ][ 0 ] | ba_r 
+                clus[ 1 ].append( idx ) # update the list of reads
+            elif int_num_clus_overlapped == 0 : # second most likely
+                # if the current read has not been overlapped with any of the existing clusters, initialize a new cluster
+                l_clus.append( [
+                    [
+                        ba_r, #    (1) [1] [bitarray] representative bitarray representation of the read cluster
+                        ( BA.to_array( ba_r ).astype( int ) ) if flag_trim_outliers else None, #        [2] [(64 bit) int arrays] the raw coverage of the read cluster, which is used for building the representative bitarray representation of the read cluster
+                    ],
+                    [ idx ], # (2) [list] the list of indices of reads assigned to the read cluster
+                    None, # (3) [set] a set of indices of clusters that the current cluster represent (initially the set only contains itself, but will include other clusters once the cluster-merging operation begins) # assignment new cluster ID ('idx_clus') will be postponed until the initial clustering operation is completed
+                ] )
+            else : # rare events (fusion or abnormal transcripts)
+                # if possible 'fusion' transcript has been detected, collect the read for further processing
+                l_idx_r_fusion.append( idx ) # collect the read for further processing
+    
+        # sort the cluster database so that the cluster with the largest read count becomes the first entry in the database, allowing iteration of clusters based on the cluster size (in the descending order).
+        arrsort_clus = np.flip( np.argsort( list( len( clus[ 1 ] ) for clus in l_clus ) ) ) # count the number of reads assigned to each cluster and sort the clusters by the total number of reads assigned to each cluster in the descending order
+        l_clus_new = [ ]
+        for idx_clus_after_sorting, idx_clus_before_sorting in enumerate( arrsort_clus ) :
+            clus = l_clus[ idx_clus_before_sorting ]
+            clus[ 2 ] = { idx_clus_after_sorting }
+            l_clus_new.append( clus )
+        l_clus = l_clus_new
+                
+        # profile 'fusion' transcripts once the initial clustering process is completed
+        dict_fusion = dict( )
+        """
+        structure of "fusion" transcript object
+        (1) list of indices of reads belonging to the 'fusion' entry
+        """
+        # perform read clustering
+        for idx in l_idx_r_fusion : # iterate through the reads that are possible 'fusion' transcripts
+            l_seg = l_r[ idx ][ 1 ] # retrieve mapped segments of the current read
+            ba_r = mapped_segments_to_bitarray( ref_st, ref_en, l_seg ) # retrieve bitarray representation of the current reads
+    
+            # initialize before iteration of clusters
+            l_idx_clus_assigned = [ ]
+            # iterate through read clusters once initial clustering operation was completed
+            for idx_clus, clus in enumerate( l_clus ) : 
+                # check overlap with the current cluster
+                if ( clus[ 0 ][ 0 ] & ba_r ).count( ) >= int_min_num_base_pairs_overlapped_for_cluster_assignment :
+                    l_idx_clus_assigned.append( idx_clus ) # update the cluster assignment
+    
+            # retrieve 'fusion' id determine the cluster assignment of the read
+            # assign the read to the specific 'fusion' bin
+            id_fusion = tuple( l_idx_clus_assigned ) # retrieve the ID the 'fusion' transcript
+            if id_fusion not in dict_fusion :
+                dict_fusion[ id_fusion ] = [ idx ] 
+            else :
+                dict_fusion[ id_fusion ].append( idx )
+    
+        # order the 'fusion' entries based on the read count in the descending order
+        # survey the 'fusion' entries
+        l_id_fusion = [ ]
+        l_n_reads = [ ]
+        for id_fusion in dict_fusion :
+            l_id_fusion.append( id_fusion )
+            l_n_reads.append( len( dict_fusion[ id_fusion ] ) )
+        # sort the 'fusion' entries and create a ordered dictionary
+        l_t = [ ]
+        for idx_fusion in np.flip( np.argsort( l_n_reads ) ) :
+            id_fusion = l_id_fusion[ idx_fusion ]
+            l_t.append( ( id_fusion, dict_fusion[ id_fusion ] ) ) # construct the ordered dictionary
+        dict_fusion = collections.OrderedDict( l_t )
+    
+        # perform cluster merging operations
+        if ( not flag_evaluate_known_clusters ) and ( len( dict_fusion ) > 0 ) : # there should be at least one 'fusion' entry in the database to start the cluster merging operation
+            # initialize
+            n_cluster_overlapped = 2
+            n_cluster_overlapped_max = max( len( id_fusion ) for id_fusion in dict_fusion )
+            n_fusion_entries_prev = None # for resetting the counter
+            while len( dict_fusion ) > 0 : # until all entries are processed, repeat the loop
+                for id_fusion in list( dict_fusion ) : # iterate through unique 'fusion' entries
+                    # start
+                    l_idx_r_curr_fusion = dict_fusion[ id_fusion ]
+                    n_reads_curr_fusion = len( l_idx_r_curr_fusion ) # number of reads for the current 'fusion' entry
+                    
+                    # ignore 'fusion' involving larger number of clusters than 'n_cluster_overlapped'
+                    if len( id_fusion ) > n_cluster_overlapped :
+                        continue
+        
+                    # retrieve list of relevent clusters
+                    set_idx_clus_overlapped = set( id_fusion ) # retrieve set of indices of overlapped clusters before the merging operation
+                    l_idx_clus_overlapped = list( idx_clus for idx_clus, clus in enumerate( l_clus ) if len( set_idx_clus_overlapped.intersection( clus[ 2 ] ) ) > 0 ) # retrieve indices of overlapped clusters during the merging operation
+                    l_n_reads = list( len( l_clus[ idx_clus ][ 1 ] ) for idx_clus in l_idx_clus_overlapped ) # retrieve number of reads for each overlapped cluster
+        
+                    # identify 'largest' cluster among the overlapped clusters
+                    idx_clus_largest = l_idx_clus_overlapped[ np.argmax( l_n_reads ) ] # retrieve the index of the largest cluster            
+        
+                    # determine whether to perform merging
+                    if len( l_idx_clus_overlapped ) == 1 : # if current 'fusion' entry is actually a subset of one of the clusters
+                        flag_merge = True
+                    else :
+                        # when two or more number of clusters are evaluated for merging
+                        idx_clus_smaller = l_idx_clus_overlapped[ np.argmin( l_n_reads ) ] # retrieve the index of the smallest cluster
+                        flag_merge = ( n_reads_curr_fusion / len( l_clus[ idx_clus_smaller ][ 1 ] ) ) >= float_min_prop_of_fusion_transcript_read_count_to_smaller_cluster_read_count_for_merging # make a decision whether to merge the clusters based on the relative size of the smallest cluster to the number of reads representing the fusion transcripts.
+                        
+                    # merge clusters and update the cluster database
+                    if flag_merge :
+                        # initialize
+                        ba_clus_merged = bitarray( len_clump )
+                        ba_clus_merged.setall( 0 )
+                        cov_clus_merged = np.zeros( len_clump, dtype = int ) if flag_trim_outliers else None
+                        l_idx_r_clus_merged = [ ]
+                        set_idx_clus_merged = set( )
+                        # merge clusters
+                        for idx_clus in l_idx_clus_overlapped :
+                            clus = l_clus[ idx_clus ]
+                            ba_clus_merged = ba_clus_merged | clus[ 0 ][ 0 ]
+                            if flag_trim_outliers :
+                                cov_clus_merged = cov_clus_merged + clus[ 0 ][ 1 ]
+                            l_idx_r_clus_merged.extend( clus[ 1 ] )
+                            set_idx_clus_merged.update( clus[ 2 ] )
+                        # add 'fusion' reads to the merged cluster
+                        l_idx_r_clus_merged.extend( l_idx_r_curr_fusion ) # collect the 'fusion' reads
+                        # update the binary mask representation (and optionally, the coverage) of the cluster
+                        for idx_r in l_idx_r_curr_fusion : # iterate through reads
+                            l_seg = l_r[ idx_r ][ 1 ] # retrieve mapped segments
+                            ba_r = mapped_segments_to_bitarray( ref_st, ref_en, l_seg ) # retrieve bitarray representation of the current reads
+                            ba_clus_merged = ba_clus_merged | ba_r
+                            if flag_trim_outliers :
+                                for st, en in l_seg :
+                                    cov_clus_merged[ st - ref_st : en - ref_st ] += 1
+                        
+                        # update the largest cluster (which will now include the other clusters)
+                        l_clus[ idx_clus_largest ] = [
+                            [ 
+                                ba_clus_merged,
+                                cov_clus_merged,
+                            ],
+                            l_idx_r_clus_merged, 
+                            set_idx_clus_merged,
+                        ]
+                        
+                        # delete the other clsuters that were merged with the largest cluster
+                        for idx_clus in l_idx_clus_overlapped :
+                            if idx_clus != idx_clus_largest :
+                                l_clus[ idx_clus ] = [
+                                    None,
+                                    list( ),
+                                    set( ),
+                                ] # an empty cluster
+                                
+                        # wrap-up
+                        dict_fusion.pop( id_fusion ) # drop the current 'fusion' entry
+            
+                # once all 'fusion' entries involving 'n_cluster_overlapped' number of clusters have been evaluated for merging, increase 'n_cluster_overlapped' counter, until all 'fusion' entries are evaluated at least once
+                n_cluster_overlapped += 1
+        
+                # if 'n_cluster_overlapped' exceed 'n_cluster_overlapped_max', check whether the iteration changed cluster memberships, and if not, exit.
+                if n_cluster_overlapped_max < n_cluster_overlapped :
+                    if ( n_fusion_entries_prev is not None ) and ( len( dict_fusion ) == n_fusion_entries_prev ) : # if number of fusion entries has not changed during the current merging operation, exit
+                        break
+                    n_fusion_entries_prev = len( dict_fusion ) # update the number of 'fusion' entries
+    
+        # post-process read clustering results
+        # initialize
+        l_clus_finalized = [ ]
+        dict_mapping_idx_clus = dict( )
+        for idx_clus, clus in enumerate( l_clus ) :
+            n_reads = len( clus[ 1 ] )
+            if n_reads > 0 : # if the cluster has non-0 number of reads
+                dict_mapping_idx_clus[ idx_clus ] = len( l_clus_finalized ) # add the mapping between 'idx_clus' before filtering and the finalized 'idx_clus' after the filtering (len( l_clus_finalized ) indicates the "idx_clus" after the filtering)
+                # add finalized 'read-cluster' record
+                l_clus_finalized.append( [
+                    bitarray_to_mapped_segments( ref_st, clus[ 0 ][ 0 ] ), # retrieve the representative mapped segments of the read cluster
+                    clus[ 1 ], # list of indices of reads assigned to the cluster
+                ] )
+        # update 'dict_fusion' (OrderedDict) using 'dict_mapping_idx_clus' mapping
+        dict_fusion = collections.OrderedDict( list( ( tuple( dict_mapping_idx_clus[ idx_clus ] for idx_clus in id_fusion if idx_clus in dict_mapping_idx_clus ), dict_fusion[ id_fusion ] ) for id_fusion in dict_fusion ) )
+        return l_clus_finalized, dict_fusion
+
+
+    def cluster_reads_with_bootstrapping( 
+        ref_st, 
+        ref_en, 
+        l_r, 
+        random_seed = 42, 
+        int_min_num_base_pairs_overlapped_for_cluster_assignment : int = 10, 
+        float_min_prop_of_fusion_transcript_read_count_to_smaller_cluster_read_count_for_merging : float = 0.1,
+        flag_trim_outliers : bool = False,
+        float_min_coverage_relative_to_max_to_represent_clus_during_trimming : float = 0.01,
+        int_initial_num_independent_runs : int = 3,
+        int_additional_num_independent_runs_for_each_step : int = 2,
+        int_min_num_of_independent_runs_for_finalizing_each_cluster : int = 2,
+        float_max_wall_time_in_seconds : float = 300, 
+    ) :
+        """
+        cluster reads using a probablistic algorithm, repeating the run (hence, similar to subsampling in bootstrapping) until convergence could be identified.
+        This method has a linear time complexity (approximately), meaning that the computation time will increase linearly as the number of reads increases (or alternatively, the region of chromosome covered by these reads increasing).
+        
+        ----- positional arguments (required) -----
+        ref_st, # start position of the current clump of reads
+        ref_en, # end position of the current clump of reads
+        l_r, # list of reads (specifically, list of ( ic, l_seg, float_weight ) tuples, where 'ic' is the cell identifier, 'l_seg' is list of the mapped segments of each read, and 'float_weight' is the weight for each read).
+    
+        ----- bootstrapping (random sampling) based clustering -----
+        random_seed = 42 # random seed to shuffle the reads for probablistic clustering of reads.
+        int_initial_num_independent_runs : int = 3, # the initial number of bootstrapping runs to estimate cluster structures. The minimum number of independent runs is 3.
+        int_additional_num_independent_runs_for_each_step : int = 2, # the number of bootstrapping runs to perform additionally for each step.
+        int_min_num_of_independent_runs_for_finalizing_each_cluster : int = 2, # each individual cluster should be repeatedly detected at least this number of independent clustering runs to be included in the final clustering result.
+        float_max_wall_time_in_seconds : float = 1200, # max allowed wall time of this method in seconds. If more than 'float_max_wall_time_in_seconds' seconds elapsed, the method will exit automatically, returning an empty clustering result.
+    
+        ----- (arguments to the 'probabilistic_clustering_of_reads' method) -----
+        float_min_prop_of_fusion_transcript_read_count_to_smaller_cluster_read_count_for_merging : float = 0.1, # during the merging operation, two (or more) number of clusters will be merged if the number of reads supporting the presence of fusion transcripts between two read clusters is larger than the number of reads in the smallest read cluster times 'float_min_prop_of_fusion_transcript_read_count_to_smaller_cluster_read_count_for_merging'. For example, for merging of cluster 1 with 100 reads and cluster 2 with 1000 reads, detecting 10 reads supporting fusion transcripts between cluster 1 and cluster 2 will be sufficient to initiate merging between the two clusters.
+        int_min_num_base_pairs_overlapped_for_cluster_assignment : int = 10, # the minimum number of base pairs overlapped with the representation of a cluster in order to assign each read to the cluster.
+        flag_trim_outliers : bool = False, # for trimming outliers during the construction of a representative bitarray mask for each cluster profile update. Please refer to 'float_min_coverage_relative_to_max_to_represent_clus_during_trimming' for more details. By default, False
+        float_min_coverage_relative_to_max_to_represent_clus_during_trimming : float = 0.01, # minimum ratio of the coverage at the current position to the max coverage in order for the current position to be incooperated into the bitarray representation of the cluster
+    
+        
+        # 2024-11-03 ~ 2024-11-13 01:00 by IEUM AN
+        """
+        timestamp_st = time.time( ) # retrieve the start time stamp
+        
+        # handle invalid arguments
+        if int_initial_num_independent_runs < 3 :
+            int_initial_num_independent_runs = 3
+        
+        # perform bootstrapping-based clustering
+        # initialize functions
+        def get_entire_cluster_structures( l_clus ) :
+            ''' get a tuple representing the entire set of cluster structures from a clustering result '''
+            l_t_cluster_structure = sorted( tuple( ( st, en ) for st, en in clus[ 0 ] ) for clus in l_clus ) # sort cluster structures 
+            t_cluster_structures = tuple( l_t_cluster_structure )
+            return l_t_cluster_structure, t_cluster_structures
+    
+        # initialize 
+        int_num_new_runs = int_initial_num_independent_runs 
+        # initialize databases
+        l_res = [ ]
+        dict_counter_entire_cluster_structures = dict( )
+        dict_counter_cluster_structure = dict( )
+        entire_struc_finalized = None
+        count_entire_struc_most_freq = None
+        flag_composite_clusters = False # a flag indicating whether the clustering results were composed from an ensemble of clustering results
+        int_num_runs = 0
+        while True : # start the infinite loop
+            # exit the infinite loop once the maximum allowed wall time has been spent
+            if ( time.time( ) - timestamp_st ) > float_max_wall_time_in_seconds :
+                break
+            
+            # run initial/additional probabilistic read clustering operations
+            for _ in range( int_num_new_runs ) :
+                res = probabilistic_clustering_of_reads( 
+                    ref_st, 
+                    ref_en, 
+                    l_r, 
+                    random_seed = random_seed + len( l_res ), # increase the random seed by the number of runs, so that different random seed is used for each run.
+                    int_min_num_base_pairs_overlapped_for_cluster_assignment = int_min_num_base_pairs_overlapped_for_cluster_assignment,
+                    float_min_prop_of_fusion_transcript_read_count_to_smaller_cluster_read_count_for_merging = float_min_prop_of_fusion_transcript_read_count_to_smaller_cluster_read_count_for_merging,
+                    flag_trim_outliers = flag_trim_outliers,
+                    float_min_coverage_relative_to_max_to_represent_clus_during_trimming = float_min_coverage_relative_to_max_to_represent_clus_during_trimming,
+                ) # run probabilistic read clustering operation
+                l_res.append( res ) # collect clustering result 
+                l_clus, dict_fusion = res # parse result
+        
+                # update the cluster databases
+                # retrieve list of cluster structures
+                l_t_cluster_structure, t_cluster_structures = get_entire_cluster_structures( l_clus )
+                bk.COUNTER( l_t_cluster_structure, dict_counter = dict_counter_cluster_structure )
+                bk.COUNTER( [ t_cluster_structures ], dict_counter = dict_counter_entire_cluster_structures ) # count the entire cluster structures
+        
+            # once the clustering operations are completed, analyze the result to determine the cluster structure
+            # initialize 
+            int_num_runs = len( l_res ) # retrieve the total number of clustering operation runs
+        
+            # if a certain group of cluster structures is produced by the majority of clustering operations (larger than 0.5), finalize the clustering operation.
+            l_entire_struc_most_freq, count_entire_struc_most_freq = bk.DICTIONARY_Find_keys_with_max_value( dict_counter_entire_cluster_structures )
+            if ( count_entire_struc_most_freq / int_num_runs ) > 0.5 :
+                entire_struc_finalized = l_entire_struc_most_freq[ 0 ] # finalize the clustering result # there should be only one 'entire_struc_most_freq' since the cutoff value is 0.5
+                break
+        
+            # check whether the 'composite' clusters can be successfully generated
+            ba_finalized = bitarray( ref_en - ref_st )
+            ba_finalized.setall( 0 )
+            l_cluster_structure_finalized = [ ]
+        
+            # collect clusters that are present in the majority of the runs (which ensure these clusters are not overlapped with each other clusters)
+            remaining_cluster_structures = [ ]
+            for cluster_structure in dict_counter_cluster_structure :
+                n_runs_detected = dict_counter_cluster_structure[ cluster_structure ]
+                l_seg = list( cluster_structure )
+                if ( n_runs_detected / int_num_runs ) > 0.5 :
+                    l_cluster_structure_finalized.append( cluster_structure ) # add the cluster to the list 
+                    ba_finalized = ba_finalized | mapped_segments_to_bitarray( ref_st, ref_en, l_seg ) # update the mask
+                else :
+                    remaining_cluster_structures.append( ( cluster_structure, [ mapped_segments_to_bitarray( ref_st, ref_en, l_seg ), n_runs_detected ] ) )
+            dict_remaining_cluster_structures = collections.OrderedDict( list( remaining_cluster_structures[ i ] for i in np.flip( np.argsort( list( l[ 1 ][ -1 ] for l in remaining_cluster_structures ) ) ) ) )
+        
+            flag_additional_runs_required = False
+            while len( dict_remaining_cluster_structures ) == 0 :
+                # drop the cluster structures overlapped with the binary masek representing the currently collected set of clusters.
+                for cs in list( dict_remaining_cluster_structures ) :
+                    if ( dict_remaining_cluster_structures[ cs ][ 0 ] & ba_finalized ).count( ) >= int_min_num_base_pairs_overlapped_for_cluster_assignment :
+                        dict_remaining_cluster_structures.pop( cs )
+        
+                cs_most_frequent = list( dict_remaining_cluster_structures )[ 0 ]
+                ba_cs_most_frequent, n_runs_detected = dict_remaining_cluster_structures.pop( cs_most_frequent )
+    
+                # if 'cs_most_frequent' cannot be used due to not meeting the requirement 'int_min_num_of_independent_runs_for_finalizing_each_cluster', perform additional runs
+                if n_runs_detected < int_min_num_of_independent_runs_for_finalizing_each_cluster :
+                    flag_additional_runs_required = True
+                    break
+                    
+                l_cluster_structure_finalized.append( cs_most_frequent )
+                ba_finalized = ba_finalized | ba_cs_most_frequent # update the mask
+            
+            # if additional runs are required, initialize the next round of analysis
+            int_num_new_runs = int_additional_num_independent_runs_for_each_step
+            if flag_additional_runs_required :
+                continue # perform additional runs
+        
+            # validate the composite set of clusters
+            entire_struc_composite = tuple( sorted( l_cluster_structure_finalized ) ) # retrieve entire cluster structures
+        
+            # if this group of 'composite' cluster structures is same as one of the clustering outputs, finalize the clustering result and exit the loop
+            if entire_struc_composite in dict_counter_entire_cluster_structures :
+                # this clustering result will not be considered 'composite'
+                entire_struc_finalized = entire_struc_composite # finalize the clustering result
+                break
+        
+            # if this group of 'composite' cluster structures has not been detected in the previous probablistic clustering runs, check the validity of the composite clustering result using the entire set of reads
+            flag_composite_clustering_validity_check_failed = False # a flag indicating that the composite clustering result failed the validity check, thus indicating that the composite cluster was discarded and instead the most frequent (but not the majority of) set of clustering structures was selected.
+            for _, l_seg, _ in l_r : # iterate through reads (sorting is not required for validating the clustering result)
+                if ( ba_finalized & mapped_segments_to_bitarray( ref_st, ref_en, l_seg ) ).count( ) < int_min_num_base_pairs_overlapped_for_cluster_assignment : # 'ba_finalize' represents mask of the composite clusters # detect whether the introduction of new cluster into currently finalized set of clusters is required.
+                    flag_composite_clustering_validity_check_failed = True
+                    break # exit the loop
+                    
+            # if the composite cluster passed the validity check, finalize the cluster 
+            if flag_composite_clustering_validity_check_failed :
+                # if the validity check has failed, select the most frequent set of clusters 
+                if ( count_entire_struc_most_freq < int_min_num_of_independent_runs_for_finalizing_each_cluster ) or ( len( l_entire_struc_most_freq ) > 1 ) : # (if the number of occurrences is smaller than 'int_min_num_of_independent_runs_for_finalizing_each_cluster' or more than one candidate sets are available, perform additional runs)
+                    continue # perform additional runs
+                else :
+                    entire_struc_finalized = l_entire_struc_most_freq[ 0 ] # finalize the clustering result
+                    break
+            else :
+                # if the composite cluster passed the validity check, consider the clustering result as a valid composite set of clusters, and finalize the clustering result.
+                flag_composite_clusters = True 
+                entire_struc_finalized = entire_struc_composite # finalize the clustering result
+                break
+    
+        # when allowed wall time is used up, # return the best clustering result 
+        if entire_struc_finalized is None : 
+            # return [ ], collections.OrderedDict( [ ] ), { 'n_bootstrapping_runs' : 0, 'n_most_freq_clustering_result' : 0, 'flag_composite_clusters' : False, 'wall_time_in_seconds' : float_max_wall_time_in_seconds } # return an empty clustering result (deprecated)
+            int_num_runs = len( l_res ) # retrieve the number of runs
+            dict_cluster_structure_weight = dict( ( cs, dict_counter_cluster_structure[ cs ] / int_num_runs ) for cs in dict_counter_cluster_structure ) # calculate weight of each cluster structure (the more frequent the cluster is, the higher the weight).
+            l_score = [ ]
+            for l_clus, dict_fusion in l_res : # for each result
+                l_score.append( sum( len( clus[ 1 ] ) * dict_cluster_structure_weight[ tuple( ( st, en ) for st, en in clus[ 0 ] ) ] for clus in l_clus ) ) # score the clustering result based on cluster weight and cluster size (i.e., the number of reads assigned to the cluster)
+            idx_res_with_max_score = np.argmax( l_score ) # retrieve index of the clustering result with the max score
+            l_t_cluster_structure, t_cluster_structures = get_entire_cluster_structures( l_res[ idx_res_with_max_score ][ 0 ] )
+            entire_struc_finalized = t_cluster_structures # finalize the clustering result
+        
+        # process finalized clustering result and return the result
+        # initialize
+        l_clus_final = None
+        dict_fusion_final = None
+        # for composite cluster, re-identify possible fusion transcripts
+        if flag_composite_clusters :
+            # finalize the clustering result (post-processing step)
+            l_clus_final, dict_fusion_final = probabilistic_clustering_of_reads( 
+                ref_st, 
+                ref_en, 
+                l_r, 
+                random_seed = random_seed, # (not relevent for the operation. reads will not be shuffled)
+                int_min_num_base_pairs_overlapped_for_cluster_assignment = int_min_num_base_pairs_overlapped_for_cluster_assignment,
+                float_min_prop_of_fusion_transcript_read_count_to_smaller_cluster_read_count_for_merging = float_min_prop_of_fusion_transcript_read_count_to_smaller_cluster_read_count_for_merging, # (not relevent for the operation. clusters will not be merged.)
+                flag_trim_outliers = False, # (not relevent for the operation) no trimming is required, since cluster structures have been already finalized.
+                float_min_coverage_relative_to_max_to_represent_clus_during_trimming = float_min_coverage_relative_to_max_to_represent_clus_during_trimming, # (not relevent for the operation)
+                t_cluster_structures = entire_struc_finalized, # re-evaluate the finalized clustering results
+            ) # run probabilistic read clustering operation
+        else :
+            # for the clustering result that is not composite (i.e., came from a single probablistic clustering operation run), retrieve the FIRST (for reproducibility) run that produced the result
+            for l_clus, dict_fusion in l_res :
+                l_t_cluster_structure, t_cluster_structures = get_entire_cluster_structures( l_clus )
+                if t_cluster_structures == entire_struc_finalized :
+                    # finalize the clustering result (post-processing step)
+                    l_clus_final = l_clus
+                    dict_fusion_final = dict_fusion
+                    break
+    
+        # compose metadata for the clustering process
+        dict_meta = {
+            'n_bootstrapping_runs' : len( l_res ), # total number of independent runs
+            'n_most_freq_clustering_result' : count_entire_struc_most_freq,
+            'flag_composite_clusters' : flag_composite_clusters,
+            'wall_time_in_seconds' : time.time( ) - timestamp_st,
+        }
+        return l_clus_final, dict_fusion_final, dict_meta # return the finalized clustering result, along with the metadata
+
+#--- I/O related components ---#
+if True :
+    # functions for storing and retrieving large data objects to and from the storage, respectively.
+    #--- basic I/O methods ---#
+    if True :
+        def check_nan( val ) :
+            """
+            efficiently detect np.nan 
+            2024-12-07 11:32 by IEUM An
+            """
+            return isinstance( val, float ) and np.isnan( val )
+    
+        def apply_func_to_a_value( val, func ) :
+            """
+            apply function to a value that might be np.nan or not.
+            2024-12-07 11:42 by IEUM An
+            """
+            return val if check_nan( val ) else func( val )
+            
+        def base64_decode(str_content):
+            """# 2022-07-04 23:19:18
+            receive base64-encoded string and return decoded bytes
+            """
+            return base64.b64decode(str_content.encode("ascii"))
+        
+        def base64_encode(byte_content):
+            """# 2022-07-04 23:19:18
+            receive bytes and return base64-encoded string
+            """
+            return base64.b64encode(byte_content).decode("ascii")
+        
+        def pickle_bytes_to_obj(bytes_content):
+            """# 2022-05-25 01:50:46
+            convert bytes to df using pickle
+            """
+            # uncompress the gzipped bytes
+            with io.BytesIO() as file:
+                file.write(bytes_content)
+                file.seek(0)
+                obj = pickle.load(file)
+            return obj
+        
+        def pickle_obj_to_bytes(obj):
+            """# 2022-05-25 01:56:37
+            convert a python dataframe to bytes using pickle
+            """
+            # compress the data
+            file = io.BytesIO()
+            pickle.dump(obj, file, protocol=pickle.HIGHEST_PROTOCOL)
+        
+            # retrieve the converted content
+            file.seek(0)
+            bytes_content = file.read()
+            file.close()
+            return bytes_content
+    
+        def obj_to_base64_encoded_pickle( obj ) :
+            """ 
+            convert python object to base64-encoded pickled python object (character-based serialization)
+            2024-12-07 by IEUM An
+            """
+            return base64_encode( pickle_obj_to_bytes( obj ) )
+            
+        def base64_encoded_pickle_to_obj( str_obj ) :
+            """ 
+            convert python object to base64-encoded pickled python object (character-based serialization)
+            2024-12-07 by IEUM An
+            """
+            return pickle_bytes_to_obj( base64_decode( str_obj ) )
+            
+        def write_a_line_of_tsv_file( newfile, l_value ) :
+            """
+            newfile # output file, open with 'wt' mode.
+            
+            2024-11-14 1:00 by IEUM An
+            """
+            newfile.write( '\t'.join( str( e ) for e in l_value ) + '\n' )
+        
+    class StackedPickles :
+        """
+        A class for writing and reading data from the 'stacked_pickles' format, which is constructed by concatenated pickle files of Python objects.
+        A 'stacked_pickles' file is always accompanied by a 'stacked_pickles index' file, which contains locations of all the python objects containined in the 'stacked_pickles' file.
+    
+        l_name_col_metadata : list = [ ], # When, 'mode' == 'r', list of names of the metadata columns can be given. The metadata will be written to the 'stacked_pickles index' file, along with start and end locations of the bytes of the objects.
+    
+        2024-11-18 21:30 - 2024-11-18 22:00 by IEUM An, 2024-12-15 12:07 by IEUM An
+        """
+        def __init__( self, path_prefix : str, mode : str = 'r', l_name_col_metadata : list = [ ], ) :
+            """
+            equivalent to 'open' operation
+            2024-11-18 21:30 - 2024-11-18 22:00 by IEUM An, 2024-12-15 12:07 by IEUM An
+            """
+            # initialize
+            self._idx_object_for_iteration = None # None indicate iteration is stopped
+            self._flag_closed = False
+            self._true_if_mode_is_r_false_if_mode_is_w = mode != 'w'
+            
+            # compose the paths to the data files
+            self._path_file_data = f"{path_prefix}.stacked_pickles"
+            self._path_file_data_index = f"{path_prefix}.stacked_pickles.index.tsv.gz"
+            # open files
+            if self._true_if_mode_is_r_false_if_mode_is_w :
+                # read mode
+                self._file_data = open( self._path_file_data, 'rb+' )
+                self._df_data_index = pd.read_csv( self._path_file_data_index, sep = '\t' ) # read the index file
+                self._l_name_col_data_index = list( self._df_data_index.columns.values )
+                self._n_cols_in_data_index = len( self._l_name_col_data_index ) # retrieve 'self._n_cols_in_data_index'
+                self._flag_metadata_exists = self._n_cols_in_data_index > 2 # a flag indicating there is at least one metadata column associated with the objects
+                # for faster access
+                self._l_l_metadata = self._df_data_index.iloc[ :, : -2 ].values if self._flag_metadata_exists else None # if metadata columns does not exist in the 'stacked_pickles index' file, set 'self._l_l_metadata' to None
+                self._arr_start_byte = self._df_data_index.start_byte.values
+                self._arr_end_byte = self._df_data_index.end_byte.values
+                # initialize the internal parameters
+                self._n_bytes_written = self._arr_end_byte[ -1 ]
+                self._n_objects = len( self._df_data_index )
+            else :
+                # write mode
+                self._newfile_data = open( self._path_file_data, 'wb' )
+                self._newfile_data_index = gzip.open( self._path_file_data_index, 'wt' )
+                self._flag_metadata_exists = len( l_name_col_metadata ) > 0
+                self._l_name_col_data_index = l_name_col_metadata + [ 'start_byte', 'end_byte' ] # compose 'self._l_name_col_data_index'
+                self._n_cols_in_data_index = len( self._l_name_col_data_index ) # retrieve 'self._n_cols_in_data_index'
+                StackedPickles.write_a_line_of_tsv_file( self._newfile_data_index, self._l_name_col_data_index ) # write the header # 'start_byte', 'end_byte' would contain 0-based coordinates of the file content
+                # initialize the internal parameters
+                self._n_bytes_written = 0  
+                self._n_objects = 0
+        @property
+        def index( self ) :
+            """
+            return the index dataframe containing locations of the objects in the 'stacked_pickles' file
+            """
+            if self._true_if_mode_is_r_false_if_mode_is_w :
+                # read mode
+                return self._df_data_index
+            else :
+                # write mode
+                return None
+        def pickle_bytes_to_obj( bytes_content ) :
+            """# 2022-05-25 01:50:46
+            convert bytes to df using pickle
+            """
+            # uncompress the gzipped bytes
+            with io.BytesIO() as file:
+                file.write(bytes_content)
+                file.seek(0)
+                obj = pickle.load(file)
+            return obj
+        def pickle_obj_to_bytes( obj ):
+            """# 2022-05-25 01:56:37
+            convert a python dataframe to bytes using pickle
+            """
+            # compress the data
+            file = io.BytesIO()
+            pickle.dump(obj, file, protocol=pickle.HIGHEST_PROTOCOL)
+        
+            # retrieve the converted content
+            file.seek(0)
+            bytes_content = file.read()
+            file.close()
+            return bytes_content
+        def write_a_line_of_tsv_file( newfile, l_value ) :
+            """
+            newfile # output file, open with 'wt' mode.
+            
+            2024-11-14 1:00 by IEUM An
+            """
+            newfile.write( '\t'.join( str( e ) for e in l_value ) + '\n' )
+        def write_an_object( self, data_object = None, l_metadata : list = [ ], ) :
+            """
+            data_object = None, # data object to be written
+            l_metadata : list, # list object containing the metadata values for the data object (which will be written to the 'stacked_pickles index' file, in addition to the start and end positions of the written bytes of the data object)
+                       
+            2024-11-15 17:20 by IEUM An, 2024-12-15 12:07 by IEUM An
+            """
+            if self._true_if_mode_is_r_false_if_mode_is_w :
+                raise RuntimeError( "write operation on 'stacked_pickles' file opened with the 'r' mode." )
+    
+            assert( self._n_cols_in_data_index == len( l_metadata ) + 2 ) # the length of the 'l_metadata' should be matched with the 'l_name_col_metadata' argument given to the object when it was initialized in the 'w' mode.
+
+            # write the pickle-serialized data of the current object
+            if data_object is None :
+                # if 'None' has been given as the input object, set "n_bytes" to 0 and skip writing actual bytes to the storage for sustainable programming
+                n_bytes = 0
+            else :
+                b_content = StackedPickles.pickle_obj_to_bytes( data_object ) # retrieve the byte representation of the object
+                n_bytes = len( b_content ) # retrieve the number of bytes to write
+                self._newfile_data.write( b_content ) # write the raw data
+
+            # write the metadata for the current object
+            StackedPickles.write_a_line_of_tsv_file( self._newfile_data_index, l_metadata + [ self._n_bytes_written, self._n_bytes_written + n_bytes ] ) # write the record to the index
+
+            # update the attributes of the current 'StackedPickles' object
+            self._n_bytes_written += n_bytes # update 'n_bytes_written'
+            self._n_objects += 1 # update 'self._n_objects'
+        def read_an_object( self, idx_entry : int ) :
+            """
+            read from the 'StackedPickles' file and return the data object, along with its associated metadata. If metadata does not exists, python None object will be returned as the 'metadata'.
+            
+            idx_entry : int, # an integer index of the object to read from the 'stacked_pickles' file
+            
+            2024-11-15 17:20 by IEUM An, 2024-12-15 12:07 by IEUM An
+            """
+            if not self._true_if_mode_is_r_false_if_mode_is_w :
+                raise RuntimeError( "read operation on 'stacked_pickles' file opened with the 'w' mode." )
+    
+            # retrieve start and end locations of the bytes of the object
+            start_byte = self._arr_start_byte[ idx_entry ]
+            end_byte = self._arr_end_byte[ idx_entry ]
+
+            # retrieve the data of the current object
+            if start_byte == end_byte : 
+                # if no bytes has been written for the current object, set 'data_object' to None
+                data_object = None
+            else :
+                self._file_data.seek( start_byte ) # move to the start position of the data object
+                data_object = StackedPickles.pickle_bytes_to_obj( self._file_data.read( end_byte - start_byte ) ) # retrieve data object from the written bytes
+                
+            # retrieve the metadata
+            l_metadata = self._l_l_metadata[ idx_entry ] if self._flag_metadata_exists else None
+            return data_object, l_metadata # return the data object
+        def close( self ) :
+            """ 
+            close the 'stacked_pickles' file and its associated 'stacked_pickles index' file.
+            # 2024-11-18 by IEUM An, 2024-12-15 12:07 by IEUM An
+            """
+            if self._flag_closed :
+                raise RuntimeError( "close on the already 'stacked_pickle' file" )
+    
+            if self._true_if_mode_is_r_false_if_mode_is_w :
+                # reading
+                # close the input data file
+                self._file_data.close( )
+            else :
+                # writing
+                # close the output files
+                self._newfile_data.close( )
+                self._newfile_data_index.close( )
+                # if no object has been written to the storage, delete the output files
+                if self._n_objects == 0 :
+                    os.remove( self._path_file_data )
+                    os.remove( self._path_file_data_index )
+            
+            # mark the object as 'closed'
+            self._flag_closed = True 
+        def __enter__( self ) :
+            """
+            # 2024-11-18 by IEUM An
+            """
+            return self
+        def __exit__( self, exc_type, exc_val, exc_tb ) :
+            """
+            # 2024-11-18 by IEUM An
+            """
+            self.close( )
+        def __repr__( self ) :
+            '''
+            represent the object
+            # 2024-11-18 by IEUM An
+            '''
+            str_repr = f"<StackedPickles object of {self._path_file_data} (index: {self._path_file_data_index}))>"
+            return str_repr
+        def __len__( self ) :
+            """
+            return the number of objects that the current 'StackedPickles' contains
+            # 2024-11-18 by IEUM An
+            """
+            return self._n_objects
+        def __iter__( self ) :
+            """
+            # 2024-11-18 by IEUM An
+            """
+            if not self._true_if_mode_is_r_false_if_mode_is_w :
+                raise RuntimeError( "the objects cannot be iterated when opened with the 'w' mode." )
+                
+            # initialize the iteration
+            self._idx_object_for_iteration = 0
+            return self
+        def __next__( self ):
+            """
+            # 2024-11-18 by IEUM An
+            """
+            # define 'StopIteration' conditions
+            if self._idx_object_for_iteration is None : # when the object is 'not currently iterating'
+                raise StopIteration
+            if self._idx_object_for_iteration == self._n_objects : # when the iteration has reached the end.
+                self._idx_object_for_iteration = None # mark the object as 'not currently iterating'
+                raise StopIteration
+                
+            data = self.read_an_object( self._idx_object_for_iteration ) # read the object
+            self._idx_object_for_iteration += 1 # update the index for iteration
+            return data
+
+    def apply_func_to_columns( df, func, subset = None, inplace : bool = False ) :
+        """
+        apply a given function to the given list of columns of the given dataframe
+    
+        df, # target dataframe
+        func, # the function will not be applied to np.nan values
+        subset = None, # list of column names to apply the given function. If None is given, the given function will be applied to all columns.
+        inplace : bool = False, # if False, the entire dataframe will be copied before the function is applied to the columns.
+    
+        # 2024-12-07 11:52 by IEUM An
+        """
+        # create the copy of the input dataframe
+        if not inplace :
+            df = df.copy( )
+    
+        # retrieve list of column names to which the given function will be applied.
+        set_name_col = set( df.columns.values ) # retrieve a set of column names
+        if subset is None :
+            subset = list( set_name_col )
+        else :
+            subset = list( set_name_col.intersection( subset ) )
+    
+        # apply the given function
+        for name_col in subset :
+            df[ name_col ] = list( apply_func_to_a_value( val, func ) for val in df[ name_col ].values )
+    
+        # return the resulting dataframe
+        return df
+    
+    def format_dataframe_containing_python_objects( df, flag_true_to_encode_and_false_to_decode : bool, l_name_col_containing_string_formatted_python_objects : list = [ ], l_name_col_containing_base64_encoded_pickled_python_objects : list = [ ], inplace : bool = False ) :
+        """
+        format a given dataframe containing python objects, either decode or encode complex python objects to CSV/TSV-compatible string format.
+    
+        flag_true_to_encode_and_false_to_decode : bool # if True, encode python objects to string values. if False, decode python objects to string values.
+        inplace : bool = False, # if False, the entire dataframe will be copied before the function is applied to the columns.
+        
+        2024-12-06 23:01 by IEUM An
+        """
+        # format string-formatted python objects
+        df = apply_func_to_columns( df, func = str if flag_true_to_encode_and_false_to_decode else ast.literal_eval, subset = l_name_col_containing_string_formatted_python_objects, inplace = inplace )
+    
+        # format pickled, base64-encoded python objects
+        df = apply_func_to_columns( df, func = obj_to_base64_encoded_pickle if flag_true_to_encode_and_false_to_decode else base64_encoded_pickle_to_obj, subset = l_name_col_containing_base64_encoded_pickled_python_objects, inplace = inplace )
+        return df # return the output dataframe
+        
+    def format_df_clump( df_clump, flag_true_to_encode_and_false_to_decode : bool ) :
+        """
+        format df_clump, either encode or decode the embedded python objects.
+    
+        2024-12-06 23:17 by IEUM An
+        """
+        return format_dataframe_containing_python_objects( 
+            df_clump, 
+            flag_true_to_encode_and_false_to_decode = flag_true_to_encode_and_false_to_decode,
+            l_name_col_containing_string_formatted_python_objects = [ 't_clump_info', 'list_of_segments_for_each_cluster', 'n_reads_for_each_cluster' ], 
+            l_name_col_containing_base64_encoded_pickled_python_objects = [ 'fusion_transcripts_database_pickled_and_base64_encoded' ],
+        )
+
+    def format_df_rc( df_rc, flag_true_to_encode_and_false_to_decode : bool ) :
+        """
+        format df_rc, either encode or decode the embedded python objects.
+    
+        2024-12-07 12:07 by IEUM An
+        """
+        return format_dataframe_containing_python_objects( 
+            df_rc, 
+            flag_true_to_encode_and_false_to_decode = flag_true_to_encode_and_false_to_decode,
+            l_name_col_containing_string_formatted_python_objects = [ 't_clus_basic_info', 'l_seg_clus', 'l_idx_era_of_gene' ],
+            # l_name_col_containing_base64_encoded_pickled_python_objects = [ 'fusion_transcripts_database_pickled_and_base64_encoded' ],
+        )
+
+    def get_dtype_to_encode_unique_values_using_integer( n_unique_values : int ) :
+        """
+        determine the integer dtype to store the given number of unique values using a integer-encoding method.
+        2024-12-13 1:10 by IEUM An
+        """
+        int_min_number_of_bits = int(np.ceil(math.log2(n_unique_values))) + 1 # since signed int will be used, an additional bit is required to encode the data
+        if int_min_number_of_bits <= 8:
+            dtype = 'int8'
+        elif int_min_number_of_bits <= 16:
+            dtype = 'int16'
+        elif int_min_number_of_bits <= 32 :
+            dtype = 'int32'
+        else :
+            dtype = 'int64'
+        return dtype
+
+# main code for the ROBIN algorithm
+def LongDiscoverCellTypeSpecificTranscriptomicFeature(
+    # input and output arguments
+    dict__path_file_bam_input__to__dict_cb_to_name_clus : dict, # a dictionary containing input BAM files and dictionaries containing cell barcodes to name cluster mappings
+    path_folder_output : str, # output folder 
+    name_tag_cb : str = 'CB', # SAM tag containing cell barcodes
+    # alignment 
+    int_min_mapq_unique_mapped: int = 60,
+    l_seqname_to_skip: list = [ "MT" ],
+    # size-distribution-normalization
+    path_folder_reference_distribution : Union[ str, None ] = None, # a folder containing the reference distribution, the output of the 'LongCreateReferenceSizeDistribution'
+    dict__path_file_bam_input__to__name_file_distribution : Union[ dict, None ] = None, # a mapping of input BAM file path to name of the sample ('name_file_distribution') that was used for building the reference distribution using 'LongCreateReferenceSizeDistribution'.
+    t_distribution_range_of_interest : Union[ List[ str ], str, None ] = None, # define a range of distribution of interest for analyzing normalized coverages across single cells.
+    name_tag_length : str = 'LE', # the total length of genomic regions that are actually covered by the read, excluding spliced introns (the sum of exons).
+    # total-count-based-normalization (size-factor-based-normalization)
+    float_target_sum_of_size_distribution_normalized_count_for_size_factor_normalization : float = 3_500,
+    # read clustering
+    dict_read_clustering_setting : dict = {
+        'int_num_seconds_to_wait_before_identifying_completed_batches' : 0.001,
+        'int_min_num_reads_in_a_batch' : 100_000,
+        # ----- arguments for the 'cluster_reads_with_bootstrapping' method ----- #
+        'random_seed' : 42,
+        'int_min_num_base_pairs_overlapped_for_cluster_assignment' : 10, 
+        'float_min_prop_of_fusion_transcript_read_count_to_smaller_cluster_read_count_for_merging' : 0.1,
+        'flag_trim_outliers' : False,
+        'float_min_coverage_relative_to_max_to_represent_clus_during_trimming' : 0.01,
+        'int_initial_num_independent_runs' : 3,
+        'int_additional_num_independent_runs_for_each_step' : 2,
+        'int_min_num_of_independent_runs_for_finalizing_each_cluster' : 2,
+        'float_max_wall_time_in_seconds' : 300, 
+    },
+    # annotation
+    dict_annotation_setting : dict = {
+        # ----- arguments for the 'load_annotation_input_files' method ----- #
+        "flag_drop_the_chr_prefix_from_seqname" : True,
+        "l_annotation_input_files" : [ ],
+    },
+    # read-cluster analysis
+    dict_read_cluster_analysis_setting : dict = {
+        'int_num_seconds_to_wait_before_identifying_completed_batches' : 0.001,
+        # ----- arguments for the 'summarize_read_cluster' method (collect and filter features) ----- #
+        'int_num_base_pairs_in_a_bin_for_collecting_transcript_coverage' : 100,
+        'float_min_prop_expr' : 0.05,
+        'int_min_num_cells' : 3,
+        'int_min_num_redundant_reads' : 3,
+        # ----- arguments for the 'identify_marker_features' method (characterize each feature by identifying cell clusters expressing the feature as a 'marker' feature)  ----- #
+        'float_placeholder_ratio_of_adjacent_scores_for_a_transition_to_a_0_count' : 10,
+        'float_max_prop_expr_to_apply_falloff' : 0.1,
+        'int_max_total_redundant_read_count_to_apply_falloff' : 10,
+        # ----- arguments for the 'analyze_features' method (integrate results across the features and classify the read-cluster) ----- #
+        'dtype_output' : 'float32',
+    },   
+    set_output_setting : set = {
+        'summary-statistics', # 'summary'
+        'gene', # 'G'
+        'transcript-coverage', # 'C'
+        'transcription-start-site', # 'TSS'
+        'transcription-end-site', # 'TES'
+        'exon-boundary', # 'EB'
+        'exon', # 'E'
+        'splice-junction', # 'SJ'
+        'intron-chain', # 'IC'
+    },
+    # general
+    n_threads: int = 16,
+    float_memory_in_GiB: float = 50,
+    int_max_num_pipe_for_each_worker : int = 8,
+    int_buffer_size : int = 100,
+    verbose: bool = True,
+) :
+    """
+    LongDiscoverCellTypeSpecificTranscriptomicFeature (ROBIN)
+    Discover cell type specific transcriptomic marker features, reference-free, with size-distribution-normalization feature.
+
+    flag_usage_from_command_line_interface: bool = False,
+    # --------------- input and output arguments --------------- # 
+    dict__path_file_bam_input__to__dict_cb_to_name_clus : dict, # a dictionary containing input BAM files and dictionaries containing cell barcodes to name cluster mappings
+    name_tag_cb : str = 'CB', # SAM tag containing cell barcodes
+    path_folder_output : str, # output folder 
+    # --------------- alignment --------------- # 
+    int_min_mapq_unique_mapped: int = 60, # reads with mapping quality below this threshold will be discarded during the analysis.
+    l_seqname_to_skip: list = [ "MT" ], # reads aligned to contigs with the names of contigs in this list will be discarded.  
+    # --------------- size-distribution-normalization --------------- #
+    path_folder_reference_distribution : Union[ str, None ] = None, # a folder containing the reference distribution and correction ratios, the output of the 'LongCreateReferenceSizeDistribution'
+    dict__path_file_bam_input__to__name_file_distribution : Union[ dict, None ] = None, # a mapping of input BAM file path to name of the sample ('name_file_distribution') that was used for building the reference distribution using 'LongCreateReferenceSizeDistribution'.
+    t_distribution_range_of_interest : Union[ List[ i ], str, None ] = None, # define a range of distribution of interest for analyzing normalized coverages of single cells across the samples.
+    name_tag_length : str = 'LE', # the total length of genomic regions that are actually covered by the read, excluding spliced introns (the sum of exons).
+    # --------------- total-count-based-normalization (size-factor-based-normalization) --------------- #
+    float_target_sum_of_size_distribution_normalized_count_for_size_factor_normalization : float = 3_500,
+    # --------------- read clustering --------------- # 
+    # before read clustering, reads will be binned into multiple "clumps" based on the coverage profiles using the following settings.
+    dict_read_clustering_setting : dict = {
+        'int_num_seconds_to_wait_before_identifying_completed_batches' : 0.001,
+        'int_min_num_reads_in_a_batch' : 100_000,
+        # ----- 'cluster_reads_with_bootstrapping' arguments ----- #
+        'random_seed' : 42,
+        'int_min_num_base_pairs_overlapped_for_cluster_assignment' : 10, 
+        'float_min_prop_of_fusion_transcript_read_count_to_smaller_cluster_read_count_for_merging' : 0.1,
+        'flag_trim_outliers' : False,
+        'float_min_coverage_relative_to_max_to_represent_clus_during_trimming' : 0.01,
+        'int_initial_num_independent_runs' : 3,
+        'int_additional_num_independent_runs_for_each_step' : 2,
+        'int_min_num_of_independent_runs_for_finalizing_each_cluster' : 2,
+        'float_max_wall_time_in_seconds' : 300, 
+    },
+    # --------------- annotate read-clusters with existing gene, transcript, and other annotations (transposable element, regulatory elements, etc)  --------------- # 
+    dict_annotation_setting : dict = {
+        # ----- 'load_annotation_input_files' arguments ----- #
+        "flag_drop_the_chr_prefix_from_seqname" : True, # If True, if present, automatically drop 'chr' prefix from the annotations
+        "l_annotation_input_files" : [ ], # list of annotation input file path. Additional information could be given for pre-processing and filtering the annotation. For more details, please check the documentation of 'load_annotation_input_file'
+    },
+    # --------------- marker feature detection --------------- # 
+    dict_read_cluster_analysis_setting : dict = {
+        'int_num_seconds_to_wait_before_identifying_completed_batches' : 0.001,
+        # ----- arguments for the 'summarize_read_cluster' method (collect and filter features) ----- #
+        'int_num_base_pairs_in_a_bin_for_collecting_transcript_coverage' : 10, # If 'transcript-coverage' has been set for the 'set_output_setting', collect transcript coverages for every 'int_num_base_pairs_in_a_bin_for_collecting_transcript_coverage' number of base pairs. Increasing this number (thus increasing "bin-width") will significantly reduce computation time, however, it will decrease the sensitivity for detecting cell cluster-specific transcript structure changes at a higher resolution (i.e., individual base pairs).
+        'float_min_prop_expr' : 0.05, # the minimum of the maximum proportion of expressing cells across the cell clusters in order for the feature to be considered as a 'valid' feature.
+        'int_min_num_cells' : 3, # the minimum number of cells of the same cell cluster expressing the given feature across the cell clusters in order for the feature to be considered as a 'valid' feature.
+        'int_min_num_redundant_reads' : 3, # the minimum number of "redundant" reads in order for the feature to be considered as a 'valid' feature. Currently, the number of "redundant" reads are equal to 'total read count for the feature' - 'the number of cells expressing the feature', so that when only one read could be detected from every cell expressing the feature, the number of "redundant" read becomes 0.
+        # ----- arguments for the 'identify_marker_features' method (characterize each feature by identifying cell clusters expressing the feature as a 'marker' feature)  ----- #
+        'float_placeholder_ratio_of_adjacent_scores_for_a_transition_to_a_0_count' : 10, # a "placeholder" ratio between "expression intensity" scores of adjacent cell clusters (cell types) sorted by the "expression intensity" scores when the score transitions to 0 (e.g., a 'expression intensity' value transitions from 0.5 to 0, the ratio will be set to 'float_placeholder_ratio_of_adjacent_scores_for_a_transition_to_a_0_count' instead of using an infinity (due to a zero-division) as a 'value')
+        'float_max_prop_expr_to_apply_falloff' : 0.1, # a ratio between "expression intensity" scores of adjacent cell clusters (sorted by the scores) will be adjusted (or "degraded") if the proportion of cells expressing the feature in the cell cluster is below the given 'float_max_prop_expr_to_apply_falloff' argument. If the proportion is above this value, no penalty will be applied.
+        'int_max_total_redundant_read_count_to_apply_falloff' : 10, # a ratio between "expression intensity" scores of adjacent cell clusters (sorted by the scores) will be adjusted (or "degraded") if the total number of "redundant" reads supporting the feature is below the given 'float_max_total_redundant_read_count_to_apply_falloff' argument. If the count is above this value, no penalty will be applied.
+        # ----- arguments for the 'analyze_features' method (integrate results across the features and classify the read-cluster) ----- #
+        'dtype_output' : 'float32', # dtype of the 'df_score' output dataframe (will not be applied to the 'df_ft' output dataframe, which will not be stored to the storage in the current implementation of 'ROBIN'). by default, np.float64 will be used for the 'df_score' output dataframe. Should be a subdtype of np.floating.
+    },    
+    set_output_setting : set = {
+        'summary-statistics', # alternatives: 'summary' # [recommended to include] output file containing summary statistics for the surveyed transcriptomic features
+        'gene', # alternatives: 'G' # [recommended to include] compare coverages of the entire read-cluster (which is equivalent to the 'gene' of the reference annotations) across single cells, using reference-free approach
+        'transcript-coverage', # alternatives: 'C' # compare coverages of individual bases in transcripts across single cells (every genomic position covered by at least 1 read across samples will be compared across cell type), using the reads from the read-cluster
+        'transcription-start-site', # alternatives: 'TSS' # compare coverages of transcription start sites across single cells, using reference-free approach, using the reads from the read-cluster
+        'transcription-end-site', # alternatives: 'TES' # compare coverages of transcription end sites across single cells, using reference-free approach, using the reads from the read-cluster
+        'exon', # alternatives: 'E' # compare coverages of exons (i.e., a tuple of exon start and end positions) across single cells, using reference-free approach, using the reads from the read-cluster
+        'exon-boundary', # alternatives: 'EB' # compare coverages at the exon boundary positions (either exon start or end position) across single cells, using reference-free approach, using the reads from the read-cluster
+        'splice-junction', # alternatives: 'SJ' # compare coverages of splice junctions across single cells, using reference-free approach, using the reads from the read-cluster
+        'intron-chain', # alternatives: 'IC' # compare coverages of individual intron chains (a collection of all splice junctions contained in the read) across single cells, using reference-free approach, using the reads from the read-cluster
+    },
+    # --------------- general --------------- # 
+    n_threads: int = 16, # number of threads to use
+    float_memory_in_GiB: float = 50, # (experimental) maximum memory to use
+    verbose: bool = True,
+    int_max_num_pipe_for_each_worker : int = 8, # maximum number of input pipes for each worker. this argument and the number of input pipes together will determine the number of threads used for sorting
+    int_buffer_size : int = 100, # the number of entries for each batch that will be given to 'pipe_sender'. increasing this number will reduce the overhead associated with interprocess-communication through pipe, but will require more memory usage
+
+    # ===== Output ===== #
+    'df_clump.tsv.gz' : clumping/clustering results in the TSV format. Detailed descriptions of columns are as follows.
+        'id_clump' : ID of the clump (int)
+        't_clump_info' : Location of the clump, encoded as a Python tuple containing the following elements. (tuple)
+            'name_chr' : name of the chromosome where the clump can be located (str)
+            'start' : start position of the clump (int)
+            'end' : end position of the clump (int)
+            'plus_strand' : a boolean flag indicating whether the clump contains reads in plus strand (True) or minus strand (False) (bool)
+        'max_coverage' : max read count (coverage) across the clump (int)
+        'n_reads' : the total number of reads in the clump (int)
+        --- information that is added after read clustering
+        'n_clusters' : the total number of identified read-clusters (int)
+        'list_of_segments_for_each_cluster' : list of l_segments for the read-clusters
+        'n_reads_for_each_cluster' : list of number of reads for the read-clusters
+        'proportion_of_fusion_transcripts' proportion of count of reads that represent fusion transcripts to the total number of reads for the clump (float)
+        'n_clustering_runs' : the total number of bootstrapping runs (i.e., random sampling rounds) used 
+        'frequency_of_most_frequent_clustering_result' : frequency of bootstrapping rounds with the most frequent clustering result (i.e., number of occurrences divided by the total number of clustering runs) (float)
+        'composite_clustering_result' : A flag indicating whether the final set of clusters are selected from the most frequent clustering result (False), or alternatively, from an ensemble of the multiple bootstrapping-based clustering results (True).
+        'fusion_transcripts_database_pickled_and_base64_encoded' : Base64 representation of the Pickle-serialized data containing detected fusion transcripts. (None if no fusion transcript has been detected)
+        'wall_time_in_seconds' : wall time used for the clustering process in seconds
+    
+    # 2024-10-20, 2024-12-13 23:40 by IEUM An
+    """
+    logger.info( "LongDiscoverCellTypeSpecificTranscriptomicFeature (ROBIN): Discover cell type specific transcriptomic marker features, reference-free, with size-distribution-normalization feature." )
+    
+    # create output folder
+    os.makedirs( path_folder_output, exist_ok = True )
+
+    # create object folder - large data objects will be saved to the storage as files throughout the analysis pipeline
+    path_folder_object = f"{path_folder_output}objects/"
+    path_folder_read_cluster = f"{path_folder_object}read_clusters/"
+    path_folder_external_annotations = f"{path_folder_object}external_annotations/"
+    path_folder_internal_objects = f"{path_folder_object}internal_objects/"
+    for path_folder in [ path_folder_internal_objects, path_folder_external_annotations, path_folder_read_cluster ] :
+        os.makedirs( path_folder, exist_ok = True )
+
+    # add default keyword arguments (if missing in the object) for the dictionaries containing keyword arguments
+    if True :
+        default_dict_read_clustering_setting = {
+            'int_num_seconds_to_wait_before_identifying_completed_batches' : 0.001,
+            'int_min_num_reads_in_a_batch' : 100_000,
+            # ----- 'cluster_reads_with_bootstrapping' arguments ----- #
+            'random_seed' : 42,
+            'int_min_num_base_pairs_overlapped_for_cluster_assignment' : 10, 
+            'float_min_prop_of_fusion_transcript_read_count_to_smaller_cluster_read_count_for_merging' : 0.1,
+            'flag_trim_outliers' : False,
+            'float_min_coverage_relative_to_max_to_represent_clus_during_trimming' : 0.01,
+            'int_initial_num_independent_runs' : 3,
+            'int_additional_num_independent_runs_for_each_step' : 2,
+            'int_min_num_of_independent_runs_for_finalizing_each_cluster' : 2,
+            'float_max_wall_time_in_seconds' : 300, 
+        }
+        default_dict_annotation_setting = {
+            # ----- 'load_annotation_input_files' arguments ----- #
+            "flag_drop_the_chr_prefix_from_seqname" : True,
+            "l_annotation_input_files" : [ ],
+        }
+        default_dict_read_cluster_analysis_setting = {
+            'int_num_seconds_to_wait_before_identifying_completed_batches' : 0.001,
+            # ----- arguments for the 'summarize_read_cluster' method (collect and filter features) ----- #
+            'int_num_base_pairs_in_a_bin_for_collecting_transcript_coverage' : 10, # If 'transcript-coverage' has been set for the 'set_output_setting', collect transcript coverages for every 'int_num_base_pairs_in_a_bin_for_collecting_transcript_coverage' number of base pairs. Increasing this number (thus increasing "bin-width") will significantly reduce computation time, however, it will decrease the sensitivity for detecting cell cluster-specific transcript structure changes at a higher resolution (i.e., individual base pairs).
+            'float_min_prop_expr' : 0.05, # the minimum of the maximum proportion of expressing cells across the cell clusters in order for the feature to be considered as a 'valid' feature.
+            'int_min_num_cells' : 3, # the minimum number of cells of the same cell cluster expressing the given feature across the cell clusters in order for the feature to be considered as a 'valid' feature.
+            'int_min_num_redundant_reads' : 3, # the minimum number of "redundant" reads in order for the feature to be considered as a 'valid' feature. Currently, the number of "redundant" reads are equal to 'total read count for the feature' - 'the number of cells expressing the feature', so that when only one read could be detected from every cell expressing the feature, the number of "redundant" read becomes 0.
+            # ----- arguments for the 'identify_marker_features' method (characterize each feature by identifying cell clusters expressing the feature as a 'marker' feature)  ----- #
+            'float_placeholder_ratio_of_adjacent_scores_for_a_transition_to_a_0_count' : 10, # a "placeholder" ratio between "expression intensity" scores of adjacent cell clusters (cell types) sorted by the "expression intensity" scores when the score transitions to 0 (e.g., a 'expression intensity' value transitions from 0.5 to 0, the ratio will be set to 'float_placeholder_ratio_of_adjacent_scores_for_a_transition_to_a_0_count' instead of using an infinity (due to a zero-division) as a 'value')
+            'float_max_prop_expr_to_apply_falloff' : 0.1, # a ratio between "expression intensity" scores of adjacent cell clusters (sorted by the scores) will be adjusted (or "degraded") if the proportion of cells expressing the feature in the cell cluster is below the given 'float_max_prop_expr_to_apply_falloff' argument. If the proportion is above this value, no penalty will be applied.
+            'int_max_total_redundant_read_count_to_apply_falloff' : 10, # a ratio between "expression intensity" scores of adjacent cell clusters (sorted by the scores) will be adjusted (or "degraded") if the total number of "redundant" reads supporting the feature is below the given 'float_max_total_redundant_read_count_to_apply_falloff' argument. If the count is above this value, no penalty will be applied.
+            # ----- arguments for the 'analyze_features' method (integrate results across the features and classify the read-cluster) ----- #
+            'dtype_output' : 'float32', # dtype of the 'df_score' output dataframe (will not be applied to the 'df_ft' output dataframe, which will not be stored to the storage in the current implementation of 'ROBIN'). by default, np.float64 will be used for the 'df_score' output dataframe. Should be a subdtype of np.floating.
+        }
+        dict_read_clustering_setting = { ** default_dict_read_clustering_setting, ** dict_read_clustering_setting }
+        dict_annotation_setting = { ** default_dict_annotation_setting, ** dict_annotation_setting }
+        dict_read_cluster_analysis_setting = { ** default_dict_read_cluster_analysis_setting, ** dict_read_cluster_analysis_setting }
+
+    # process output flags
+    def process_output_setting( set_output_setting ) :
+        """
+        process output setting and return flags determining output behaviors
+        2024-11-16 - 2024-11-18 00:30 by IEUM An, 2024-12-07 18:37 by IEUM An
+        """
+        def check_presence_of_keys( keys ) :
+            """
+            2024-11-16 
+            """
+            return len( set_output_setting.intersection( keys ) ) > 0
+        flag_summary = check_presence_of_keys( { 'summary-statistics', 'summary' } )
+        flag_C = check_presence_of_keys( { 'transcript-coverage', 'C' } )
+        flag_G = check_presence_of_keys( { 'gene', 'G' } )
+        flag_TSS = check_presence_of_keys( { 'transcription-start-site', 'TSS' } )
+        flag_TES = check_presence_of_keys( { 'transcription-end-site', 'TES' } )
+        flag_EB = check_presence_of_keys( { 'exon-boundary', 'EB' } )
+        flag_E = check_presence_of_keys( { 'exon', 'E' } )
+        flag_SJ = check_presence_of_keys( { 'splice-junction', 'SJ' } )
+        flag_IC = check_presence_of_keys( { 'intron-chain', 'IC' } )
+        return flag_summary, flag_C, flag_G, flag_TSS, flag_TES, flag_EB, flag_E, flag_SJ, flag_IC
+    flag_summary, flag_C, flag_G, flag_TSS, flag_TES, flag_EB, flag_E, flag_SJ, flag_IC = process_output_setting( set_output_setting ) # retrieve flags determining the output behaviors
+    flag_collect_non_coverage_features = ( flag_G or flag_TSS or flag_TES or flag_EB or flag_E or flag_SJ or flag_IC )
+    flag_collect_coverage_features = flag_C
+   
+    # save settings
+    current_sig, current_locals = inspect.signature( LongDiscoverCellTypeSpecificTranscriptomicFeature ), locals( )
+    dict_setting = dict( ( param.name, current_locals[ param.name ] ) for param in current_sig.parameters.values( ) ) # retrieve a dictionary of given parameters
+    bk.PICKLE_Write( f"{path_folder_internal_objects}dict_setting.pkl", dict_setting ) # save the run setting to the storage
+    
+    # parse arguments
+    set_seqname_to_skip = set(l_seqname_to_skip)
+
+    # map each input BAM file to an integer ID
+    l_path_file_bam_input = list( dict__path_file_bam_input__to__dict_cb_to_name_clus )
+    dict_path_file_bam_input_to_idx = dict( ( e, i ) for i, e in enumerate( l_path_file_bam_input ) )
+    bk.PICKLE_Write( f"{path_folder_internal_objects}dict_path_file_bam_input_to_idx.pkl", dict_path_file_bam_input_to_idx ) # save the result to the storage
+
+    # refactor 'dict__path_file_bam_input__to__dict_cb_to_name_clus' using an integer IDs
+    # initialize data structures for the 'name_clus' <--> 'idx_name_clus' mapping
+    set_name_clus_already_seen = set( )
+    dict_ic_to_idx_name_clus = dict( ) # ic = identifier for each cell
+    for path_file_bam_input in dict__path_file_bam_input__to__dict_cb_to_name_clus :
+        idx_bam_input = dict_path_file_bam_input_to_idx[ path_file_bam_input ]
+        dict_cb_to_name_clus = dict__path_file_bam_input__to__dict_cb_to_name_clus[ path_file_bam_input ]
+        for cb in dict_cb_to_name_clus :
+            # update 'dict_ic_to_idx_name_clus'
+            name_clus = dict_cb_to_name_clus[ cb ]
+            dict_ic_to_idx_name_clus[ idx_bam_input, cb ] = name_clus
+            # collect 'name_clus'
+            set_name_clus_already_seen.add( name_clus )
+    # retrieve the 'name_clus' <--> 'idx_name_clus' mapping
+    l_unique_name_clus = sorted( set_name_clus_already_seen )
+    dict_name_clus_to_idx_name_clus = dict( ( e, i ) for i, e in enumerate( l_unique_name_clus ) )
+    n_unique_name_clus = len( l_unique_name_clus ) # retrieve number of unique names of (cell) clusters
+    # convert 'name_clus' to 'idx_name_clus' using the mapping
+    dict_ic_to_idx_name_clus = dict( ( ic, dict_name_clus_to_idx_name_clus[ dict_ic_to_idx_name_clus[ ic ] ] ) for ic in dict_ic_to_idx_name_clus )
+    # save the result to the storage
+    bk.PICKLE_Write( f"{path_folder_internal_objects}l_unique_name_clus.pkl", l_unique_name_clus ) 
+    bk.PICKLE_Write( f"{path_folder_internal_objects}dict_name_clus_to_idx_name_clus.pkl", dict_name_clus_to_idx_name_clus ) 
+    # of note, 'dict_ic_to_idx_name_clus' will be saved later with 'dict_ic_to_total_count'
+    
+    # prepare size-distribution-normalization-based analysis
+    # retrieve a flag indicating size-distribution-normalization will be performed
+    flag_perform_size_distribution_normalization_for_coverage_calculation = os.path.exists( f"{path_folder_reference_distribution}dict_output.pickle" ) and ( dict__path_file_bam_input__to__name_file_distribution is not None ) and ( t_distribution_range_of_interest is not None ) and ( name_tag_length is not None )
+
+    ''' read the reference distribution for exporting size-distribution normalized coverage calculation '''
+    if flag_perform_size_distribution_normalization_for_coverage_calculation :
+        dict_output = bk.PICKLE_Read( f"{path_folder_reference_distribution}dict_output.pickle" )
+        dict_name_file_distribution_to_arr_ratio_to_ref = dict( ( name_file_dist, arr_ratio_to_ref ) for name_file_dist, arr_ratio_to_ref in zip( dict_output[ 'setting' ][ 'l_name_file_distributions' ], dict_output[ 'l_arr_ratio_to_ref' ] ) ) # retrieve name_file_distribution > arr_ratio_to_ref mapping
+        int_molecule_size_min, int_molecule_size_max = t_distribution_range_of_interest # parse 't_distribution_range_of_interest'
+
+    # ----------------------- #
+    # basic internal settings #
+    # ----------------------- #
+    val_repr_invalid_idx = -1 # a value representing invalid index values, such as 'idx_entry' and 'idx_input' (-1 indicates invalid values)
+    val_repr_invalid_object = np.nan # a value representing invalid python objects in a Pandas DataFrame
+    
+    # -------------------------------------------- #
+    # read clumping & clustering operation started #
+    # -------------------------------------------- #
+    # --- (first iteration) --- #
+    if True : # first iteration
+        logger.info("[the first iteration] preparing the read-clustering operation")
+    
+        # start streaming of BAM records for read clustering and estimation of total counts for individual cells (the first iteration)
+        def create_stream_from_a_BAM_file_using_pipe(
+            path_file_bam_input, pipe_sender, int_buffer_size = 100
+        ) :
+            """
+            parse and decorate SAM record for merge sorting. 
+            return a generator yielding decorated (and filtered) SAM records
+        
+            'path_file_bam_input' : input file BAM file to create stream of decorated SAM record
+            'pipe_sender' : pipe for retrieving decorated mtx records. when all records are parsed, None will be given.
+            'int_buffer_size' : the number of entries for each batch that will be given to 'pipe_sender'. increasing this number will reduce the overhead associated with interprocess-communication through pipe, but will require more memory usage
+        
+            returns:
+            return the process that will be used for unzipping the input gzip file and creating a stream.
+            # 2024-10-24 17:45
+            """
+            # handle arguments
+            int_buffer_size = int(max(1, int_buffer_size))
+    
+            # retrieve an integer ID of the input BAM file
+            idx_bam_input = dict_path_file_bam_input_to_idx[ path_file_bam_input ]
+            # retrieve cb to cluster name mapping
+            dict_cb_to_name_clus = dict__path_file_bam_input__to__dict_cb_to_name_clus[ path_file_bam_input ] 
+            
+            # define 'func' : a function for transforming each record in the input BAM file to a decorated SAM record. if None is returned, the SAM record will be filtered out and will not be included in the output stream. The output should contain two values: first should be reference start position (or other values by which the input BAM files were sorted); second can contain any data (e.g., the entire SAM record in string format)
+            if flag_perform_size_distribution_normalization_for_coverage_calculation :
+                # retrieve correction ratios for size-distribution normalization
+                name_file_distribution = dict__path_file_bam_input__to__name_file_distribution[ path_file_bam_input ]
+                arr_ratio_to_ref = dict_name_file_distribution_to_arr_ratio_to_ref[ name_file_distribution ]
+                def func( r ) :
+                    name_chr = r.reference_name
+                    if name_chr in set_seqname_to_skip : # if the read was not aligned to one of the target chromosomes, discard the read
+                        return None
+                    mapq = r.mapq # retrieve mapping quality
+                    if mapq < int_min_mapq_unique_mapped : # if the read does not satisfy the mapping quality requirement, discard the read
+                        return None
+                    dict_tags = dict( r.get_tags( ) ) # retrieve tags of the read
+                    if name_tag_cb not in dict_tags :
+                        return None
+                    str_cb = dict_tags[ name_tag_cb ] # retrieve cell barcode
+                    if str_cb not in dict_cb_to_name_clus : # if cell barcode is not included in the target cell barcodes, discard the read
+                        return None
+                    int_total_aligned_length = dict_tags[ name_tag_length ] # retrieve aligned length of the read
+                    if not ( int_molecule_size_min <= int_total_aligned_length <= int_molecule_size_max ) : # if the molecule size does not satisfy the size range of interest, discard the read
+                        return None
+                    ref_st = r.reference_start
+                    flags = r.flag
+                    flag_is_plus_strand = ( flags & ( 1 << 4 ) ) == 0 # if not reverse complemented, the read will be considered as plus strand
+                    l_seg = retrieve_mapped_segments( r.cigartuples, ref_st ) # retrieve aligned segments
+                    # str_r = r.tostring( ) # retrieve string repr of the record (pysam record cannot be passed through pipe)
+                    return ( ( name_chr, ref_st ), ( idx_bam_input, flag_is_plus_strand, str_cb, l_seg, r.reference_end, arr_ratio_to_ref[ int_total_aligned_length ] ) ) # records will be sorted by ( name_chr, ref_st ) # additionally return index of current input BAM file 
+            else :
+                def func( r ) :
+                    name_chr = r.reference_name
+                    if name_chr in set_seqname_to_skip : # if the read was not aligned to one of the target chromosomes, discard the read
+                        return None
+                    mapq = r.mapq # retrieve mapping quality
+                    if mapq < int_min_mapq_unique_mapped : # if the read does not satisfy the mapping quality requirement, discard the read
+                        return None
+                    dict_tags = dict( r.get_tags( ) ) # retrieve tags of the read
+                    if name_tag_cb not in dict_tags :
+                        return None
+                    str_cb = dict_tags[ name_tag_cb ] # retrieve cell barcode
+                    if str_cb not in dict_cb_to_name_clus : # if cell barcode is not included in the target cell barcodes, discard the read
+                        return None
+                    ref_st = r.reference_start
+                    flags = r.flag
+                    flag_is_plus_strand = ( flags & ( 1 << 4 ) ) == 0 # if not reverse complemented, the read will be considered as plus strand
+                    l_seg = retrieve_mapped_segments( r.cigartuples, ref_st ) # retrieve aligned segments
+                    # str_r = r.tostring( ) # retrieve string repr of the record (pysam record cannot be passed through pipe)
+                    return ( ( name_chr, ref_st ), ( idx_bam_input, flag_is_plus_strand, str_cb, l_seg, r.reference_end, 1 ) ) # records will be sorted by ( name_chr, ref_st ) # additionally return index of current input BAM file 
+            # define a function for doing the work
+            def __parse_bam(path_file_bam_input, pipe_sender, int_buffer_size):
+                """
+                parse a BAM file and create a stream using the given pipe
+                # 2024-10-24
+                """
+                with pysam.AlignmentFile(path_file_bam_input, "r") as samfile :
+                    l_buffer = []  # initialize the buffer
+                    for r in samfile.fetch( ) :
+                        dr = func( r )  # convert gzipped line into a decorated record
+                        if dr is not None:  # if the transformed record is valid
+                            l_buffer.append(dr)  # add a parsed record to the buffer
+        
+                        if len(l_buffer) >= int_buffer_size:  # if the buffer is full
+                            pipe_sender.send(
+                                l_buffer
+                            )  # send a list of record of a given buffer size
+                            l_buffer = []  # initialize the next buffer
+                    if len(l_buffer) > 0:  # flush remaining buffer
+                        pipe_sender.send( l_buffer )
+                pipe_sender.send( None )
+        
+            p = mp.Process(target=__parse_bam, args=(path_file_bam_input, pipe_sender, int_buffer_size))
+            return p # return the process
+    
+        def start_streaming( ) :
+            """
+            start merge-sort tree to create a stream of BAM records
+            # 2024-10-24 18:15
+            """
+            # construct and collect the processes for the parsers
+            l_p = [ ]
+            l_pipe_receiver = []
+            for path_file_bam_input in l_path_file_bam_input :
+                pipe_sender, pipe_receiver = mp.Pipe()
+                p = create_stream_from_a_BAM_file_using_pipe(
+                    path_file_bam_input, pipe_sender, int_buffer_size = int_buffer_size
+                )
+                l_p.append(p)
+                l_pipe_receiver.append(pipe_receiver)
+        
+            # construct and collect the processes for a concurrent merge sort tree
+            pipe_sender_streaming, pipe_receiver_streaming = mp.Pipe()  # create a link
+            l_p.extend(
+                concurrent_merge_sort_using_pipe(
+                    pipe_sender_streaming,
+                    *l_pipe_receiver,
+                    int_max_num_pipe_for_each_worker = int_max_num_pipe_for_each_worker,
+                    int_buffer_size = int_buffer_size,
+                )
+            )
+            # run the processes
+            for p in l_p:
+                p.start( )
+    
+            def end_streaming( ) :
+                # join the completed processes
+                for p in l_p:
+                    p.join()
+    
+            return pipe_receiver_streaming, end_streaming
+    
+        pipe_receiver_streaming, end_streaming = start_streaming( ) # start streaming
+    
+        # analyze incoming reads (the first iteration)
+        # initialize for total count estimation
+        dict_ic_to_total_count = dict( ( ic, 0 ) for ic in dict_ic_to_idx_name_clus ) # initialize with 0 total counts
+        # initialize for clump separation
+        int_initial_size_buffer = 1_000_000 # initial size of the buffer
+        float_ratio_padding = 1
+        # initialize for read clustering
+        # prepare pipes
+        # for 'worker for read clustering' (w4rc)
+        pipe_sender_for_w4rc, pipe_receiver_of_w4rc = mp.Pipe( )
+        pipe_sender_of_w4rc, pipe_receiver_for_w4rc = mp.Pipe( )
+        # parse keyword arguments
+        int_min_num_reads_in_a_batch = dict_read_clustering_setting.pop( 'int_min_num_reads_in_a_batch' )
+        int_num_seconds_to_wait_before_identifying_completed_batches = dict_read_clustering_setting.pop( 'int_num_seconds_to_wait_before_identifying_completed_batches' )
+        # define internal functions related to writing an internal object to the storage
+        def set_id_rc_for_a_read_cluster( id_clump, idx_clus_within_clump ) :
+            """
+            Define read-cluster ID
+    
+            return:
+            id_rc
+            
+            2024-11-13 16:35 by IEUM An
+            """
+            id_rc = f"{id_clump}-{idx_clus_within_clump}" # set cluster id
+            return id_rc
+        def compose_and_save_raw_data_for_a_read_cluster( clump, idx_clus_within_clump, l_seg_clus, l_r_clus, sp ) :
+            """
+            compose and save raw data for a read cluster
+
+            sp, # a StackedPickles object opened in the 'w' mode.
+            
+            2024-11-14 1:00 - 2024-11-18 22:20 by IEUM An
+            """
+            id_clump = clump[ 0 ] # retrieve 'id_clump'
+            id_rc = set_id_rc_for_a_read_cluster( id_clump, idx_clus_within_clump ) # set cluster ID for the current read cluster
+            name_chr_of_clump, st_of_clump, en_of_clump, flag_clump_is_plus_strand = clump[ 1 ] # retrieve and parse 't_clump_basic_info'
+            st_of_clus, en_of_clus = l_seg_clus[ 0 ][ 0 ], l_seg_clus[ -1 ][ -1 ] # retrieve start and end positions of the read cluster
+            # create name space for the current read cluster
+            ns_rc_raw = {
+                'id_rc' : id_rc,
+                'id_clump' : id_clump,
+                't_clus_basic_info' : ( name_chr_of_clump, st_of_clus, en_of_clus, flag_clump_is_plus_strand ),
+                'idx_clus_within_clump' : idx_clus_within_clump,
+                'l_seg_clus' : l_seg_clus,
+                'l_r_clus' : l_r_clus,
+            } 
+            # the raw data will be the first object that will be written to the storage for the read cluster, requiring making the directory representing the read cluster
+            sp.write_an_object( ns_rc_raw, l_metadata = [ id_rc, id_clump, idx_clus_within_clump, ] ) # write the object representing the raw data and retrieve the number of bytes for the written raw data
+            return 
+        def worker_for_read_clustering( pipe_receiver_of_w4rc, pipe_sender_of_w4rc ) :
+            """
+            worker process for read clustering
+            
+            2024-10-27 - 2024-11-18 22:20 by IEUM An
+            """
+            def stockpile_of_batches( p_in = pipe_receiver_of_w4rc ) :
+                """
+                This generator receives batches of clumps from the main process and store as a stockpile, yielding a batch at a time as a generator.
+                # 2024-10-27
+                """
+                # initialize
+                q_batch = collections.deque( ) # initialize queue of batchs
+                n_batch_send = 0
+                flag_stream_ended = False 
+                while True :
+                    # stockpile batches as much as possible to reduce the possibility that the sending operation of the pipe becomes a blocking operation in the main process.
+                    while ( not flag_stream_ended ) and ( p_in.poll( ) ) : # if an input stream has not ended and a batch is present in the receiving end of the pipe to the main process.
+                        batch = p_in.recv( ) # receive a batch of clumps for read-level clustering
+                        if batch is None : # if the input stream ends, set the flag and exit 
+                            flag_stream_ended = True
+                            break
+                        q_batch.appendleft( batch ) # append batch
+                    # yield one of the batches
+                    if len( q_batch ) != 0 :
+                        batch = q_batch.pop( ) # retrieve a batch for distribution to worker processes
+                        yield batch
+                        n_batch_send += 1 # debugging
+                    # if the input steam has ended and the stockpile has been depleted, exit
+                    if flag_stream_ended and len( q_batch ) == 0 :
+                        break
+                return
+            def cluster_reads_using_bootstrapping( p_in, p_out ) :
+                """
+                cluster clumps of reads using bootstrapping-based probabilistic clustering methods with linear time complexity
+                2024-10-27 - 2024-11-18 22:20 by IEUM An
+                """
+                # initialize output files - raw data of read-clusters
+                id_file = bk.UUID( ) # get a random file ID
+                sp_raw = StackedPickles( f"{path_folder_read_cluster}raw.{id_file}", 'w', l_name_col_metadata = [ 'id_rc', 'id_clump', 'idx_clus_within_clump' ] )
+                while True :
+                    batch_of_clumps = p_in.recv( )
+                    if batch_of_clumps is None : # when end of stream has been reached, exit
+                        break
+    
+                    # process the batch
+                    # initialize 
+                    l_clump_processed = [ ]
+                    for clump, l_r in batch_of_clumps : # for each clump
+                        # parse clump information
+                        id_clump = clump[ 0 ]
+                        name_chr_of_clump, st_of_clump, en_of_clump, flag_clump_is_plus_strand = clump[ 1 ] 
+                        n_reads = len( l_r ) # retrieve the number of reads in the clump
+                        
+                        # cluster reads using bootstrapping and save the raw data for each read-cluster
+                        if n_reads > 1 : # if there are more than two reads in the current clump, perform read-clustering operations
+                            # perform bootstrapping-based clustering of reads
+                            l_clus, dict_fusion, dict_meta = cluster_reads_with_bootstrapping( 
+                                st_of_clump, 
+                                en_of_clump, 
+                                l_r, 
+                                ** dict_read_clustering_setting
+                            )
+        
+                            # process detected 'fusion' transcripts 
+                            n_reads_fusion = 0
+                            dict_fusion_processed = dict( )
+                            for id_fusion in dict_fusion :
+                                l_idx_r = dict_fusion[ id_fusion ] # list of indices of reads
+                                dict_fusion_processed[ id_fusion ] = list( l_r[ idx_r ] for idx_r in l_idx_r ) # retrieve the actual records for the reads representing fusion transcripts
+                                n_reads_fusion += len( l_idx_r ) # update 'n_reads_fusion'
+                            
+                            # process the clustering result and update the clump
+                            n_runs = dict_meta[ 'n_bootstrapping_runs' ]
+                            n_read_clusters = len( l_clus )
+                            clump.extend( [
+                                n_read_clusters, # (5) number of identified read-clusters
+                                list( tuple( ( st, en ) for st, en in clus[ 0 ] ) for clus in l_clus ), # (6) list of l_segments for the read-clusters
+                                list( len( clus[ 1 ] ) for clus in l_clus ), # (7) list of number of reads for the read-clusters
+                                n_reads_fusion / n_reads, # (8) proportion of total read count of fusion (or chimeric reads) for the clump
+                                n_runs, # (9) number of bootstrapping (i.e., random sampling rounds) used 
+                                ( dict_meta[ 'n_most_freq_clustering_result' ] / n_runs ) if n_runs > 0 else 0, # (10) proportion of bootstrapping rounds with the most frequent clustering result
+                                dict_meta[ 'flag_composite_clusters' ], # (11) A flag indicating whether the final set of clusters are selected from the most frequent clustering result (False), or alternatively, from an ensemble of the multiple bootstrapping-based clustering results (True).
+                                base64_encode( pickle_obj_to_bytes( dict_fusion_processed ) ), # (12) Base64 representation of the Pickle-serialized data containing detected fusion transcripts. (None if no fusion transcript has been detected)
+                                dict_meta[ 'wall_time_in_seconds' ], # (13) wall time used for the clustering process
+                            ] )
+    
+                            # compose data object representing raw data for each read cluster and save the object to the storage
+                            for idx_clus_within_clump, clus in enumerate( l_clus ) : # retrieve raw data for each read cluster
+                                l_seg_clus, l_idx_r_clus = clus # parse the cluster information
+                                compose_and_save_raw_data_for_a_read_cluster( clump, idx_clus_within_clump, l_seg_clus, list( l_r[ idx_r ] for idx_r in l_idx_r_clus ), sp_raw ) # save raw data # update 'n_bytes_written'
+                        else :
+                            # handle the clump with only a single read, for which read-clustering operation is not required.
+                            l_seg_clus = l_r[ 0 ][ 1 ]
+                            clump.extend( [
+                                1, # (5) number of read-clusters
+                                [ l_seg_clus ], # (6) list of l_segments for the read-clusters
+                                [ n_reads ], # (7) list of number of reads for the read-clusters
+                                0, # (8) proportion of fusion (or chimeric reads) for the clump
+                                0, # (9) number of bootstrapping (i.e., random sampling rounds) used 
+                                1, # (10) proportion of bootstrapping rounds with the current clustering results
+                                False, # (11) A flag indicating whether the final set of clusters are selected from the most frequent clustering result (False), or alternatively, from an ensemble of the multiple bootstrapping-based clustering results (True).
+                                None, # (12) Base64 representation of the Pickle-serialized data containing detected fusion transcripts. (None if no fusion transcript has been detected)
+                                0, # (13) wall time used for the clustering process
+                            ] )
+    
+                            # compose data object representing raw data for the read cluster and save the object to the storage
+                            # set cluster id and retrieve necessary information
+                            compose_and_save_raw_data_for_a_read_cluster( clump, 0, l_seg_clus, l_r, sp_raw ) # save raw data # update 'n_bytes_written'
+    
+                        # collect the clump information, which will be sent to the main process to compile a complete list of all clumps and read clusters detected for the downstream analysis
+                        l_clump_processed.append( clump )
+                       
+                    # process batch 
+                    p_out.send( l_clump_processed ) # place-holder
+                    
+                # close the output file
+                sp_raw.close( )
+
+                # notify all works has been completed.
+                p_out.send( 'completed' )     
+            def process_read_clustering_result( res ) :
+                pipe_sender_of_w4rc.send( res ) # send result
+    
+            logger.info( "[the first iteration] read clustering operation started" )
+            # start and monitor the processes until the input stream from the main process ends.
+            bk.Multiprocessing_Batch_Generator_and_Workers(
+                gen_batch = stockpile_of_batches( ),
+                process_batch = cluster_reads_using_bootstrapping,
+                post_process_batch = process_read_clustering_result,
+                int_num_threads = n_threads,
+                int_num_seconds_to_wait_before_identifying_completed_processes_for_a_loop = int_num_seconds_to_wait_before_identifying_completed_batches,
+                flag_wait_for_a_response_from_worker_after_sending_termination_signal = True,
+            )
+            logger.info( "[the first iteration] read clustering operation completed" )
+    
+            # before exiting, notify the main process that the output stream has ended.
+            pipe_sender_of_w4rc.send( None )
+            return # exit
+        # initiate the worker for read clustering (w4rc) process and start the process
+        p_w4rc = mp.Process( target = worker_for_read_clustering, args = ( pipe_receiver_of_w4rc, pipe_sender_of_w4rc ) )
+        p_w4rc.start( )
+    
+        # constants
+        dtype_buffer_clump = int
+        
+        # initialize the name space
+        ns = {
+            # clump id
+            'id_clump_curr' : 0,
+            # store information of the current clumps
+            'clumps_curr' : [
+                {
+                    'flag_is_plus_strand' : False,
+                    'name_chr_curr' : None,
+                    'st_clump' : None,
+                    'buffer' : None,
+                    'l_r' : [ ], 
+                }, # reverse strand
+                {
+                    'flag_is_plus_strand' : True,
+                    'name_chr_curr' : None,
+                    'st_clump' : None,
+                    'buffer' : None,
+                    'l_r' : [ ], 
+                }, # forward strand
+            ], # first and second for reverse and forward strands, respectively
+            # store the current batch
+            'batch_of_clumps' : [ ], 
+            'num_reads_in_batch' : 0,
+            # for multiprocessing
+            'flag_stream_from_w4rc_ended' : False,
+            # a database of processed clumps. for detailed description of the database, refer to the comment in the 'process_curr_clump_and_initialize_next_clump' method.
+            'l_clump' : [ ],
+        }
+        def send_batch_and_retrieve_results( flag_flush : bool = False ) :
+            """
+            send the batch of clumps 
+            
+            flag_flush : bool = False, # if 'flag_flush' is True, send the batch even if the preferred size has not been reached.
+            # 2024-10-28 19:00
+            """
+            if ( flag_flush or ( ns[ 'num_reads_in_batch' ] >= int_min_num_reads_in_a_batch ) ) and len( ns[ 'batch_of_clumps' ] ) > 0 : # determine whether to flush the current batch
+                # send the current batch of the clump of reads for further processing
+                pipe_sender_for_w4rc.send( ns[ 'batch_of_clumps' ] )
+                # reset the batch
+                ns[ 'batch_of_clumps' ] = [ ]
+                ns[ 'num_reads_in_batch' ] = 0
+    
+            while ( not ns[ 'flag_stream_from_w4rc_ended' ] ) and ( pipe_receiver_for_w4rc.poll( ) ) : # if an output stream has not ended and a result is present in the receiving end of the pipe from the worker for read clustering (w4rc)
+                l_clump_processed = pipe_receiver_for_w4rc.recv( )
+                
+                if l_clump_processed is None : # if the end of the output stream has been detected, set the appropriate flag.
+                    ns[ 'flag_stream_from_w4rc_ended' ] = True
+                    break
+    
+                # parse the processed result
+                for clump_processed in l_clump_processed : # for each clump processed
+                    id_clump = clump_processed[ 0 ] # retrieve clump ID
+                    ns[ 'l_clump' ][ id_clump ].extend( clump_processed[ 4 : ] )
+            return
+        def process_curr_clump_and_initialize_next_clump( clump, ref_st = None, ref_en = None, name_chr = None ) :
+            """
+            process the current clump and initialize clump using the incoming read.
+            Of note, for initialization of a clump, at least one read is required, and the minimum number of reads in a clump would be 1.
+    
+            If 'ref_st' is not given (i.e., if None is given), the clump will be 'reset' to the ground state before initialization.
+            # 2024-10-28 19:00
+            """
+            # process current clump
+            if clump[ 'name_chr_curr' ] is not None : # when clump has not been initialized, exit
+                # finalize the boundaries of the current clump by retrieving the end position of the clump
+                en_clump = clump[ 'st_clump' ] + np.nonzero( clump[ 'buffer' ] )[ 0 ][ -1 ] + 1 # 0-based coordinate
+                # initialize processed clump data object
+                l_r = clump[ 'l_r' ]
+                n_reads = len( l_r ) # retrieve the number of reads in the clump
+                clump_processed = [
+                    ns[ 'id_clump_curr' ], # assign clump id
+                    ( clump[ 'name_chr_curr' ], clump[ 'st_clump' ], en_clump, clump[ 'flag_is_plus_strand' ] ),
+                    clump[ 'buffer' ].max( ),
+                    n_reads,
+                ]
+                """
+                structure of 'clump_processed'
+                (1) id-clump (int)
+                (2) ( name_chr, st, en, flag_is_plus_strand ) (tuple)
+                (3) max-coverage (max-read-count across the clump) (int)
+                (4) the total number of reads in the clump
+                --- information that is added after read clustering
+                (5) number of identified read-clusters
+                (6) list of l_segments for the read-clusters
+                (7) list of number of reads for the read-clusters
+                (8) proportion of total read count of fusion (or chimeric reads) for the clump
+                (9) number of bootstrapping (i.e., random sampling rounds) used 
+                (10) proportion of bootstrapping rounds with the most frequent clustering result
+                (11) A flag indicating whether the final set of clusters are selected from the most frequent clustering result (False), or alternatively, from an ensemble of the multiple bootstrapping-based clustering results (True).
+                (12) Base64 representation of the Pickle-serialized data containing detected fusion transcripts. (None if no fusion transcript has been detected)
+                (13) wall time used for the clustering process
+                """
+                ns[ 'id_clump_curr' ] += 1 # increase the clump id after the assignment for the next clump
+            
+                # for the current clump perform read-clustering operations and save the result, along with the 'raw' data.
+                ns[ 'batch_of_clumps' ].append( ( clump_processed, l_r ) ) # add the clump to the current batch
+                ns[ 'num_reads_in_batch' ] += n_reads # update the number of reads in the current batch
+                send_batch_and_retrieve_results( ) # send the current batch to the worker.
+                
+                # add the processed clump to the database of processed clumps
+                ns[ 'l_clump' ].append( clump_processed )
+    
+            # initialize the next clump
+            if ref_st is not None : 
+                # initialize the next clump using the current read
+                if name_chr is not None : # update chromosome
+                    clump[ 'name_chr_curr' ] = name_chr
+                clump[ 'st_clump' ] = ref_st
+                clump[ 'buffer' ] = np.zeros( max( int_initial_size_buffer, ( ref_en - ref_st ) * ( 1 + float_ratio_padding ) ), dtype = dtype_buffer_clump )
+                clump[ 'l_r' ] = [ ]
+            else :
+                # If 'ref_st' is not given (i.e., if None is given), the clump will be 'reset' to the ground state before initialization.
+                clump[ 'name_chr_curr' ] = None
+                clump[ 'st_clump' ] = None
+                clump[ 'buffer' ] = None
+                clump[ 'l_r' ] = [ ]
+            return
+        def expand_clump( clump, pos ) :
+            """
+            expand end position of the current clump
+            # 2024-10-24
+            """
+            buffer_size_curr = len( clump[ 'buffer' ] )
+            buffer_size_required = pos - clump[ 'st_clump' ]
+            if buffer_size_curr < buffer_size_required : # if current size of the buffer is too small to accomodate the given position
+                # create new buffer and copy the content of the existing buffer
+                buffer_new = np.zeros( buffer_size_required * ( 1 + float_ratio_padding ), dtype = dtype_buffer_clump )
+                buffer_new[ : buffer_size_curr ] = clump[ 'buffer' ][ : ]
+                clump[ 'buffer' ] = buffer_new # update the buffer
+            return
+        
+        while True:
+            l_dr = pipe_receiver_streaming.recv( )  # retrieve record
+            if l_dr is None:  # handle when all records are parsed
+                break
+            for dr in l_dr :
+                # parse a decorated record
+                d, rec = dr
+                name_chr, ref_st = d
+                idx_bam_input, flag_is_plus_strand, str_cb, l_seg, ref_en, float_weight = rec
+                ic = ( idx_bam_input, str_cb ) # retrieve cell identifier
+                dict_ic_to_total_count[ ic ] += float_weight # update total (size-distribution-normalized) count for the current cell
+    
+                # retrieve the clump for the current strand
+                clump = ns[ 'clumps_curr' ][ int( flag_is_plus_strand ) ]
+                # determine whether a new clump should begin
+                if name_chr != clump[ 'name_chr_curr' ] : # if chromosome has changed
+                    # start processing of existing clump and initialize a new clump
+                    process_curr_clump_and_initialize_next_clump( clump, ref_st, ref_en, name_chr )
+                elif len( clump[ 'buffer' ] ) + clump[ 'st_clump' ] <= ref_st : # if current read is completely outside of the boundaries of current clump
+                    # start processing of existing clump and initialize a new clump
+                    process_curr_clump_and_initialize_next_clump( clump, ref_st, ref_en )
+                elif ref_st > clump[ 'st_clump' ] and clump[ 'buffer' ][ ref_st - clump[ 'st_clump' ] - 1 ] == 0 : # if zero-coverage region appears before the current read
+                    # start processing of existing clump and initialize a new clump
+                    process_curr_clump_and_initialize_next_clump( clump, ref_st, ref_en )
+                    
+                # update current clump
+                expand_clump( clump, ref_en ) # expand clump using the reference alignment end position
+                clump[ 'buffer' ][ ref_st - clump[ 'st_clump' ] : ref_en - clump[ 'st_clump' ] ] += 1 # increase read-count (size-distribution-normalized will not be used due to the sample-specific difference of total transcript abundance and the difficulties associated with accurately estimating the metric (because of PCR amplification bias, low rate of sampling, ect.).)
+                clump[ 'l_r' ].append( ( ic, l_seg, float_weight ) ) # collect the read for the clump # cell identifier, list of mapped segments, and the weight of the read are currently all the necessary pieces of information ROBIN requires for the downstream analysis.
+                
+        # finalize and process the last clumps
+        for clump in ns[ 'clumps_curr' ] : # for both strands
+            process_curr_clump_and_initialize_next_clump( clump )
+        send_batch_and_retrieve_results( flag_flush = True ) # send the last batch
+    
+        # debugging
+        logger.info( f"[the first iteration] {len( ns[ 'l_clump' ] )} read-clumps have been detected" )
+    
+        end_streaming( ) # end streaming
+    
+        # notify the worker for read clustering (w4rc) that the stream of clumps has ended, allowing the w4rc process to join the main process
+        pipe_sender_for_w4rc.send( None )
+        # wait until the w4rc process to complete all batches and all results are retrieved from the worker process (w4rc)
+        while not ns[ 'flag_stream_from_w4rc_ended' ] : # if the end of output stream has been detected, exit the loop
+            send_batch_and_retrieve_results( )
+        # wait until the w4rc process join the main process
+        p_w4rc.join( )
+
+        # post-process total sum of size-distribution-normalized-count before size-factor based normalization
+        # and save results from the first iteration to the storage
+        dict_ic_to_total_count = dict( ( ic, dict_ic_to_total_count[ ic ] ) for ic in dict_ic_to_total_count if dict_ic_to_total_count[ ic ] > 0 ) # drop cells with 0 total count
+        bk.PICKLE_Write( f"{path_folder_internal_objects}dict_ic_to_total_count.pkl", dict_ic_to_total_count ) # [optional internal object]
+        dict_ic_to_idx_name_clus = dict( ( ic, dict_ic_to_idx_name_clus[ ic ] ) for ic in dict_ic_to_idx_name_clus if ic in dict_ic_to_total_count ) # drop cells with 0 total count
+        bk.PICKLE_Write( f"{path_folder_internal_objects}dict_ic_to_idx_name_clus.pkl", dict_ic_to_idx_name_clus ) # [required for downstream analysis]
+        dict_idx_name_clus_to_n_cells = bk.COUNTER( dict_ic_to_idx_name_clus.values( ) ) # count the number of cells for each cluster after dropping cells with 0 total count (some 'name_clus' could have been dropped completely, containing 0 cells after the filtering)
+        # convert 'dict_idx_name_clus_to_n_cells' to 'arr_n_cells_for_each_name_clus' for faster access speed
+        arr_n_cells_for_each_name_clus = np.zeros( n_unique_name_clus, dtype = int ) # initialize 'arr_n_cells_for_each_name_clus'
+        for idx_name_clus in dict_idx_name_clus_to_n_cells :
+            arr_n_cells_for_each_name_clus[ idx_name_clus ] = dict_idx_name_clus_to_n_cells[ idx_name_clus ]
+        bk.PICKLE_Write( f"{path_folder_internal_objects}arr_n_cells_for_each_name_clus.pkl", arr_n_cells_for_each_name_clus ) # [required for downstream analysis]
+        # pre-calculate inverse of size factors for total-sum-based normalization
+        dict_ic_to_inverse_of_size_factor = dict( ( ic, float_target_sum_of_size_distribution_normalized_count_for_size_factor_normalization / dict_ic_to_total_count[ ic ] ) for ic in dict_ic_to_total_count )
+        bk.PICKLE_Write( f"{path_folder_internal_objects}dict_ic_to_inverse_of_size_factor.pkl", dict_ic_to_inverse_of_size_factor ) # [required for downstream analysis]
+
+        #--- compose "df_clump" and "df_rc" ---#
+        # export clustering result 
+        # compose "df_clump"
+        df_clump = pd.DataFrame( ns[ 'l_clump' ], columns = [
+            'id_clump',
+            't_clump_info',
+            'max_coverage',
+            'n_reads',
+            'n_clusters',
+            'list_of_segments_for_each_cluster',
+            'n_reads_for_each_cluster',
+            'proportion_of_fusion_transcripts',
+            'n_clustering_runs',
+            'frequency_of_most_frequent_clustering_result',
+            'composite_clustering_result',
+            'fusion_transcripts_database_pickled_and_base64_encoded',
+            'wall_time_in_seconds',
+        ] )
+        df_clump = df_clump.join( pd.DataFrame( list( list( t ) for t in df_clump.t_clump_info.values ), columns = [
+            'name_chr',
+            'start',
+            'end',
+            'plus_strand',
+        ] ) )
+        df_clump.to_csv( f"{path_folder_object}df_clump.tsv.gz", sep = '\t', index = False )
+
+        # compose 'df_rc'
+        def initialize_df_rc_from_df_clump( df_clump ) :
+            """
+            initialize read cluster dataframe
+            2024-12-06 21:45 by IEUM An, 2024-12-15 11:17 by IEUM An
+            """
+            l_l = [ ]
+            for id_clump, t_clump_info, l_l_seg_clus, l_n_reads_clus in df_clump[ [ 'id_clump', 't_clump_info', 'list_of_segments_for_each_cluster', 'n_reads_for_each_cluster' ] ].values :
+                name_chr_of_clump, st_of_clump, en_of_clump, flag_clump_is_plus_strand = t_clump_info # parse 't_clump_info'
+                n_clus = len( l_l_seg_clus ) # retrieve the number of clusters
+                for idx_clus_within_clump in range( n_clus ) : # for each cluster
+                    l_seg_clus = l_l_seg_clus[ idx_clus_within_clump ]
+                    n_reads_clus = l_n_reads_clus[ idx_clus_within_clump ]
+                    id_rc = set_id_rc_for_a_read_cluster( id_clump, idx_clus_within_clump ) # set cluster ID for the current read cluster
+                    st_of_clus, en_of_clus = l_seg_clus[ 0 ][ 0 ], l_seg_clus[ -1 ][ -1 ] # retrieve start and end positions of the read cluster
+                    l_l.append( [
+                        id_rc, # id_rc
+                        id_clump, # id_clump
+                        ( name_chr_of_clump, st_of_clus, en_of_clus, flag_clump_is_plus_strand ), # t_clus_basic_info
+                        idx_clus_within_clump, # idx_clus_within_clump
+                        l_seg_clus, # l_seg_clus
+                        n_reads_clus, # n_reads_clus
+                    ] )
+            df_rc = pd.DataFrame( l_l, columns = [ 'id_rc', 'id_clump', 't_clus_basic_info', 'idx_clus_within_clump', 'l_seg_clus', 'n_reads_clus' ] ) # compose the dataframe
+            df_rc[ 'idx_rc' ] = df_rc.index.values # retrieve the integer indices of read-clusters
+            return df_rc
+
+        df_rc = initialize_df_rc_from_df_clump( df_clump ) # initialize 'df_rc'  (read-cluster database) based on 'df_clump' (read-clump database)
+        df_rc.to_csv( f"{path_folder_object}df_rc.raw.tsv.gz", sep = '\t', index = False )
+
+    # ---------------------------------------------------------------------------- #
+    # integrate the information from the external reference annotation (era) files #
+    # to annotate detected read-clusters with available info.                      #
+    # ---------------------------------------------------------------------------- #
+    # --- (interpretation of read-clusters from the first iteration) --- #
+    if True :
+        # parse keyword arguments
+        flag_drop_the_chr_prefix_from_seqname = dict_annotation_setting.pop( 'flag_drop_the_chr_prefix_from_seqname' )
+        l_annotation_input_files = dict_annotation_setting.pop( 'l_annotation_input_files' )
+        n_annotation_input_file = len( l_annotation_input_files ) # retrieve the number of ERA files
+        flag_no_era = n_annotation_input_file == 0
+
+        # ------------------------------------------------------------------------------------------- #
+        # load and pre-process external annotation, based on the 'load_annotation_input_files' method #
+        # ------------------------------------------------------------------------------------------- #
+        if not flag_no_era : # if more than one input file has been given
+            # perform the loading and pre-processing of input annotation files
+            logger.info( f"loading {len( l_annotation_input_files )} external reference annotation (ERA) files ..." )
+            l_ns_anno = load_annotation_input_files( 
+                l_annotation_input_files, 
+                flag_drop_the_chr_prefix_from_seqname = flag_drop_the_chr_prefix_from_seqname, 
+                str_format_default_id = "input_annotation#{index_of_annotation}"
+            )
+            logger.info( f"loaded {len( l_annotation_input_files )} ERA files" )
+    
+            # --------------------------------------------------------------- #
+            # further process the external annotation based on the input data #
+            # --------------------------------------------------------------- #
+            # retrieve list of 'name_chr' that were observed in the input sequencing data
+            l_name_chr_observed_from_data = set( df_clump.name_chr.values )
+            
+            #--- combine annotation inputs ---#
+            l_df_anno = [ ]
+            dtype_idx_input = get_dtype_to_encode_unique_values_using_integer( len( l_ns_anno ) ) # determine dtype for storing 'idx_input'
+            for idx_input, ns in enumerate( l_ns_anno ) :
+                ns[ 'idx' ] = idx_input # update the namespace
+                # process 'df_anno' before collecting 'df_anno' for combining
+                df_anno = ns[ 'df_anno' ]
+                del df_anno[ 'attribute' ] # delete the attribute column, which contains the data values that were already parsed and stored as the columns of 'df_anno'
+                del ns[ 'df_anno' ] # to reduce the memory footprint, discard the copy of 'df_anno' for each annotation input 
+                df_anno = bk.PD_Select( df_anno, seqname = l_name_chr_observed_from_data ) # filter out entries in the 'name_chr' that were not observed in the input sequencing data
+                n_era = len( df_anno ) # retrieve number of ERA entries in the current input
+                df_anno[ '_idx_input' ] = np.full( n_era, idx_input, dtype = dtype_idx_input )
+                l_df_anno.append( df_anno ) # collect 'df_anno' for merging
+            l_n_era_for_each_input = list( len( df ) for df in l_df_anno ) # collect the number of ERA entries for each annotation input in the resulting 'df_anno'
+            df_anno = pd.concat( l_df_anno, ignore_index = True ) # combine all annotation inputs
+            del l_df_anno # to reduce the memory footprint
+            l_id_era_input = list( ns[ 'id' ] for ns in l_ns_anno ) # retrieve 'ID' of each ERA input
+            l_flag_gene_transcript_exon_annotation = list( ns[ 'flag_gene_transcript_exon_annotation' ] for ns in l_ns_anno ) # retrieve 'flag_gene_transcript_exon_annotation' of each ERA input
+            
+            #--- change dtype of columns to reduce the memory footprint ---#
+            dtype_idx_era = get_dtype_to_encode_unique_values_using_integer( len( df_anno ) ) # determine dtype for storing 'idx_entry' (i.e., 'idx_era', the external reference annotation (ERA))
+            df_anno[ '_idx_entry' ] = df_anno.index.values.astype( dtype_idx_era ) # assign unique integer indices for ERA entries
+            df_anno.start = df_anno.start - 1 # convert 1-based coordinates to 0-based coordinates
+            # change dtype of genomic coordinates
+            l_name_col_genomic_coord = [ 'start', 'end' ]
+            dtype_genomic_coord = get_dtype_to_encode_unique_values_using_integer( max( df_anno[ name_col ].values.max( ) for name_col in l_name_col_genomic_coord ) ) # determine dtype for storing the genomic coordinates of the ERA entries
+            for name_col in l_name_col_genomic_coord :
+                df_anno[ name_col ] = df_anno[ name_col ].values.astype( dtype_genomic_coord )
+            # for processing integer indices of external reference annotation (ERA) inputs
+            arr_idx_era_end_for_each_input = np.cumsum( l_n_era_for_each_input ) # the end coordinate (0-based; i.e., the end coordinate does not include 'idx_era' values of the ERA entries of the annotation input) of 'idx_era' (i.e. '_idx_entry' in 'df_anno') for each annotation input. 
+            def get_idx_era_input_from_idx_era( idx_era ) :
+                """
+                retrieve 'idx_era_input' ('idx_input' from 'df_anno') from the given ERA entry 'idx_era' ('idx_entry' from 'df_anno').
+                2024-12-13 15:31 by IEUM An
+                """
+                for idx_era_input, idx_era_end in enumerate( arr_idx_era_end_for_each_input ) :
+                    if idx_era < idx_era_end :
+                        return idx_era_input
+            
+            #--- add 'idx_entry_of_gene' column and build the Interval Trees of the entries from the annotation inputs ('dict_name_chr_to_it_anno') ---#
+            arr_idx_entry_of_gene = np.full( len( df_anno ), fill_value = val_repr_invalid_idx, dtype = dtype_idx_era ) # initialize 'arr_idx_entry_of_gene' array (-1 indicates invalid values)
+            arr_idx_entry_of_transcript = np.full( len( df_anno ), fill_value = val_repr_invalid_idx, dtype = dtype_idx_era ) # initialize 'arr_idx_entry_of_transcript' array (-1 indicates invalid values)
+            def update_arr_idx_entry_of_a_specific_feature( df_anno, name_feature : str, name_col_of_id_of_a_specific_feature, arr_idx_entry_of_a_specific_feature ) :
+                """
+                update an input array of idx_entry of a specific feature type ('gene' or 'transcript') using a given 'df_anno' of a "gene/transcript/exon" annotation input
+                2024-12-12 23:45 by IEUM An
+                """
+                # prepare
+                df_anno_of_a_specific_feature = df_anno[ df_anno.feature == name_feature ] # retrieve entries of a specific feature type
+                dict_id_of_a_specific_feature_to_idx_entry = dict( ( id_of_a_specific_feature, idx_entry ) for id_of_a_specific_feature, idx_entry in df_anno_of_a_specific_feature[ [ name_col_of_id_of_a_specific_feature, '_idx_entry' ] ].values ) # retrieve 'id_of_a_specific_feature' to 'idx_entry' mapping for the entries of the specific feature type
+                # update 'arr_idx_entry_of_a_specific_feature' array for the current input using the 'dict_id_of_a_specific_feature_to_idx_entry' mapping
+                for id_of_a_specific_feature, idx_entry in df_anno[ [ name_col_of_id_of_a_specific_feature, '_idx_entry' ] ].values :
+                    arr_idx_entry_of_a_specific_feature[ idx_entry ] = dict_id_of_a_specific_feature_to_idx_entry[ id_of_a_specific_feature ] if ( id_of_a_specific_feature in dict_id_of_a_specific_feature_to_idx_entry ) else val_repr_invalid_idx # update 'arr_idx_entry_of_a_specific_feature' for the entry 'idx_entry'
+                return arr_idx_entry_of_a_specific_feature, dict_id_of_a_specific_feature_to_idx_entry
+            dict_name_chr_to_it_anno = dict( ( name_chr, intervaltree.IntervalTree( ) ) for name_chr in l_name_chr_observed_from_data ) # initialize 'dict_name_chr_to_it_anno'
+            for idx_input, df_anno_for_an_input in df_anno.groupby( '_idx_input' ) :
+                flag_gene_transcript_exon_annotation = l_ns_anno[ idx_input ][ 'flag_gene_transcript_exon_annotation' ] # retrieve 'flag_gene_transcript_exon_annotation'
+                if flag_gene_transcript_exon_annotation :
+                    #--- process "gene/transcript/exon" annotation input ---#
+                    df = df_anno_for_an_input[ [ 'seqname', 'feature', 'start', 'end', '_gene_id', '_transcript_id', '_idx_entry' ] ] # retrieve data of required columns
+            
+                    # update 'arr_idx_entry_of_gene' and 'arr_idx_entry_of_transcript'
+                    arr_idx_entry_of_gene, dict_id_gene_to_idx_entry = update_arr_idx_entry_of_a_specific_feature( df, name_feature = 'gene', name_col_of_id_of_a_specific_feature = '_gene_id', arr_idx_entry_of_a_specific_feature = arr_idx_entry_of_gene )
+                    arr_idx_entry_of_transcript, dict_id_transcript_to_idx_entry = update_arr_idx_entry_of_a_specific_feature( df, name_feature = 'transcript', name_col_of_id_of_a_specific_feature = '_transcript_id', arr_idx_entry_of_a_specific_feature = arr_idx_entry_of_transcript )
+            
+                    # update 'dict_name_chr_to_it_anno' (interval trees) for the current input
+                    for id_gene, df_exon_of_a_gene in df[ df.feature == 'exon' ].groupby( '_gene_id' ) : # iterate through exons of each gene
+                        idx_entry_of_gene = dict_id_gene_to_idx_entry[ id_gene ] # retrieve 'idx_entry_of_gene' of the current gene
+                        for name_chr, st, en in df_exon_of_a_gene[ [ 'seqname', 'start', 'end', ] ].values :
+                            dict_name_chr_to_it_anno[ name_chr ].addi( st, en, idx_entry_of_gene ) # update the interval tree # 'st' and 'en' are already in 0-based coordinates
+                    del dict_id_gene_to_idx_entry, dict_id_transcript_to_idx_entry 
+                else :
+                    #--- process "gene" annotation input ---#
+                    df = df_anno_for_an_input[ [ 'seqname', 'feature', 'start', 'end', '_gene_id', '_idx_entry' ] ] # retrieve data of required columns
+                    
+                    # update 'arr_idx_entry_of_gene' array for the current input
+                    # each entry is a unique entry of feature type == 'gene'
+                    arr = df[ '_idx_entry' ].values # 'arr' itself is an array of 'idx_entry_of_gene'
+                    arr_idx_entry_of_gene[ arr ] = arr
+                        
+                    # update 'dict_name_chr_to_it_anno' (interval trees) for the current input
+                    for name_chr, st, en, idx_entry_of_gene in df[ [ 'seqname', 'start', 'end', '_idx_entry' ] ].values :
+                        dict_name_chr_to_it_anno[ name_chr ].addi( st, en, idx_entry_of_gene ) # update the interval tree # 'st' and 'en' are already in 0-based coordinates        
+                    del arr
+                del df_anno_for_an_input, df 
+            df_anno[ '_idx_entry_of_gene' ] = arr_idx_entry_of_gene # update 'df_anno' # add the 'idx_entry_of_gene' column
+            df_anno[ '_idx_entry_of_transcript' ] = arr_idx_entry_of_transcript # update 'df_anno' # add the 'idx_entry_of_transcript' column
+            del arr_idx_entry_of_gene, arr_idx_entry_of_transcript
+            
+            # ---------------------------------------------------------------------------------------------------------------- #
+            #    for each read-cluster, identify overlapped "gene" annotations from the external reference annotation (ERA)    #
+            # ---------------------------------------------------------------------------------------------------------------- #
+            l = [ ]
+            set_idx_era_gene_overlapped = set( ) # initialize 'set_idx_era_gene_overlapped'
+            for t_clus_basic_info, l_seg_clus in df_rc[ [ 't_clus_basic_info', 'l_seg_clus' ] ].values : # iterate through each read cluster
+                name_chr_of_rc, st_of_rc, en_of_rc, flag_rc_is_plus_strand = t_clus_basic_info # parse 't_clus_basic_info'
+                set_idx_era_gene_overlapped_with_a_rc = set( ) # initialize 'set_idx_era_gene_overlapped_with_a_rc'
+                if name_chr_of_rc in dict_name_chr_to_it_anno : # if ERA of 'name_chr_of_rc' exists
+                    it_anno = dict_name_chr_to_it_anno[ name_chr_of_rc ] # retrieve an interval tree containing ERA entries (regardless of the strandness values of the ERA entries)
+                    for st_seg, en_seg in l_seg_clus :
+                        for i in it_anno[ st_seg : en_seg ] : # for each overlapped ERA entrie
+                            idx_entry_of_gene = i[ 2 ] # parse the data contained in the interval object
+                            set_idx_era_gene_overlapped_with_a_rc.add( idx_entry_of_gene )
+                l_idx_era_gene_overlapped_with_a_rc = sorted( set_idx_era_gene_overlapped_with_a_rc ) # compose a sorted list of 'idx_era_gene' overlapped with the current read-cluster
+                l.append( l_idx_era_gene_overlapped_with_a_rc ) # collect the 'l_idx_era_gene_overlapped_with_a_rc'
+                set_idx_era_gene_overlapped.update( set_idx_era_gene_overlapped_with_a_rc ) # update 'set_idx_era_gene_overlapped'
+            df_rc[ 'l_idx_era_gene' ] = l # add a list of overlapped "gene" external reference annotation (ERA) entries for each read-cluster
+            df_rc[ 'n_era_gene' ] = list( len( e ) for e in df_rc.l_idx_era_gene.values ) # collect the total number of ERA gene entries overlapped
+            df_anno = bk.PD_Select( df_anno, _idx_entry_of_gene = set_idx_era_gene_overlapped ) # exclude ERA entries that were not overlapped with any read-clsuter
+            del set_idx_era_gene_overlapped, l
+            # if no ERA entries were overlapped with the discovered read clusters, set 'flag_no_era' to True
+            if len( df_anno ) == 0 :
+                flag_no_era = True
+        
+        # --------------------------- #
+        #    Finalize ERA database    #
+        # --------------------------- #
+        if not flag_no_era :
+            #--- perform integer encoding of selected columns ---#
+            def integer_encoding( values, dict_for_ie, dtype = 'int8' ) :
+                """
+                perform integer-encoding of given 'values' using the given 'dict_for_ie'. if the value does not have an appropriate mapping in the given 'dict_for_ie', a value stored in 'dict_for_ie' with None as a key (i.e., 'dict_for_ie[ None ]') will be used.
+                2024-12-13 00:35 by IEUM An
+                """
+                values_encoded = list( dict_for_ie[ e ] if e in dict_for_ie else dict_for_ie[ None ] for e in values )
+                return np.array( values_encoded, dtype = dtype )
+            dict_for_ie_feature = {
+                'gene' : 0,
+                'transcript' : 1,
+                'exon' : 2,
+                None : -1
+            } # IE stands for 'integer encoding' # a dictionary for integer-encoding of the 'feature' column of 'df_anno' (ERA)
+            l_for_decoding_ie_feature = [ 'gene', 'transcript', 'exon' ]
+            dict_for_ie_strand = {
+                '+' : 0,
+                '-' : 1,
+                '.' : 2,
+                None : -1
+            } # IE stands for 'integer encoding' # a dictionary for integer-encoding of the 'strand' column of 'df_anno' (ERA)
+            l_for_decoding_ie_strand = [ '+', '-', '.' ]
+            dict_for_ie_strand_relationship = {
+                'sense' : 0,
+                'antisense' : 1,
+                'unknown' : 2,
+                None : -1,
+            } # IE stands for 'integer encoding' # a dictionary for integer-encoding of the 'strand_relationship' column of 'df_ft' (ERA-annotated features from the "summarize_read_cluster" method)
+            l_for_decoding_ie_strand_relationship = [ 'sense', 'antisense', 'unknown' ]
+            def decode_ie( values_encoded, dict_for_ie, l_for_decoding_ie, val_invalid = np.nan ) :
+                """
+                Decode an integer-encoded value based on 'dict_for_ie' and 'l_for_decoding_ie'
+                2024-12-13 19:31 by IEUM An
+                """
+                val_repr_invalid = dict_for_ie[ None ]
+                values_decoded = list( val_invalid if e == val_repr_invalid else l_for_decoding_ie[ e ] for e in values_encoded )
+                return values_decoded # return decoded values
+            df_anno[ '_ie_feature' ] = integer_encoding( df_anno.feature.values, dict_for_ie_feature, dtype = 'int8' )
+            df_anno[ '_ie_strand' ] = integer_encoding( df_anno.strand.values, dict_for_ie_strand, dtype = 'int8' )
+            
+            #--- retrieve a subset of ERA database for "gene" faeture ---#
+            df_anno[ 'flag_is_gene_feature' ] = df_anno[ '_idx_entry_of_gene' ].values == df_anno[ '_idx_entry' ].values # flag indicating whether an ERA entry is of ERA 'gene' feature
+            df_anno_gene = df_anno[ df_anno.flag_is_gene_feature == True ] # a subset of 'df_anno' containing only ERA entries of 'gene' feature type
+
+            #--- store processed ERA entries for record-keeping ---#
+            logger.info( f"storing the processed external reference annotation (ERA) entries (total {len( df_anno )} entries) ..." ) 
+            bk.PICKLE_Write( f'{path_folder_external_annotations}df_anno.pkl', df_anno )
+            logger.info( f"completed storing {len( df_anno )} ERA entries" ) 
+        
+            #--- compose a compact "df_anno" ("df_anno_for_rca") for read-cluster analysis ---#
+            # during read-cluster analysis, ERA entries will be used to identify novel features, which is useful for setting the priorities across (possibly a very large number of) detected cell cluster-specific transcript structure changes
+            df_anno_for_rca = df_anno[ [ 'seqname', '_ie_feature', 'start', 'end', '_ie_strand', '_idx_input', '_idx_entry', '_idx_entry_of_gene', '_idx_entry_of_transcript' ] ]
+            bk.PICKLE_Write( f'{path_folder_external_annotations}df_anno_for_rca.pkl', df_anno_for_rca ) # store 'df_anno_for_rca' for record keeping
+        
+        # -------------------------------------------------------------- #
+        #    ERA "gene" feature-based interpretation of read-clusters    #
+        # -------------------------------------------------------------- #          
+        if not flag_no_era :          
+            #--- annotate read-clusters with ERA entries ---#
+            l_l = [ ]
+            def annotate_a_feature_with_era_entries( l_era_info : list, ie_strand_rc_opposite : int ) :
+                """
+                annotate a current feature (or a read-cluster as a whole) overlapped with the given list of ERA entries
+                l_era_info : list, # a list of ERA entries that overlapped with the feature (or a read-cluster), with each ERA entry represented by the following list: [ ie_strand, idx_input, idx_entry_of_gene ] 
+                ie_strand_rc_opposite : int, # an integer representation of strandness that is opposite to that of the current read-cluster.
+            
+                return
+                ---------
+                values of a row with the following columns [ 'min_idx_era_input', 'idx_era_gene_assigned', 'ie_strand_relationship', 'l_idx_era_gene_assigned' ]
+                
+                2024-12-23 21:30, 2024-12-28 1:30 by IEUM An
+                """
+                res_for_de_novo = [ val_repr_invalid_idx, val_repr_invalid_idx, dict_for_ie_strand_relationship[ None ], val_repr_invalid_object ] # a result representing a "de novo" feature/read-cluster
+
+                #--- check for "de novo" feature/read-cluster ---#
+                if len( l_era_info ) == 0 :
+                    return res_for_de_novo
+                
+                l_era_info = list( set( tuple( data ) for data in l_era_info ) ) # [ ie_strand, idx_input, idx_entry_of_gene ] # drops duplicates based on the data
+                
+                #--- check for "de novo" feature/read-cluster ---#
+                if len( l_era_info ) == 0 :
+                    return res_for_de_novo
+
+                #--- filter 'era_gene' entries using the "strandness" of the current read-cluster ---#
+                # assumes '.' (unknown strandness) represent compatibility with any "strandness"
+                l_era_info = list( [ ie_strand, idx_input, idx_entry_of_gene ] for ie_strand, idx_input, idx_entry_of_gene in l_era_info if ( ie_strand != ie_strand_rc_opposite ) )
+            
+                #--- check for "de novo" feature/read-cluster ---#
+                if len( l_era_info ) == 0 :
+                    return res_for_de_novo
+
+                # select ERA "gene" entries from the ERA input with the highest priority (the minimum 'idx_input')
+                min_idx_era_input = min( idx_input for ie_strand, idx_input, idx_entry_of_gene in l_era_info ) # retrieve index of ERA inputs with the highest priority (the minimum 'idx_input')
+                # retrieve a final filtered list of ERA entries, a list of 'idx_era_gene' from the ERA input with the highest priority with compatible "strandness" values for the current feature/read-cluster
+                l_era_info = list( [ ie_strand, idx_input, idx_entry_of_gene ] for ie_strand, idx_input, idx_entry_of_gene in l_era_info if ( idx_input == min_idx_era_input ) ) # filter ERA entries
+                if len( l_era_info ) > 1 :
+                    return [ min_idx_era_input, val_repr_invalid_idx, dict_for_ie_strand_relationship[ None ], sorted( idx_entry_of_gene for ie_strand, idx_input, idx_entry_of_gene in l_era_info ) ]
+                else :
+                    return [ min_idx_era_input, l_era_info[ 0 ][ 2 ], dict_for_ie_strand_relationship[ 'unknown' if ( l_for_decoding_ie_strand[ l_era_info[ 0 ][ 0 ] ] == '.' ) else 'sense' ], val_repr_invalid_object ]
+            # from ERA database of 'gene' feature type, retrieve 'gene' attributes, such as "strand", "id", "name", and "type"
+            dict_idx_era_gene_to_t_gene_info = dict( ( idx_era, tuple( arr ) ) for idx_era, arr in zip( df_anno_gene[ '_idx_entry' ].values, df_anno_gene[ [ '_ie_strand', '_gene_id', '_gene_name', '_gene_type', ] ].values ) ) # compose 'id_era_gene' to ERA gene attributes (i.e., "strandness" "id", "name", "type") mapping
+            def compose_t_era_attr_from_l_idx_era( l_idx_era, dict_idx_era_to_t_era_info, int_num_attrs : int = 4 ) :
+                """
+                Compose t_era_attr (attributes of ERA entries, "strand", "id", "name", "type") for given list of 'idx_era' (i.e., 'l_idx_era') using 'dict_idx_era_to_t_era_info', which contains the the attributes of ERA entries (i.e., "strand", "id", "name", "type") for each 'idx_era'
+                2024-12-13 18:15 by IEUM An
+                """
+                l_l_era_attr = list( list( ) for _ in range( int_num_attrs ) )
+                
+                for idx_era in l_idx_era :
+                    for idx_era_attr, era_attr in enumerate( dict_idx_era_to_t_era_info[ idx_era ] ) :
+                        l_l_era_attr[ idx_era_attr ].append( era_attr )
+                l_t_era_attr = list( tuple( l_era_attr ) for l_era_attr in l_l_era_attr )
+                return l_t_era_attr
+            for t_clus_basic_info, l_idx_era_gene in df_rc[ [ 't_clus_basic_info', 'l_idx_era_gene', ] ].values : # iterate through each read-cluster
+                #--- retrieve basic information about the current read-cluster ---#
+                name_chr_of_rc, st_of_rc, en_of_rc, flag_rc_is_plus_strand = t_clus_basic_info # parse 't_clus_basic_info'
+                # retrieve 'strandness' of the current reac-cluster
+                strand_rc, strand_rc_opposite = ( '+', '-' ) if flag_rc_is_plus_strand else ( '-', '+' )
+                
+                l_l.append( 
+                    annotate_a_feature_with_era_entries( 
+                        list( [ dict_idx_era_gene_to_t_gene_info[ idx_era_gene ][ 0 ], get_idx_era_input_from_idx_era( idx_era_gene ), idx_era_gene, ] for idx_era_gene in l_idx_era_gene ), # retrieve a list of ERA "gene" entries that overlapped with the current read-cluster, with each ERA "gene" entry represented by the following list: [ ie_strand, idx_input, idx_entry_of_gene ] 
+                        dict_for_ie_strand[ strand_rc_opposite ], # retrieve integer-encoded value of the opposite strandness of the current read cluster
+                    )
+                )
+            df_rc = df_rc.join( pd.DataFrame( l_l, columns = [ 'min_idx_era_input', 'idx_era_gene_assigned', 'ie_strand_relationship', 'l_idx_era_gene_assigned' ] ) ) # add the collected data values to "df_rc"
+            df_rc[ 'id_of_min_idx_era_input' ] = list( l_id_era_input[ idx_era_input ] if idx_era_input != val_repr_invalid_idx else np.nan for idx_era_input in df_rc.min_idx_era_input.values ) # retrieve 'ID' of ERA input of the highest priority (i.e., minimum 'idx_era_input') of the 
+            del l_l
+
+            #--- retrieve the name/ID/type of an ERA entry for better interpretation ---#
+            l_l = [ ]
+            for idx_era_gene_assigned, ie_strand_relationship, l_idx_era_gene_assigned in df_rc[ [ 'idx_era_gene_assigned', 'ie_strand_relationship', 'l_idx_era_gene_assigned' ] ].values : # for each read-cluster
+                # set default values representing a 'de novo' read-cluster
+                t_era_gene_strand, t_era_gene_id, t_era_gene_name, t_era_gene_type, strand_relationship, gene_id, gene_name, gene_type = ( ), ( ), ( ), ( ), None, val_repr_invalid_object, val_repr_invalid_object, val_repr_invalid_object
+
+                l_idx_era_gene_assigned = [ idx_era_gene_assigned ] if ( idx_era_gene_assigned != val_repr_invalid_idx ) else l_idx_era_gene_assigned # generalize the 'l_idx_era_gene_assigned' variable
+                
+                if l_idx_era_gene_assigned is not val_repr_invalid_object : # when 'l_idx_era_gene_assigned' is valid
+                    # compose tuples of ERA 'gene' attributes, "id", "name", and "type" for the 'l_idx_era_gene_of_min_idx_anno_input_compatible_with_rc_strand'
+                    t_era_gene_ie_strand, t_era_gene_id, t_era_gene_name, t_era_gene_type = compose_t_era_attr_from_l_idx_era( l_idx_era_gene_assigned, dict_idx_era_gene_to_t_gene_info ) 
+                    t_era_gene_strand = tuple( decode_ie( t_era_gene_ie_strand, dict_for_ie_strand, l_for_decoding_ie_strand ) )
+
+                    # when only 1 ERA "gene" entry was assigned to the current read-cluster
+                    if len( t_era_gene_id ) == 1 :
+                        #--- "successful" ERA "gene" assignment ---#
+                        strand_relationship = l_for_decoding_ie_strand_relationship[ ie_strand_relationship ]
+                        gene_id = t_era_gene_id[ 0 ]
+                        gene_name = t_era_gene_name[ 0 ]
+                        gene_type = t_era_gene_type[ 0 ]
+                        
+                l_l.append( [ t_era_gene_strand, t_era_gene_id, t_era_gene_name, t_era_gene_type, strand_relationship, gene_id, gene_name, gene_type ] ) # update the read-cluster metadata
+            df_rc = df_rc.join( pd.DataFrame( l_l, columns = [ 't_era_gene_strand', 't_era_gene_id', 't_era_gene_name', 't_era_gene_type', 'strand_relationship', 'gene_id', 'gene_name', 'gene_type' ] ) ) # add the collected data values to "df_rc"
+            del dict_idx_era_gene_to_t_gene_info, l_l
+
+        #--- compose and store stacked pickles files containing subsets of "df_anno_for_rca" for individual read clusters ---#
+        # retrieve list of 'id_file' containing raw/processed data for individual read-clusters
+        l_id_file_for_rca = bk.GLOB_Retrive_Strings_in_Wildcards( f"{path_folder_read_cluster}raw.*.stacked_pickles" ).wildcard_0.values 
+        
+        # ------------------------------------------------------------------------------------------------- #
+        #    Store ERA entries associated with each read-cluster using the "StackedPickles" file format     #
+        # ------------------------------------------------------------------------------------------------- #
+        if not flag_no_era :
+            # retrieve 'id_rc' to ( "idx_rc", "l_idx_era_gene" ) mapping (the read-cluster 'raw' data file does not contain the 'idx_rc' information, since these values are assigned after the read clustering operation has been completed)
+            # compose "dict_id_rc_to_idx_rc_and_l_idx_era_gene"
+            dict_id_rc_to_idx_rc_and_l_idx_era_gene = dict( )
+            for id_rc, idx_rc, l_idx_era_gene in df_rc[ [ 'id_rc', 'idx_rc', 'l_idx_era_gene' ] ].values :
+                dict_id_rc_to_idx_rc_and_l_idx_era_gene[ id_rc ] = ( idx_rc, l_idx_era_gene )
+            
+            # index 'df_anno_for_rca' for efficient subset operations
+            dict_index_of_df_anno_for_rca = bk.DF_Build_Index_Using_Dictionary( df_anno_for_rca, l_col_for_index = '_idx_entry_of_gene' )
+            arr_of_df_anno_for_rca = df_anno_for_rca.values
+            l_name_col_of_df_anno_for_rca = df_anno_for_rca.columns.values
+            
+            for id_file_for_rca in l_id_file_for_rca : # for each input file ID for read-cluster analysis (RCA)
+                with StackedPickles( f"{path_folder_read_cluster}raw.{id_file_for_rca}" ) as sp_raw : # read 'raw' input data for RCA
+                    # retrieve the list of "id_rc" (read-cluster ID) for the current input file ID
+                    l_id_rc = sp_raw.index.id_rc.values 
+            
+                    # for each input file ID, write a stacked pickles file containing a subset of 'df_anno_for_rca' for each read-cluster
+                    # these stacked pickles files will be stored along side with the 'raw' data files of the read clusters in the "path_folder_read_cluster" folder
+                    with StackedPickles( f"{path_folder_read_cluster}era.{id_file_for_rca}", 'w', l_name_col_metadata = [ 'idx_rc', 'id_rc', 'n_era_gene', 'n_era', ] ) as sp_era : # write the data of the ERA entries for each corresponding 'raw' input data for RCA
+                        for id_rc in l_id_rc : # for each "id_rc" (read-cluster ID) for the current input file ID
+                            idx_rc, l_idx_era_gene = dict_id_rc_to_idx_rc_and_l_idx_era_gene[ id_rc ] # retrieve 'idx_rc' and 'l_idx_era_gene'
+            
+                            # subset "df_anno_for_rca" for the current read-cluster
+                            # compose "df_anno_for_rca_for_a_read_cluster"
+                            l_idx = [ ] # initialize "l_idx", a list that will contain list of integer indices of "df_anno_for_rca" rows associated with the current read-cluster
+                            for idx_era_gene in l_idx_era_gene :
+                                l_idx.extend( dict_index_of_df_anno_for_rca[ idx_era_gene ] )
+                            df_anno_for_rca_for_a_read_cluster = pd.DataFrame( arr_of_df_anno_for_rca[ l_idx ], columns = l_name_col_of_df_anno_for_rca ) # compose a dataframe representing a subset of "df_anno_for_rca". Of note, the use of the customized data types (e.g., "int32", "int16", "int8", etc.) for reducing the memory footprint of "df_anno_for_rca" will be lost and the default data types (e.g., "int64") will be used to store the data values.
+            
+                            # write a namespace containing 'df_anno_for_rca_for_a_read_cluster' to the stacked pickles file
+                            sp_era.write_an_object( { 'df_anno_for_rca_for_a_read_cluster' : df_anno_for_rca_for_a_read_cluster }, l_metadata = [ idx_rc, id_rc, len( l_idx_era_gene ), len( df_anno_for_rca_for_a_read_cluster ) ] ) # write the ERA entries for the current read-cluster, along with the metadata values
+            del dict_id_rc_to_idx_rc_and_l_idx_era_gene, dict_index_of_df_anno_for_rca, arr_of_df_anno_for_rca, l_name_col_of_df_anno_for_rca, df_anno_for_rca_for_a_read_cluster, l_id_rc
+        else :
+            # when there are no ERA entries associated with the detected read-clusters, store the metadata containing 'idx_rc' values.
+            # retrieve 'id_rc' to "idx_rc" mapping (the read-cluster 'raw' data file does not contain the 'idx_rc' information, since these values are assigned after the read clustering operation has been completed)
+            # compose "dict_id_rc_to_idx_rc"
+            dict_id_rc_to_idx_rc = dict( )
+            for id_rc, idx_rc in df_rc[ [ 'id_rc', 'idx_rc', ] ].values :
+                dict_id_rc_to_idx_rc[ id_rc ] = idx_rc
+            
+            for id_file_for_rca in l_id_file_for_rca : # for each input file ID for read-cluster analysis (RCA)
+                with StackedPickles( f"{path_folder_read_cluster}raw.{id_file_for_rca}" ) as sp_raw : # read 'raw' input data for RCA
+                    # retrieve the list of "id_rc" (read-cluster ID) for the current input file ID
+                    l_id_rc = sp_raw.index.id_rc.values 
+            
+                    # for each input file ID, write a stacked pickles file containing "None" as a data object (which would be a subset of 'df_anno_for_rca' when 'flag_no_era' is False) for each read-cluster
+                    # these stacked pickles files will be stored along side with the 'raw' data files of the read clusters in the "path_folder_read_cluster" folder
+                    with StackedPickles( f"{path_folder_read_cluster}era.{id_file_for_rca}", 'w', l_name_col_metadata = [ 'idx_rc', 'id_rc', 'n_era_gene', 'n_era', ] ) as sp_era : # write the data of the ERA entries for each corresponding 'raw' input data for RCA
+                        for id_rc in l_id_rc : # for each "id_rc" (read-cluster ID) for the current input file ID
+                            idx_rc = dict_id_rc_to_idx_rc[ id_rc ] # retrieve 'idx_rc'
+            
+                            # write a namespace containing 'df_anno_for_rca_for_a_read_cluster' to the stacked pickles file
+                            sp_era.write_an_object( None, l_metadata = [ idx_rc, id_rc, 0, 0 ] ) # write the metadata values of the output "StackedPickles" file
+            del dict_id_rc_to_idx_rc, l_id_rc
+
+    # ----------------------------------------------------------------------------- #
+    # read cluster analysis (RCA) - cell-type-cluster-level summarization - started #
+    # ----------------------------------------------------------------------------- #
+    # --- (second iteration) --- #
+    if True : 
+        logger.info( "[the second iteration] preparing read-cluster-level analysis (RCA) operation" )
+        # exit if no output type has been selected.
+        if not ( flag_collect_coverage_features or flag_collect_non_coverage_features ) :
+            logger.info( f"At least one output type should be selected for a valid run, exiting" )
+            return 
+    
+        # initialize for read cluster analysis (RCA)
+        # parse keyword arguments
+        int_num_seconds_to_wait_before_identifying_completed_batches = dict_read_cluster_analysis_setting.pop( 'int_num_seconds_to_wait_before_identifying_completed_batches' )
+        int_num_base_pairs_in_a_bin_for_collecting_transcript_coverage = dict_read_cluster_analysis_setting.pop( 'int_num_base_pairs_in_a_bin_for_collecting_transcript_coverage' )
+        float_min_prop_expr = dict_read_cluster_analysis_setting.pop( 'float_min_prop_expr' )
+        int_min_num_cells = dict_read_cluster_analysis_setting.pop( 'int_min_num_cells' )
+        int_min_num_redundant_reads = dict_read_cluster_analysis_setting.pop( 'int_min_num_redundant_reads' )
+        float_placeholder_ratio_of_adjacent_scores_for_a_transition_to_a_0_count = dict_read_cluster_analysis_setting.pop( 'float_placeholder_ratio_of_adjacent_scores_for_a_transition_to_a_0_count' )
+        float_max_prop_expr_to_apply_falloff = dict_read_cluster_analysis_setting.pop( 'float_max_prop_expr_to_apply_falloff' )
+        int_max_total_redundant_read_count_to_apply_falloff = dict_read_cluster_analysis_setting.pop( 'int_max_total_redundant_read_count_to_apply_falloff' )
+        dtype_output = dict_read_cluster_analysis_setting.pop( 'dtype_output' )
+        # define the variables and functions associated with RCA
+        l_name_col_multiindex = [ "name_data_type", "detailed_entry" ] # list of names of columns for building the multiindex dataframes as the output objects of RCA
+        def get_column_index_for_each_unique_name_clus( name_data_type ) :
+            """
+            For the given 'name_data_type', get column indices for individual name_clus entries for building a multiindex dataframe
+            2024-11-17 by IEUM An
+            """
+            return list( ( name_data_type, name_clus ) for name_clus in l_unique_name_clus )
+        def get_column_index_of_given_column_names( name_data_type, l_name_col : list = [ ] ) :
+            """
+            For the given 'name_data_type', get column indices for the given column names for building a multiindex dataframe
+            
+            name_data_type, l_name_col : list = [ ]
+            
+            2024-12-07 17:30 by IEUM An
+            """
+            return list( ( name_data_type, name_col ) for name_col in l_name_col )
+        def add_metadata_columns( df, ** dict_name_col_to_values ) :
+            """
+            add metadata columns to 'df_score'
+            
+            2025-12-29 22:03 by IEUM An
+            """
+            for name_col in dict_name_col_to_values :
+                values = dict_name_col_to_values[ name_col ]
+                assert len( values ) == len( df ) # check validity of the given 'values'
+                df[ ( 'metadata', name_col ) ] = values
+        def retrieve_basic_rc_info_from_ns_raw( ns_raw : dict, ) :
+            """
+            retrieve basic read-cluster information from the namespace 'ns_raw' of a read-cluster.
+            2024-12-17 16:08 by IEUM An
+            """
+            ( name_chr_of_rc, st_of_rc, en_of_rc, flag_rc_is_plus_strand ) = ns_raw[ 't_clus_basic_info' ]
+            id_rc = ns_raw[ 'id_rc' ]
+            id_clump = ns_raw[ 'id_clump' ]
+            idx_clus_within_clump = ns_raw[ 'idx_clus_within_clump' ]
+            return ( id_rc, id_clump, idx_clus_within_clump, name_chr_of_rc, st_of_rc, en_of_rc, flag_rc_is_plus_strand, )
+        def summarize_read_cluster(
+            ns_raw : dict,
+            dict_ic_to_idx_name_clus : dict,
+            dict_ic_to_inverse_of_size_factor : dict,
+            int_num_base_pairs_in_a_bin_for_collecting_transcript_coverage : int = 10,
+            float_min_prop_expr : float = 0.05,
+            int_min_num_cells : int = 3,
+            int_min_num_redundant_reads : int = 3,
+        ) :
+            """
+            summarize read cluster 
+            
+            ns_raw, # input raw data from the first iteration of the 'ROBIN' algorithm.
+            dict_ic_to_idx_name_clus, # mapping of cell identifier to cell cluster index
+            dict_ic_to_inverse_of_size_factor, # mapping of cell identifier to the inverse of the size factor for the size-factor-based normalization of the size-distribution-normalized count for each cell
+            int_num_base_pairs_in_a_bin_for_collecting_transcript_coverage : int = 10, # If 'transcript-coverage' has been set for the 'set_output_setting', collect transcript coverages for every 'int_num_base_pairs_in_a_bin_for_collecting_transcript_coverage' number of base pairs. Increasing this number (thus increasing "bin-width") will significantly reduce computation time, however, it will decrease the sensitivity for detecting cell cluster-specific transcript structure changes at a higher resolution (i.e., individual base pairs).
+            float_min_prop_expr : float = 0.05, # the minimum of the maximum proportion of expressing cells across the cell clusters in order for a feature to be classified as 'valid' feature.
+            int_min_num_cells : int = 3, # the minimum number of cells of the same cell cluster expressing the given feature across the cell clusters in order for the feature to be considered as a 'valid' feature.
+            int_min_num_redundant_reads : int = 3, # the minimum number of "redundant" reads in order for the feature to be considered as a 'valid' feature. Currently, the number of "redundant" reads are equal to 'total read count for the feature' - 'the number of cells expressing the feature', so that when only one read could be detected from every cell expressing the feature, the number of "redundant" read becomes 0.
+            
+            return:
+            df_ft, # data of unfiltered features
+            df_score, # data of filtered features
+            dict_counter_of_type_feature # number of each type_feature before filtering
+            
+            2024-11-16 17:00 - 2024-11-18 1:00 - 2024-11-18 16:30, 2024-11-19 1:00, 2024-11-21, 2024-12-07 19:16 by IEUM An, 2024-12-11 02:10 by IEUM An (adding 'int_num_base_pairs_in_a_bin_for_collecting_transcript_coverage'), 2024-12-15 14:45 by IEUM An (refactored), 2024-12-29 13:30 by IEUM An
+            """
+            # initialize
+            bin_witdh_cov = int_num_base_pairs_in_a_bin_for_collecting_transcript_coverage # retrieve the bin-width of transcript coverage
+            # >>> fixed-settings START <<<
+            name_total_read_count_for_a_feature = 'c'
+            name_total_redundant_read_count_for_a_feature = 'r'
+            # >>> fixed-settings END <<<
+            def update_count_for_coverage_features( mtx, pos : int, ic : tuple, float_weight : float = 1 ) :
+                """
+                update single cell count of coverage features at the given posotion in the given matrix using the given weight
+                2024-11-17 1:00 - 2024-11-20 23:30
+                """
+                if mtx[ pos ] is None : # initialize a dictionary containing the single-cell count values
+                    mtx[ pos ] = { ic : float_weight, name_total_read_count_for_a_feature : 1, name_total_redundant_read_count_for_a_feature : 0 } # total read count will be stored using 'name_total_read_count_for_a_feature' as the key
+                else : # update the dictionary containing the single-cell count values
+                    d = mtx[ pos ]
+                    if ic in d :
+                        d[ ic ] += float_weight
+                        d[ name_total_redundant_read_count_for_a_feature ] += 1 # more than one read detected for the feature for the current cell # increase the total redundant read count (which can indicate the credibility  of the detected feature)
+                    else :
+                        d[ ic ] = float_weight
+                    d[ name_total_read_count_for_a_feature ] += 1 # increase the total read count
+            def update_count_for_non_coverage_features( mtx, type_feature, pos : int, ic : tuple, float_weight : float = 1 ) :
+                """
+                update single cell count of non-coverage features at the given posotion in the given matrix using the given weight.
+            
+                type_feature, # a string or tuple representing a non-coverage feature type
+                2024-11-17 1:00 - 2024-11-20 23:30
+                """
+                if mtx[ pos ] is None : # initialize a dictionary containing the single-cell count values
+                    mtx[ pos ] = { type_feature : { ic : float_weight, name_total_read_count_for_a_feature : 1, name_total_redundant_read_count_for_a_feature : 0 } } # total read count will be stored using 'name_total_read_count_for_a_feature' as the key
+                else : # update the dictionary containing various non-coverage faeture identifiers and their corresponding dictionaries containing the single-cell count values
+                    dd = mtx[ pos ] 
+                    if type_feature not in dd :
+                        dd[ type_feature ] = { ic : float_weight, name_total_read_count_for_a_feature : 1, name_total_redundant_read_count_for_a_feature : 0 } # total read count will be stored using 'name_total_read_count_for_a_feature' as the key
+                    else : # update the dictionary containing the single-cell count values
+                        d = dd[ type_feature ]
+                        if ic in d :
+                            d[ ic ] += float_weight
+                            d[ name_total_redundant_read_count_for_a_feature ] += 1 # more than one read detected for the feature for the current cell # increase the total redundant read count (which can indicate the credibility  of the detected feature)
+                        else :
+                            d[ ic ] = float_weight
+                        d[ name_total_read_count_for_a_feature ] += 1 # increase the total read count
+            # parse and retrieve basic information about the current read cluster
+            id_rc, id_clump, idx_clus_within_clump, name_chr_of_rc, st_of_rc, en_of_rc, flag_rc_is_plus_strand = retrieve_basic_rc_info_from_ns_raw( ns_raw )
+            
+            # retrieve reads constituting the current read cluster
+            l_r_rc = ns_raw[ 'l_r_clus' ]
+            
+            # compose window using the given 'bin_witdh_cov'
+            st_of_window = ( ( st_of_rc ) // bin_witdh_cov ) * bin_witdh_cov
+            en_of_window = en_of_rc
+            len_window = en_of_window - st_of_window # retrieve the number of base pairs for the window, a region containing the current read cluster that could accommodate every bin based on the given 'bin_witdh_cov'
+            
+            # create a raw/size-distribution-normalized count matrix in base-pair resolution
+            idx_mtx_coverage_features, idx_mtx_non_coverage_features = 0, 1
+            # initialize the matrix
+            def get_start_of_a_bin( pos ) :
+                """
+                retrieve the start position of the bin where the given 'pos' belongs, based on the current 'st_of_window'
+                2024-12-11 00:33, 11:50 by IEUM An
+                """
+                return ( ( pos ) // bin_witdh_cov ) * bin_witdh_cov
+            l_mtx = [ None, None ]
+            assert( flag_collect_coverage_features or flag_collect_non_coverage_features ) # check validity of the output setting
+            if flag_collect_coverage_features :
+                l_mtx[ idx_mtx_coverage_features ] = np.full( len_window, None )
+            if flag_collect_non_coverage_features :
+                l_mtx[ idx_mtx_non_coverage_features ] = np.full( len_window, None )
+            # compose the matrix
+            for ic, l_seg, float_weight in l_r_rc :
+                l_seg_shifted = list( ( st - st_of_window, en - st_of_window ) for st, en in l_seg ) # compose 'l_seg_shifted', containing shifted positions so that all reads can be included in the array of length 'len_window'
+                if flag_collect_coverage_features :
+                    # collect coverages features
+                    mtx = l_mtx[ idx_mtx_coverage_features ] # retrieve the matrix containing coverage features
+                    last_st_bin_from_the_last_seg = -1 # initialize 'last_st_bin_from_the_last_seg' ('st_bin' should be >= 0)
+                    for st, en in l_seg_shifted :
+                        for st_bin in range( get_start_of_a_bin( st ), en, bin_witdh_cov ) : # retrieve start position of each bin that overlaps with the current segment
+                            if st_bin != last_st_bin_from_the_last_seg : # if the bin starting with 'st_bin' has been alreadly encountered, skip the bin
+                                update_count_for_coverage_features( mtx, st_bin, ic, float_weight ) # update the count matrix
+                        last_st_bin_from_the_last_seg = st_bin # update the start of the last bin encountered during the processing of the current segment.
+                if flag_collect_non_coverage_features :
+                    # collect non-coverage features
+                    mtx = l_mtx[ idx_mtx_non_coverage_features ] # retrieve the matrix containing non-coverage features
+                    # collect 'gene' feature (collect all reads in the read cluster)
+                    if flag_G :
+                        update_count_for_non_coverage_features( mtx, 'G', 0, ic, float_weight ) # update the count matrix # gene feature will be assigned to the position 0 (the start of the read cluster)
+                    # retrieve positions of TSS and TES features
+                    pos_r_st, pos_r_en = l_seg_shifted[ 0 ][ 0 ], l_seg_shifted[ -1 ][ -1 ] - 1 # 0-based coordinates of exact start and end positions
+                    pos_TSS, pos_TES = ( pos_r_st, pos_r_en ) if flag_rc_is_plus_strand else ( pos_r_en, pos_r_st )
+                    if flag_TSS : # collect the TSS feature
+                        update_count_for_non_coverage_features( mtx, 'TSS', pos_TSS, ic, float_weight ) # update the count matrix
+                    if flag_TES : # collect the TES feature
+                        update_count_for_non_coverage_features( mtx, 'TES', pos_TES, ic, float_weight ) # update the count matrix
+                    # initialize collection of splice junctions
+                    # Of note, 'flag_rc_is_plus_strand' information will not be incorporated into (coverage/non-coverage) feature identifiers, meaning that the coordinates will always follow the reference genome '+' strand.
+                    pos_donor = None
+                    intron_chain = [ ] # initialize the intron chain
+                    for st, en in l_seg_shifted :
+                        if flag_EB : # collect the exon boundary feature
+                            update_count_for_non_coverage_features( mtx, ( 'EB', 'st' ), st, ic, float_weight ) # update the count matrix
+                            update_count_for_non_coverage_features( mtx, ( 'EB', 'en' ), en - 1, ic, float_weight ) # update the count matrix # 0-based coordinates of exact start and end positions
+                        if flag_E : # collect the exon feature
+                            update_count_for_non_coverage_features( mtx, ( 'E', ( st, en ) ), st, ic, float_weight ) # update the count matrix # shifted positions
+                        # identify a splice junction
+                        if pos_donor is not None :
+                            t_SJ_shifted = ( pos_donor, st ) # identify a splice junction # shifted positions
+                            if flag_SJ : # collect splice junction feature
+                                update_count_for_non_coverage_features( mtx, ( 'SJ', t_SJ_shifted ), pos_donor, ic, float_weight ) # update the count matrix
+                            intron_chain.append( t_SJ_shifted ) # collecte the splice junction for the collection of intron chain feature
+                        pos_donor = en # update the possible splice donor site
+                    if flag_IC : # collect intron chain feature
+                        if len( intron_chain ) > 0 : # if valid intron chain has been detected
+                            update_count_for_non_coverage_features( mtx, ( 'IC', tuple( intron_chain ) ), intron_chain[ 0 ][ 0 ], ic, float_weight ) # update the count matrix
+            
+            # normalize and summarize the matrix
+            def summarize_matrix( mtx, flag_true_if_coverage_ft_and_false_if_non_coverage_ft : bool ) :
+                """
+                summarize a given matrix, depending on the given flag 'flag_true_if_coverage_ft_and_false_if_non_coverage_ft', indicating whether the matrix contain count data of the coverage or non-coverage features.
+                2024-11-19 1:30, 2024-12-07 17:54, 23:47 by IEUM An, 
+                """
+                empty_val_for_feature_specific_info = np.nan # define a value representing empty value for feature specific info
+                # collect the number of valid entries with non-zero counts
+                n_valid_entries = 0
+                for pos in range( len_window ) :
+                    if mtx[ pos ] is not None :
+                        n_valid_entries += 1 if flag_true_if_coverage_ft_and_false_if_non_coverage_ft else len( mtx[ pos ] ) # update the number of entries # for coverage features, a specific position only contains a single feature, while for non-coverage features type, each position can contain many independent non-coverage features
+                # initialize the output arrays
+                l_entry = [ ] # a list that will contain metadata of the entries
+                arr_avg_expr = np.zeros( ( n_valid_entries, n_unique_name_clus ), dtype = float )
+                arr_prop_expr = np.zeros( ( n_valid_entries, n_unique_name_clus ), dtype = float )
+                arr_mask_confident = np.ones( n_valid_entries, dtype = bool ) # initialize a mask for confident entries for filtering # initialized to include all entries
+                # summarize the input matrix, depending on the input flag
+                idx_entry = 0 # initialize 'idx_entry'
+                if flag_true_if_coverage_ft_and_false_if_non_coverage_ft :
+                    # summarize coverage features
+                    for pos in range( len_window ) :
+                        if mtx[ pos ] is not None :
+                            # retrieve the count matrix
+                            d = mtx[ pos ]
+                            int_total_read_count_for_a_feature = d.pop( name_total_read_count_for_a_feature ) # retrieve the total read count for the current feature
+                            int_total_redundant_read_count_for_a_feature = d.pop( name_total_redundant_read_count_for_a_feature ) # retrieve the total redundant read count for the current feature
+                            int_total_cell_count_for_a_feature = len( d ) # retrieve total number of cells for the current feature
+            
+                            # iterate through each cell and update summarize the count matrix
+                            for ic in d :
+                                idx_name_clus = dict_ic_to_idx_name_clus[ ic ] # retrieve 'idx_name_clus' of the current cell
+                                float_log_normalized_count = math.log( 1 + ( d[ ic ] * dict_ic_to_inverse_of_size_factor[ ic ] ) ) # perform log-normalization of the count value
+                                arr_avg_expr[ idx_entry, idx_name_clus ] += float_log_normalized_count # increase the total log-normalized count
+                                arr_prop_expr[ idx_entry, idx_name_clus ] += 1 # increase the number of cells expressing the feature
+                                
+                            # add metadata for the entry
+                            l_entry.append( [
+                                'C', # 'type_feature' of coverage feature 
+                                int_num_base_pairs_in_a_bin_for_collecting_transcript_coverage, # 'bin-width' will be used as 'feature-specific_info'
+                                pos + st_of_window,
+                                int_total_read_count_for_a_feature,
+                                int_total_cell_count_for_a_feature,
+                                int_total_redundant_read_count_for_a_feature,
+                            ] )
+                            
+                            # update 'idx_entry' 
+                            idx_entry += 1
+                else :
+                    # summarize non-coverage features
+                    for pos in range( len_window ) :
+                        if mtx[ pos ] is not None :
+                            dd = mtx[ pos ]
+                            for type_feature in dd :
+                                # retrieve the count matrix
+                                d = dd[ type_feature ]
+                                int_total_read_count_for_a_feature = d.pop( name_total_read_count_for_a_feature ) # retrieve the total read count for the current feature
+                                int_total_redundant_read_count_for_a_feature = d.pop( name_total_redundant_read_count_for_a_feature ) # retrieve the total redundant read count for the current feature
+                                int_total_cell_count_for_a_feature = len( d ) # retrieve total number of cells for the current feature
+            
+                                # iterate through each cell and update summarize the count matrix
+                                for ic in d :
+                                    idx_name_clus = dict_ic_to_idx_name_clus[ ic ] # retrieve 'idx_name_clus' of the current cell
+                                    float_log_normalized_count = math.log( 1 + ( d[ ic ] * dict_ic_to_inverse_of_size_factor[ ic ] ) ) # perform log-normalization of the count value
+                                    arr_avg_expr[ idx_entry, idx_name_clus ] += float_log_normalized_count # increase the total log-normalized count
+                                    arr_prop_expr[ idx_entry, idx_name_clus ] += 1 # increase the number of cells expressing the feature
+                
+                                # collect the metadata for the entry
+                                # parse 'type_feature'
+                                if isinstance( type_feature, str ) :
+                                    # 'type_feature' = 'G', 'TSS' or 'TES'
+                                    specific_info = empty_val_for_feature_specific_info
+                                else :
+                                    type_feature, specific_info = type_feature # further parse 'type_feature'
+                                    if isinstance( specific_info, tuple ) :
+                                        if isinstance( specific_info[ 0 ], tuple ) :
+                                            # 'type_feature' = 'IC'
+                                            specific_info = tuple( ( st + st_of_window, en + st_of_window ) for st, en in specific_info ) # shift the position
+                                        else :
+                                            # 'type_feature' = 'SJ' or 'E'
+                                            specific_info = tuple( e + st_of_window for e in specific_info ) # shift the position
+                                    else :
+                                        # 'type_feature' = 'EB'
+                                        pass
+                                    
+                                # add metadata for the entry        
+                                l_entry.append( [
+                                    type_feature,
+                                    specific_info,
+                                    pos + st_of_window,
+                                    int_total_read_count_for_a_feature,
+                                    int_total_cell_count_for_a_feature,
+                                    int_total_redundant_read_count_for_a_feature,
+                                ] )
+            
+                                # update 'idx_entry' 
+                                idx_entry += 1
+                                
+                # update the mask for the confident entries, so that only the features that are detected in the sufficient number of cells for at least one cell type can be included in the output
+                arr_mask_confident = arr_mask_confident & ( arr_prop_expr.max( axis = 1 ) >= int_min_num_cells ) # filter out the entries that were detected in less then 'int_min_num_cells' number of cells of the same cell types for any cell types
+                
+                # calculate 'arr_avg_expr' from the sum of log-normalized counts and the number of detected cells
+                arr_avg_expr = arr_avg_expr / arr_prop_expr
+                arr_avg_expr[ np.isnan( arr_avg_expr ) ] = 0 # for the entries where the number of cells is 0, replace np.nan values with 0
+                # calculate 'arr_prop_expr' from the number of detected cells
+                arr_prop_expr = arr_prop_expr / arr_n_cells_for_each_name_clus # divide by the total number of cells for each cluster
+                arr_prop_expr[ np.isnan( arr_prop_expr ) ] = 0 # for the entries where the number of cells is 0, replace np.nan values with 0
+            
+                # update the mask for the confident entries, so that only the features that are detected above the given threshold of the proportion of the cells for at least one cell type can be included in the output
+                arr_mask_confident = arr_mask_confident & ( arr_prop_expr.max( axis = 1 ) >= float_min_prop_expr ) # filter out the entries that were detected in less then 'float_min_prop_expr' proportion of cells of the same cell types for any cell types
+            
+                # compose an output dataframe
+                df_ft_meta = pd.DataFrame( l_entry, columns = pd.MultiIndex.from_tuples( list( ( 'metadata', e ) for e in [ 'type_feature', 'feature_specific_info', 'position', 'total_read_count', 'total_cell_count', 'total_redundant_read_count' ] ), names = l_name_col_multiindex ) )
+                df_ft_data = pd.DataFrame( np.hstack( [ arr_avg_expr, arr_prop_expr ] ), columns = pd.MultiIndex.from_tuples( get_column_index_for_each_unique_name_clus( 'avg_expr' ) + get_column_index_for_each_unique_name_clus( 'prop_expr' ), names = l_name_col_multiindex ) )
+                df_ft = df_ft_meta.join( df_ft_data )
+            
+                # update the mask for the confident entries, so that only the features that are supported by at least 'int_min_num_redundant_reads' number of redundant reads can be included in the output
+                arr_mask_confident = arr_mask_confident & ( df_ft[ ( 'metadata', 'total_redundant_read_count' ) ].values >= int_min_num_redundant_reads ) # filter out the entries that were detected in less then 'float_min_prop_expr' proportion of cells of the same cell types for any cell types
+            
+                # only include confident entries in the final output
+                df_ft = df_ft[ arr_mask_confident ]
+                
+                return n_valid_entries, df_ft # return the number of valid entries and the output dataframe containing filtered entries
+            
+            # summarize the matrix
+            l_df_ft = [ ]
+            n_valid_entries_total = 0
+            for flag_collect, idx_mtx, flag_true_if_coverage_ft_and_false_if_non_coverage_ft in zip ( [ flag_collect_coverage_features, flag_collect_non_coverage_features ], [ idx_mtx_coverage_features, idx_mtx_non_coverage_features ], [ True, False ] ) : # summarize the coverage and non-coverage features
+                if flag_collect : 
+                    n_valid_entries, df_ft = summarize_matrix( l_mtx[ idx_mtx ], flag_true_if_coverage_ft_and_false_if_non_coverage_ft ) 
+                    l_df_ft.append( df_ft )
+                    n_valid_entries_total += n_valid_entries
+        
+            # combine the output dataframes into a single output dataframe
+            df_ft = pd.concat( l_df_ft, ignore_index = True ) # combine output dataframe
+            # compose the 'ns_res'
+            ns_res = dict( ) # initialize 'ns_res'
+            ns_res[ 'n_features_unfiltered' ] = n_valid_entries_total # collect 'n_features_unfiltered'
+            flag_no_significant_features_detected = len( df_ft ) == 0
+            ns_res[ 'flag_no_significant_features_detected' ] = flag_no_significant_features_detected
+            ns_res[ 'n_features_filtered' ] = 0 if flag_no_significant_features_detected else len( df_ft ) # None will be returned when no features remain after filtering
+            # handle empty output
+            if flag_no_significant_features_detected :
+                ns_res[ 'n_features_filtered_and_dedeuplicated' ] = 0 # update 'ns_res' # None will be returned when no features remain after filtering
+                return None, None, ns_res
+            
+            # sort features according to their type and assigned position
+            df_ft.sort_values( get_column_index_of_given_column_names( 'metadata', [ 'type_feature', 'position' ] ), ignore_index = True, inplace = True )
+            
+            # drop duplicates and identify 'a_group_of_features_with_identical_data'
+            l_col_for_identifying_data_duplicates = get_column_index_of_given_column_names( 'metadata', [ 'total_read_count', 'total_cell_count', 'total_redundant_read_count' ] ) + get_column_index_for_each_unique_name_clus( 'avg_expr' ) + get_column_index_for_each_unique_name_clus( 'prop_expr' ) # define the tuple of the columns for identifying the data duplicates
+            df_ft_duplicated_data_removed = df_ft.drop_duplicates( subset = l_col_for_identifying_data_duplicates, keep = 'first' )[ l_col_for_identifying_data_duplicates ] # identify entries with duplicated data values
+            dict_t_data_to_idx_ft = dict( ( tuple( arr_data_for_a_feature ), idx_ft ) for arr_data_for_a_feature, idx_ft in zip( df_ft_duplicated_data_removed.values, df_ft_duplicated_data_removed.index.values ) ) # retrieve mapping of duplicated data values to index in the resulting dataframe containing the de-duplicated entries 
+            df_ft.insert( loc = len( df_ft[ 'metadata' ].columns.values ), column = ( 'metadata', 'representative_idx_ft_of_a_group_of_features_with_identical_data' ), value = list( dict_t_data_to_idx_ft[ tuple( arr_data_for_a_feature ) ] for arr_data_for_a_feature in df_ft[ l_col_for_identifying_data_duplicates ].values ) ) # insert the new column as the last column of the 'metadata' section
+            df_ft_duplicated_data_removed = df_ft.drop_duplicates( subset = [ ( 'metadata', 'representative_idx_ft_of_a_group_of_features_with_identical_data' ) ] ) # retrieve 'df_ft_duplicated_data_removed' again, now containing 'representative_idx_ft_of_a_group_of_features_with_identical_data', for faster downstream analysis.
+            df_ft_duplicated_data_removed.insert( loc = 0, column = ( 'metadata', 'idx_ft' ), value = df_ft_duplicated_data_removed.index.values ) # insert 'idx_ft' column containing 'idx_ft' values
+            df_ft.drop( columns = l_col_for_identifying_data_duplicates, inplace = True ) # drop columns containing data values that were utilized for identifying data duplicates
+            # for "df_ft", simple column index will be used instead of the multiindex
+            df_ft = df_ft[ 'metadata' ] 
+            df_ft.columns.name = None
+            
+            # calculate 'expression score' and identify marker features based on the detected 'transition' of the scores
+            df_score = df_ft_duplicated_data_removed
+            ns_res[ 'n_features_filtered_and_dedeuplicated' ] = len( df_score ) # update 'ns_res'
+            df = df_score[ 'avg_expr' ] * df_score[ 'prop_expr' ] # calculate scores
+            df.columns = pd.MultiIndex.from_tuples( get_column_index_for_each_unique_name_clus( 'score' ), names = l_name_col_multiindex ) # update multiindex columns
+            df_score = df_score.join( df ) # compose 'df_score'
+                
+            # return the result
+            return df_ft, df_score, ns_res
+        def identify_marker_features( 
+            df_score, 
+            float_placeholder_ratio_of_adjacent_scores_for_a_transition_to_a_0_count = 10,
+            float_max_prop_expr_to_apply_falloff = 0.1,
+            int_max_total_redundant_read_count_to_apply_falloff = 10,
+        ) :
+            """
+            Identify marker features by identifying the transition of "expression intensity" scores 
+        
+            float_placeholder_ratio_of_adjacent_scores_for_a_transition_to_a_0_count = 10, # a "placeholder" ratio between "expression intensity" scores of adjacent cell clusters (cell types) sorted by the "expression intensity" scores when the score transitions to 0 (e.g., a 'expression intensity' value transitions from 0.5 to 0, the ratio will be set to 'float_placeholder_ratio_of_adjacent_scores_for_a_transition_to_a_0_count' instead of using an infinity (due to a zero-division) as a 'value')
+            float_max_prop_expr_to_apply_falloff = 0.1, # a ratio between "expression intensity" scores of adjacent cell clusters (sorted by the scores) will be adjusted (or "degraded") if the proportion of cells expressing the feature in the cell cluster is below the given 'float_max_prop_expr_to_apply_falloff' argument. If the proportion is above this value, no penalty will be applied.
+            int_max_total_redundant_read_count_to_apply_falloff = 10, # a ratio between "expression intensity" scores of adjacent cell clusters (sorted by the scores) will be adjusted (or "degraded") if the total number of "redundant" reads supporting the feature is below the given 'float_max_total_redundant_read_count_to_apply_falloff' argument. If the count is above this value, no penalty will be applied.
+            
+            2024-11-21 12:45 by IEUM An, 2024-12-08 16:50 by IEUM An, 2024-12-10 15:32 by IEUM An (major errors were detected corrected), 2024-12-15 14:45 by IEUM An (refactored), 2024-01-04 23:21 - 2024-01-06 23:30 by IEUM An (algorithm redesigned)
+            """
+            # initialize
+            # sort clusters by scores for each feature
+            arr_prop_expr, arr_score = df_score[ 'prop_expr' ].values, df_score[ 'score' ].values
+            n_ft = len( arr_score ) # number of features
+            arr_idx_name_clus_sorted_by_score = np.flip( np.argsort( arr_score, axis = 1 ), axis = 1 ) # sorted by score in the descending order
+            arr_score_sorted = np.flip( np.sort( arr_score, axis = 1 ), axis = 1 ) # sorted by score in the descending order
+            
+            # compose 'arr_weight_based_on_prop_expr_sorted_by_score'
+            arr_weight_based_on_prop_expr_sorted_by_score = arr_prop_expr.copy( ) # initialize 'arr_weight_based_on_prop_expr_sorted_by_score' with 'arr_prop_expr'
+            for idx_ft in range( n_ft ) : # iterate through features
+                arr_weight_based_on_prop_expr_sorted_by_score[ idx_ft ] = arr_prop_expr[ idx_ft ][ arr_idx_name_clus_sorted_by_score[ idx_ft ] ] # sort 'arr_prop_expr' by scores
+            arr_weight_based_on_prop_expr_sorted_by_score[ arr_weight_based_on_prop_expr_sorted_by_score > float_max_prop_expr_to_apply_falloff ] = float_max_prop_expr_to_apply_falloff
+            arr_weight_based_on_prop_expr_sorted_by_score /= float_max_prop_expr_to_apply_falloff
+            
+            # compose 'arr_weight_based_on_total_redundant_read_count'
+            arr_weight_based_on_total_redundant_read_count = df_score[ ( 'metadata', 'total_redundant_read_count' ) ].values.copy( ).astype( float ) # initialize 'arr_weight_based_on_total_redundant_read_count' by retrieving 'total_redundant_read_count' of the features # change to float dtype
+            arr_weight_based_on_total_redundant_read_count[ arr_weight_based_on_total_redundant_read_count > int_max_total_redundant_read_count_to_apply_falloff ] = int_max_total_redundant_read_count_to_apply_falloff
+            arr_weight_based_on_total_redundant_read_count /= int_max_total_redundant_read_count_to_apply_falloff
+            arr_weight_based_on_total_redundant_read_count = arr_weight_based_on_total_redundant_read_count.reshape( ( n_ft, 1 ) )
+            
+            # calculate 'ratio_of_adjacent_scores'
+            arr = np.diff( np.log( np.hstack( ( arr_score_sorted, np.zeros( ( len( arr_score_sorted ), 1 ) ) ) ) ), axis = 1 )
+            val_placeholder = - math.log( float_placeholder_ratio_of_adjacent_scores_for_a_transition_to_a_0_count ) # retrieve the placeholder value
+            arr[ np.isnan( arr ) ] = val_placeholder
+            arr[ np.isinf( arr ) ] = val_placeholder
+            
+            arr *= -1
+            arr_ratio_of_adjacent_scores = np.exp( arr )
+            
+            # calculate 'arr_score_relative_to_max'
+            arr_max_score = arr_score_sorted[ :, 0 ] # retrieve max score for each feature
+            arr_score_relative_to_max = ( arr_score_sorted.T / arr_max_score ).T
+            
+            # calculate 'transition' scores
+            arr_transition = arr_score_relative_to_max * arr_ratio_of_adjacent_scores * arr_weight_based_on_prop_expr_sorted_by_score * arr_weight_based_on_total_redundant_read_count
+            
+            # identify and characterize the 'transition' for each feature
+            arr_transition_argmax = arr_transition.argmax( axis = 1 )
+            arr_transition_mean = arr_transition.mean( axis = 1 )
+            arr_transition_std = arr_transition.std( axis = 1 )
+            
+            l_t_marker_feature_of, arr_score_mean, arr_score_std, arr_transition_max, arr_transition_max_n_std_from_mean = [ ], np.zeros( n_ft, dtype = float ), np.zeros( n_ft, dtype = float ), np.zeros( n_ft, dtype = float ), np.zeros( n_ft, dtype = float ) # initialize
+            for idx_ft in range( n_ft ) : # for each feature
+                idx_sorted_cell_clus_of_max_transition = arr_transition_argmax[ idx_ft ] # index in the sorted list of cell clusters that has the max 'transition score' value
+                # identify and characterize the 'transition'
+                arr_transition_max[ idx_ft ] = arr_transition[ idx_ft, idx_sorted_cell_clus_of_max_transition ] # collect the max 'transition score' value
+                arr_transition_max_n_std_from_mean[ idx_ft ] = ( arr_transition_max[ idx_ft ] - arr_transition_mean[ idx_ft ] ) / arr_transition_std[ idx_ft ]
+                # identify the cell clusters expressing the feature as the 'marker' using the identified 'transition'
+                sl = slice( None, int( idx_sorted_cell_clus_of_max_transition ) + 1 )
+                l_t_marker_feature_of.append( tuple( sorted( arr_idx_name_clus_sorted_by_score[ idx_ft ][ sl ] ) ) ) # collect 't_marker_feature_of'
+                # collect the 'expression score' of the cell clusters expressing the feature as the 'marker'
+                arr = arr_score_sorted[ idx_ft ][ sl ]
+                arr_score_mean[ idx_ft ] = arr.mean( )
+                arr_score_std[ idx_ft ] = arr.std( )
+        
+            # update 'df_score'
+            add_metadata_columns( 
+                df_score, 
+                t_expressed_by = list( tuple( np.flatnonzero( arr ) ) for arr in ( arr_prop_expr > 0 ) ),
+                t_marker_feature_of = l_t_marker_feature_of,
+                mean_score = arr_score_mean,
+                std_score = arr_score_std,
+                max_transition = arr_transition_max,
+                n_std_from_mean_for_max_transition = arr_transition_max_n_std_from_mean,
+                mean_transition = arr_transition_mean,
+                std_transition = arr_transition_std,
+            )
+            return df_score
+        def annotate_features_with_era(
+            df_ft,
+            ns_era : dict,
+            flag_rc_is_plus_strand : bool,
+        ) :
+            """
+            Annotate features of a read cluster using the external reference annotation (ERA) entries associated with the current read cluster
+            
+            2024-12-29 1:51 by IEUM An (adding de novo features based on the given ERA entries)
+            """
+            # if no ERA entries are available for annotation, return 'df_ft' as-is
+            if flag_no_era or ( ns_era is None ) :
+                return df_ft
+            
+            # retrieve ERA entries
+            df_era = ns_era[ 'df_anno_for_rca_for_a_read_cluster' ]
+            
+            # retrieve the strand of the current read-cluster
+            strand_rc, strand_rc_opposite = ( '+', '-' ) if flag_rc_is_plus_strand else ( '-', '+' )
+            ie_strand_rc = dict_for_ie_strand[ strand_rc ] # retrieve integer-encoded value of the strandness of the current read cluster
+            ie_strand_rc_opposite = dict_for_ie_strand[ strand_rc_opposite ] # retrieve integer-encoded value of the opposite strandness of the current read cluster
+            
+            # retrieve set of 'idx_era_input' that are 'gene/transcript/exon' annotation
+            set_idx_era_input_of_gene_transcript_exon_annotation = set( idx_era_input for idx_era_input, flag_gene_transcript_exon_annotation in enumerate( l_flag_gene_transcript_exon_annotation ) if flag_gene_transcript_exon_annotation )
+            
+            #--------------- [indexing of the ERA entries] ERA-based annotation of coverage and non-coverage features ---------------#
+            # retrieve individual ERA "exon" entries, which will be used for annotating the coverage features and the 'EB', 'E', 'SJ', and 'IC' non-coverage features
+            df_era_exon = df_era[ [ '_ie_feature', 'start', 'end', '_ie_strand', '_idx_input', '_idx_entry_of_gene', '_idx_entry_of_transcript' ] ]
+            df_era_exon = pd.concat( [ 
+                df_era_exon[ df_era_exon._ie_feature == dict_for_ie_feature[ 'exon' ] ], 
+                bk.PD_Select( df_era_exon, _idx_input = set_idx_era_input_of_gene_transcript_exon_annotation, deselect = True ),
+            ] )
+            it_era_for_cov = intervaltree.IntervalTree( ) # initialize an interval tree to annotate coverage features
+            dict_era_ncf = dict( ) # initialize dictionary for ERA-based annotation of non-coverage features
+            dict_era_ncf[ 'G' ] = list( set( tuple( data ) for data in df_era[ [ '_ie_strand', '_idx_input', '_idx_entry_of_gene' ] ].values ) ) # add the records for the non-coverage feature 'G'
+            def update_database_for_ncf_annotation_with_era( t_era_info : tuple, * l_key ) :
+                """
+                2024-12-23 22:55 by IEUM An
+                """
+                for key in l_key : # for each key
+                    # check whether the key exists in 'dict_era_ncf'
+                    if key in dict_era_ncf : # add 't_era_info'
+                        dict_era_ncf[ key ].append( t_era_info )
+                    else : # initialize a new list and add 't_era_info'
+                        dict_era_ncf[ key ] = [ t_era_info ]
+            for st, en, ie_strand, idx_input, idx_entry_of_gene in df_era_exon[ [ 'start', 'end', '_ie_strand', '_idx_input', '_idx_entry_of_gene' ] ].values :
+                t_era_info = ( ie_strand, idx_input, idx_entry_of_gene ) # a tuple containing essential information of an ERA entry
+                #--------------- for ERA-based annotation of coverage features ---------------#
+                it_era_for_cov[ st : en ] = t_era_info # add era "exon" entries for annotating the coverage features
+                #--------------- for ERA-based annotation of E (exon) and EB (exon boundary) features ---------------#
+                update_database_for_ncf_annotation_with_era( t_era_info, ( 'EB', 'st', st ), ( 'EB', 'en', en - 1 ), ( 'E', ( st, en ) ) ) # update the database for annotation of non-coverage features using the overlapped ERA entries # record the actual 'end' position of an exon
+            for idx_entry_of_transcript, df in df_era_exon[ [ 'start', 'end', '_ie_strand', '_idx_input', '_idx_entry_of_gene', '_idx_entry_of_transcript' ] ].groupby( '_idx_entry_of_transcript' ) : # group exons for each transcript
+                # skip invalid 'idx_entry_of_transcript' or transcript with only 1 exons
+                if ( idx_entry_of_transcript == val_repr_invalid_idx ) or ( len( df ) < 2 ) :
+                    continue
+                #--------------- for ERA-based annotation of SJ (splice junction) and IC (intron chain) features ---------------#
+                t_era_gene_info = ( ie_strand, idx_input, idx_entry_of_gene ) # a tuple containing essential information of an ERA "gene" entry
+                t_era_transcript_info = ( ie_strand, idx_input, idx_entry_of_transcript ) # a tuple containing essential information of an ERA "transcript" entry
+                n_exon = len( df ) # retrieve number of exons for the current transcript
+                n_sj = n_exon - 1 # retrieve the number of splice junctions
+                l_intron = [ ] # initialize the intron chain
+                for st, en in df[ [ 'start', 'end' ] ].values.ravel( )[ 1 : -1 ].reshape( ( n_sj, 2 ) ) : # for each splice junction
+                    t_sj = ( st, en ) # compose a tuple representing a splice junction
+                    l_intron.append( t_sj ) # collect an intron to compose the intron chain
+                    update_database_for_ncf_annotation_with_era( t_era_gene_info, ( 'SJ', t_sj ) ) # for SJ feature, collect ERA "gene" information
+                update_database_for_ncf_annotation_with_era( t_era_transcript_info, ( 'IC', tuple( l_intron ) ) ) # for IC feature, collect ERA "transcript" information
+            
+            # retrieve ERA "transcript" entries, which will be used for annotating the 'TSS' and 'TES' non-coverage features
+            df_era_transcript = df_era[ [ '_ie_feature', 'start', 'end', '_ie_strand', '_idx_input', '_idx_entry_of_gene', ] ]
+            df_era_transcript = pd.concat( [ 
+                df_era_transcript[ df_era_transcript._ie_feature == dict_for_ie_feature[ 'transcript' ] ],
+                bk.PD_Select( df_era_exon, _idx_input = set_idx_era_input_of_gene_transcript_exon_annotation, deselect = True ),
+            ] )
+            for st, en, ie_strand, idx_input, idx_entry_of_gene in df_era_exon[ [ 'start', 'end', '_ie_strand', '_idx_input', '_idx_entry_of_gene' ] ].values :
+                t_era_info = ( ie_strand, idx_input, idx_entry_of_gene ) # a tuple containing essential information of an ERA entry
+                #--------------- for ERA-based annotation of TSS (transcription start site) and TES (transcription end site) features ---------------#
+                if ie_strand == dict_for_ie_strand[ '+' ] :
+                    update_database_for_ncf_annotation_with_era( t_era_info, ( 'TSS', st ), ( 'TES', en - 1 ) )
+                elif ie_strand == dict_for_ie_strand[ '-' ] :
+                    update_database_for_ncf_annotation_with_era( t_era_info, ( 'TES', st ), ( 'TSS', en - 1 ) )
+                else :
+                    # when strandness is 'unknown', allow interpretation of start and end coordinates as 'TSS' and 'TES'.
+                    update_database_for_ncf_annotation_with_era( t_era_info, ( 'TSS', st ), ( 'TSS', en - 1 ) , ( 'TES', st ), ( 'TES', en - 1 ), )
+                    
+            #--------------- [searching the (indexed) ERA entries] ERA-based annotation of coverage and non-coverage features ---------------#
+            l_l = [ ]
+            for type_feature, feature_specific_info, position in df_ft[ [ 'type_feature', 'feature_specific_info', 'position' ] ].values :
+                if type_feature == 'C' : 
+                    #--------------- coverage feature ---------------#
+                    # 'feature_specific_info' encodes the bin width  #
+                    # 'position' encodes the start of the bin        #
+                    st, en = position, position + feature_specific_info
+                    l_era_info = list( data for st, en, data in it_era_for_cov[ st : en ] ) # search the interval tree to retrieve overlapped ERA entries
+                else : 
+                    #---------- non-coverage features ---------#
+                    if type_feature == 'TSS' or type_feature == 'TES' : 
+                        #---------- non-coverage feature, 'TSS' and 'TES' ---------#
+                        # 'position' encodes the coordinate of the feature         #
+                        key_representing_a_feature = ( type_feature, position )
+                    elif type_feature == 'G' :
+                        #--------------- non-coverage feature, 'G'  ---------------#
+                        key_representing_a_feature = type_feature
+                    elif type_feature == 'EB' :
+                        #--------------- non-coverage feature, 'EB' ---------------#
+                        # 'position' encodes the start of the feature              #
+                        # 'feature_specific_info' indicates start/end of the exon  #
+                        key_representing_a_feature = ( type_feature, feature_specific_info, position )
+                    elif type_feature == 'E' :
+                        #--------------- non-coverage feature, 'E'  ---------------#
+                        # 'feature_specific_info' contains exon coordinates        #
+                        key_representing_a_feature = ( type_feature, feature_specific_info )
+                    elif type_feature == 'SJ' :
+                        #--------------- non-coverage feature, 'SJ' ---------------#
+                        # 'feature_specific_info' contains the coordinates of a    #
+                        # splice junction                                          #
+                        key_representing_a_feature = ( type_feature, feature_specific_info )
+                    elif type_feature == 'IC' :
+                        #--------------- non-coverage feature, 'IC' ---------------#
+                        # 'feature_specific_info' contains the coordinates of      #
+                        # the introns that constitute the intron chain             #
+                        key_representing_a_feature = ( type_feature, feature_specific_info )
+                    else :
+                        raise KeyError( f"invalid {type_feature}" )
+                     
+                    l_era_info = dict_era_ncf[ key_representing_a_feature ] if key_representing_a_feature in dict_era_ncf else [ ] # an empty list represents a "de novo" feature
+                # annotate the current feature using the ERA entries
+                l_l.append( annotate_a_feature_with_era_entries( l_era_info, ie_strand_rc_opposite ) )
+            
+            # update the 'df_ft'
+            df_ft = df_ft.join( pd.DataFrame( l_l, columns = [ 'min_idx_era_input', 'idx_era_gene_assigned', 'ie_strand_relationship', 'l_idx_era_gene_assigned' ] ) ) 
+            return df_ft
+        def analyze_features( 
+            df_ft, 
+            df_score,
+            ns_res : dict,
+            float_min_prop_expr : float = 0.05,
+            dtype_output = None, 
+        ) :
+            """
+            analyze each feature to prioritize the features associated with the biologically relevant expression patterns. 
+        
+            Arguments:
+            ----------------------------------------------------------------------------------------------------------------
+            df_ft, 
+            df_score,
+            float_min_prop_expr : float = 0.05, # the minimum proportion of cells expressing the current feature for a cell cluster to be considered as the cell cluster expressing the feature "confidently."
+            dtype_output = None, # dtype of the 'df_score' output dataframe (will not be applied to the 'df_ft' output dataframe, which will not be stored to the storage in the current implementation of 'ROBIN'). by default, np.float64 will be used for the 'df_score' output dataframe. Should be a subdtype of np.floating.
+        
+            Return:
+            ----------------------------------------------------------------------------------------------------------------
+            df_ft, df_score, ns_res_for_a_rc
+        
+            2024-12-15 14:45 by IEUM An (refactored), 2024-12-29 22:00 by IEUM An, 2025-01-07 00:10 by IEUM An
+            """
+            # for entropy calculation
+            from scipy.stats import entropy
+            
+            # calculate entropy values
+            df = df_score[ 'metadata' ].copy( )
+            df[ 'n_ft' ] = pd.Series( bk.COUNTER( df_ft[ 'representative_idx_ft_of_a_group_of_features_with_identical_data' ] ) )
+            
+            for name_col in [ 't_expressed_by', 't_marker_feature_of' ] :
+                dict_counter = dict( )
+                for k, c, w in df[ [ name_col, 'n_ft', 'mean_score' ] ].values :
+                    v = c * w
+                    if k not in dict_counter :
+                        dict_counter[ k ] = v
+                    else :
+                        dict_counter[ k ] += v
+                # update 'ns_res'
+                ns_res[ f"feature_diversity_based_on_{name_col}" ] = entropy( list( dict_counter.values( ) ) )
+                # ns_res[ f"dict_counter_of_{name_col}" ] = dict_counter # debugging
+            
+            # change dtype of the output values to reduce storage space required to store the result
+            if dtype_output is not None :
+                assert( np.issubdtype( dtype_output, np.floating ) ) # Should be a subdtype of np.floating.
+                df_score = df_score[ [ 'metadata' ] ].join( df_score[ [ 'avg_expr', 'prop_expr', 'score' ] ].astype( dtype_output ) ) # change dtype of the output values to reduce storage space required to store the result                
+        
+            return df_ft, df_score, ns_res                        
+        def compose_and_save_data_for_a_read_cluster( ns_rc_raw, ns_to_add, sp, l_name_col_metadata ) :
+            """
+            compose and save data for a read cluster
+            
+            2024-11-18 3:00, 2024-11-18 16:40 by IEUM An
+            """
+            ns = { ** ns_rc_raw, ** ns_to_add } # compose the namespace to exported
+            ns.pop( 'l_r_clus' ) # drop 'l_r_clus' (represent raw data)
+            
+            # the raw data will be the first object that will be written to the storage for the read cluster, requiring making the directory representing the read cluster
+            sp.write_an_object( ns, l_metadata = list( ns[ key ] for key in l_name_col_metadata ) ) # write the object representing the raw data and retrieve the number of bytes for the written raw data
+            return 
+        def analyze_read_cluster_at_single_base_pair_resolution( p_in, p_out ) :
+            """
+            analyze long-read cluster at single base-pair resolution at single-cell level
+
+            2024-11-18 3:00, 2024-12-15 15:30 by IEUM An (refactored)
+            """
+            # load large data objects from files
+            dict_ic_to_idx_name_clus = bk.PICKLE_Read( f"{path_folder_internal_objects}dict_ic_to_idx_name_clus.pkl" )
+            dict_ic_to_inverse_of_size_factor = bk.PICKLE_Read( f"{path_folder_internal_objects}dict_ic_to_inverse_of_size_factor.pkl" )
+
+            while True :
+                id_file = p_in.recv( )
+                if id_file is None : # when end of input stream has been reached, exit
+                    break
+    
+                # initialize analysis
+                dict_res_for_id_file = dict( )
+                # open input and output files 
+                sp_raw = StackedPickles( f"{path_folder_read_cluster}raw.{id_file}", 'r' ) # open 'StackedPickles' input file containing raw data for the read-clusters
+                sp_era = StackedPickles( f"{path_folder_read_cluster}era.{id_file}", 'r' ) # open 'StackedPickles' input file containing the ERA entries the read-clusters
+                l_name_col_metadata_for_summary = [ 'idx_rc', 'id_rc', 'id_clump', 'idx_clus_within_clump', 'flag_no_significant_features_detected', 'n_features_unfiltered', 'n_features_filtered', 'n_features_filtered_and_dedeuplicated', 'n_era_gene', 'n_era' ]
+                sp_sum = StackedPickles( f"{path_folder_read_cluster}cell_clus_level_summary.{id_file}", 'w', l_name_col_metadata = l_name_col_metadata_for_summary ) # open 'StackedPickles' output file that will contain cell-type-cluster-level summarization results
+
+                # flag_no_era # 사용할 수 있는 flag
+                
+                for ( ns_raw, l_metadata_raw ), ( ns_era, l_metadata_era ) in zip( sp_raw, sp_era ) : # iterate through the input 'StackedPickles' files to retrieve the raw data and the ERA entries of each read-cluster
+                    idx_rc, id_rc, n_era_gene, n_era = l_metadata_era # parse 'l_metadata_era', which contains the 'idx_rc' information, which is useful for updateing the read-cluster database in the main process.
+                    id_rc, id_clump, idx_clus_within_clump, name_chr_of_rc, st_of_rc, en_of_rc, flag_rc_is_plus_strand = retrieve_basic_rc_info_from_ns_raw( ns_raw ) # parse and retrieve the basic information about the current read cluster
+                    
+                    # summarize individual reads in "ns_raw"
+                    df_ft, df_score, ns_res = summarize_read_cluster( ns_raw, dict_ic_to_idx_name_clus, dict_ic_to_inverse_of_size_factor, int_num_base_pairs_in_a_bin_for_collecting_transcript_coverage, float_min_prop_expr, int_min_num_cells, int_min_num_redundant_reads ) # summarize the reads constituting the current read cluster and retrieve a count matrix of various features across the current list of cell clusters (i.e., user-provided cell types)
+                    
+                    if not ns_res[ 'flag_no_significant_features_detected' ] :
+                        # identify de-novo features
+                        df_score = identify_marker_features( df_score, float_placeholder_ratio_of_adjacent_scores_for_a_transition_to_a_0_count, float_max_prop_expr_to_apply_falloff, int_max_total_redundant_read_count_to_apply_falloff )
+                    
+                        # annotate features using ERA entries
+                        if not flag_no_era :
+                            df_ft = annotate_features_with_era( df_ft, ns_era, flag_rc_is_plus_strand )
+                    
+                        # summarize each feature of the current read-cluster
+                        df_ft, df_score, ns_res = analyze_features( df_ft, df_score, ns_res, float_min_prop_expr, dtype_output )
+                        
+                    # save the analysis result for the current read-cluster
+                    compose_and_save_data_for_a_read_cluster( ns_raw, { 'idx_rc' : idx_rc, 'df_ft' : df_ft, 'df_score' : df_score, 'n_era_gene' : n_era_gene, 'n_era' : n_era, ** ns_res }, sp_sum, l_name_col_metadata_for_summary ) # save the analysis result of a read-cluster 
+                    
+                    dict_res_for_id_file[ idx_rc ] = ns_res # collect the result
+
+                # close files
+                sp_sum.close( )
+                sp_raw.close( )
+                
+                # return the result 
+                p_out.send( { 'dict_res_for_id_file' : dict_res_for_id_file } )
+            p_out.send( 'completed' ) # notify all works has been completed.
+        ns_main = {
+            'l_dict_res' : list( None for _ in range( int( df_rc[ 'idx_rc' ].max( ) ) + 1 ) ), # initialize 'l_dict_res' # should be able to accomodate 'idx_rc'
+        } # initialize the namespace of the main process
+        def process_read_cluster_analysis_result( ns_res ) :
+            """
+            2024-12-31 23:12 by IEUM An
+            """
+            dict_res_for_id_file = ns_res[ 'dict_res_for_id_file' ]
+            for idx_rc in dict_res_for_id_file :
+                ns_main[ 'l_dict_res' ][ idx_rc ] = dict_res_for_id_file[ idx_rc ]
+            return
+
+        logger.info( "[the second iteration] read-cluster-level analysis (RCA) started" )
+    
+        # start and monitor the processes until the input stream from the main process ends.
+        bk.Multiprocessing_Batch_Generator_and_Workers(
+            gen_batch = l_id_file_for_rca.__iter__( ), # iterate through file IDs of the output files, written by individual processes during the first iteration of the input data.
+            process_batch = analyze_read_cluster_at_single_base_pair_resolution,
+            post_process_batch = process_read_cluster_analysis_result,
+            int_num_threads = n_threads,
+            int_num_seconds_to_wait_before_identifying_completed_processes_for_a_loop = int_num_seconds_to_wait_before_identifying_completed_batches,
+            flag_wait_for_a_response_from_worker_after_sending_termination_signal = True,
+        )
+        logger.info( "[the second iteration] read-cluster-level analysis (RCA) completed" )
+
+        # update the read-cluster database
+        df_rc = df_rc.join( pd.DataFrame( ns_main[ 'l_dict_res' ] ) ) # update the result
+        bk.PICKLE_Write( f"{path_folder_internal_objects}df_rc.pkl", df_rc ) # write temporary results
+    return
+    """
+    Initiate pipelines for off-loading works
+    """
+    pipelines = bk.Offload_Works(
+        None
+    )  # no limit for the number of works that can be submitted.
+
+    # wait all pipelines to be completed
+    pipelines.wait_all()
+
+    logger.info(f"pipeline completed.")
+    return # exit
+
+# set alias
+ROBIN = LongDiscoverCellTypeSpecificTranscriptomicFeature 
+
+"""
+[utility function]
+"""
+if True :
+    def ucsc_repeatmasker_tsv_to_gtf( path_file_input : str, path_file_output : str ) :
+        """
+        convert UCSC Table Browser's RepeatMasker TSV output file to a GTF file (thus allowing the use of UCSC RepeatMasker annotations for one of the annotation files for the ROBIN)
+        2024-11-24 23:45 by IEUM An
+        """
+        df_repeatmasker = pd.read_csv( path_file_input, sep = '\t' )
+        df_repeatmasker_converted = df_to_gtf( 
+            df_repeatmasker, 
+            dict_matched_cols = {
+                'genoName' : "seqname",
+                'genoStart' : "start",
+                'genoEnd' : "end",
+                'strand' : "strand",
+            },
+            dict_default_values = {
+                'source' : "ucsc_repeatmasker",
+                'feature' : "ucsc_repeatmasker",
+            },
+            default_value = '.',
+        ) # convert to GTF file format
+        bk.GTF_Write( df_gtf = df_repeatmasker_converted, path_file = path_file_output ) # write the GTF output file
+    
+    def df_to_gtf( df, dict_matched_cols : dict, dict_default_values : dict = dict( ), default_value = '.' ) :
+        """
+        convert an input dataframe into a dataframe of the GTF file format. The list of required and optional columns are shown below.  
+        required columns : { 'seqname', 'start', 'end', }
+        optional columns : { 'source', 'feature', 'score', 'strand', 'frame', }
+        The default value is '.' (can be changed using the 'default_value' argument)
+        However, the default value can be changed using the 'dict_default_values' argument (key = column name, value = custom default value)
+    
+        dict_default_values : dict 
+    
+        example:
+        df_to_gtf( 
+            df_repeatmasker, 
+            dict_matched_cols = {
+                'genoName' : "seqname",
+                'genoStart' : "start",
+                'genoEnd' : "end",
+                'strand' : "strand",
+            },
+            dict_default_values = {
+                'source' : "ucsc_repeatmasker",
+                'feature' : "ucsc_repeatmasker",
+            },
+            default_value = '.',
+        )
+    
+        2024-11-25 10:00 by IEUM An
+        """
+        def To_gtf_compatible_str(
+            a_string,
+            dict_replacement={
+                "%": "_Percent_",
+                "+": "_Plus_",
+                "-": "_Minus_",
+                "&": "_and_",
+                "=": "_Equal_",
+            },
+        ) :  
+            """
+            convert a string into python-compatible string.
+        
+            2024-11-25 12:20 by IEUM An
+            """
+            l_incompatible_character = [
+                " ",
+                "?",
+                "(",
+                ")",
+                "&",
+                "%",
+                "/",
+                ",",
+                ":",
+                ".",
+                "-",
+                "+",
+                "[",
+                "]",
+                "#",
+                "=",
+                "\n",
+                '"',
+                "\\",
+                "|",
+                "?",
+                "*",
+            ]
+            for incompatible_character in l_incompatible_character:
+                a_string = a_string.replace(
+                    incompatible_character, dict_replacement.get(incompatible_character, "_")
+                )
+            return a_string
+    
+        l_name_gtf_columns = [
+            'seqname', 
+            'source', 
+            'feature', 
+            'start', 
+            'end', 
+            'score', 
+            'strand', 
+            'frame', 
+        ]
+        set_required_columns = { 'seqname', 'start', 'end', }
+        set_optional_columns = { 'source', 'feature', 'score', 'strand', 'frame', }
+        
+        df.rename( columns = dict_matched_cols, inplace = True )
+        
+        for name_col in dict_default_values :
+            df[ name_col ] = dict_default_values[ name_col ]
+        
+        set_columns = set( df.columns.values )
+        assert( set_required_columns.issubset( set_columns ) ) # the dataframe should contain all the required columns
+        # add gtf columns that are not present in the input dataframe with the default value
+        for name_col in set_optional_columns.difference( set_columns ) :
+            df[ name_col ] = default_value
+        # rename attribute columns to make the column name compatible with the GTF file format
+        def get_attribute_columns( df ) : 
+            """
+            2024-11-25 21:00 by IEUM An
+            """
+            return sorted( set( df.columns.values ).difference( l_name_gtf_columns ) )
+        df.rename( columns = dict( ( name_col_attr, To_gtf_compatible_str( name_col_attr ) ) for name_col_attr in get_attribute_columns( df ) ), inplace = True )
+        # reorder the columns in the dataframe 
+        df = df[ l_name_gtf_columns + get_attribute_columns( df ) ]
+        # return the resulting dataframe
+        return df
+
+"""
+[EXPLORATORY] functions for debugging/exploration ("under development")
+"""
+if True : # code folding
+    def _build_interval_trees_from_df_clump( df_clump ) :
+        """
+        build a dictionary of interval trees for efficient identification of the clump each read has been assigned to
+        2024-11-08 14:00
+        """
+        dict_t_name_chr__plus_strand__to_it_of_id_clump = dict( )
+        for id_clump, name_chr, start, end, plus_strand in df_clump[ [ 'id_clump', 'name_chr', 'start', 'end', 'plus_strand', ] ].values :
+            t_name_chr__plus_strand = ( name_chr, plus_strand )
+            if t_name_chr__plus_strand not in dict_t_name_chr__plus_strand__to_it_of_id_clump :
+                dict_t_name_chr__plus_strand__to_it_of_id_clump[ t_name_chr__plus_strand ] = intervaltree.IntervalTree( )
+            dict_t_name_chr__plus_strand__to_it_of_id_clump[ t_name_chr__plus_strand ][ start : end ] = id_clump
+        return dict_t_name_chr__plus_strand__to_it_of_id_clump
+    # dict_it_of_id_clump = build_interval_trees_from_df_clump( df_clump ) # build interval trees of clumps
+    
+    def _explore_coverages(
+        l_name_clus_to_plot,
+        ns_rc_raw,
+        dict_name_clus_to_idx_name_clus,
+        dict_ic_to_idx_name_clus,
+        flag_use_raw_read_count : bool = True,
+        float_min_relative_coverage_for_searching_locations_of_transcripts : float = 0.1,
+        int_bp_padding_around_transcripts : int = 50,
+    ) :
+        """
+        [EXPLORATORY] visualize coverages using the data processed by the ROBIN algorithm
+        2024-11-21 by IEUM An
+        """
+        dict_idx_name_clus_to_idx_name_clus_to_plot = dict( ( dict_name_clus_to_idx_name_clus[ name_clus_to_plot ], idx_name_clus_to_plot ) for idx_name_clus_to_plot, name_clus_to_plot in enumerate( l_name_clus_to_plot ) )
+        n_name_clus_to_plot = len( dict_idx_name_clus_to_idx_name_clus_to_plot )
+        
+        # parse and retrieve basic information about the current read cluster
+        ( name_chr_of_clus, st_of_clus, en_of_clus, flag_clus_is_plus_strand ) = ns_rc_raw[ 't_clus_basic_info' ]
+        len_clus = en_of_clus - st_of_clus # retrieve the number of base pairs for the region containing the current read cluster
+        id_rc = ns_rc_raw[ 'id_rc' ]
+        id_clump = ns_rc_raw[ 'id_clump' ]
+        idx_clus_within_clump = ns_rc_raw[ 'idx_clus_within_clump' ]
+        l_r_clus = ns_rc_raw[ 'l_r_clus' ]
+        
+        # initialize the empty panel
+        arr_panel = np.zeros( ( n_name_clus_to_plot, len_clus ) )
+        
+        # collect the coverage
+        for ic, l_seg, float_weight in l_r_clus :
+            idx_name_clus = dict_ic_to_idx_name_clus[ ic ]
+            if idx_name_clus not in dict_idx_name_clus_to_idx_name_clus_to_plot :
+                continue
+            idx_name_clus_to_plot = dict_idx_name_clus_to_idx_name_clus_to_plot[ idx_name_clus ]
+            l_seg_shifted = list( ( st - st_of_clus, en - st_of_clus ) for st, en in l_seg ) # compose 'l_seg_shifted', containing shifted positions so that all reads can be included in the array of length 'len_clus'
+            for st, en in l_seg_shifted :
+                arr_panel[ idx_name_clus_to_plot, st : en ] += 1 if flag_use_raw_read_count else float_weight 
+        
+        # scale the data
+        arr_panel_scaled = arr_panel / arr_panel.max( axis = 1 ).reshape( ( n_name_clus_to_plot, 1 ) )
+        
+        # search for boundaries
+        arr_panel_scaled_flattened = ( arr_panel_scaled >= float_min_relative_coverage_for_searching_locations_of_transcripts ).sum( axis = 0 )
+        st_coverage, en_coverage = np.nonzero( arr_panel_scaled_flattened )[ 0 ][ [ 0, -1 ] ]
+        
+        for arr, name_clus_to_plot in zip( arr_panel_scaled[ :, st_coverage : en_coverage ], l_name_clus_to_plot ) :
+            plt.plot( arr, label = name_clus_to_plot )
+        plt.legend( )
