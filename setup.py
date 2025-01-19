@@ -12,7 +12,7 @@ with open(os.path.join(HERE, "README.md")) as fid:
 
 setup(
     name="ourotools",
-    version="0.2.0",
+    version="0.2.1",
     author="Hyunsu An",
     author_email="ahs2202@gm.gist.ac.kr",
     description="A comprehensive toolkit for quality control and analysis of single-cell long-read RNA-seq data",
