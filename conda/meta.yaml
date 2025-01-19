@@ -1,0 +1,80 @@
+{% set name = "ourotools" %}
+{% set version = "0.2.3" %}
+
+package:
+  name: {{ name|lower }}
+  version: {{ version }}
+
+source:
+  path: ..
+
+build:
+  script: {{ PYTHON }} -m pip install . -vv
+  number: 0
+
+requirements:
+  build:
+    - python
+  host:
+    - python>=3.8
+    - numpy>=1.26.4
+    - pysam>=0.18.0
+    - bitarray>=2.5.1
+    - scipy>=1.9.1
+    - tqdm>=4.64.1
+    - nest-asyncio>=1.5.6
+    - joblib>=1.2.0
+    - pandas>=1.5.2
+    - intervaltree>=3.1.0
+    - matplotlib>=3.5.2
+    - mappy>=2.24
+    - h5py>=3.8.0
+    - pyBigWig>=0.3.22
+    - plotly>=5.18.0
+    - regex>=2.5.135
+    - owlready2>=0.46
+    - scanpy>=1.10.2
+    - pip
+    - setuptools
+  run:
+    - python>=3.8
+    - numpy>=1.26.4
+    - pysam>=0.18.0
+    - bitarray>=2.5.1
+    - scipy>=1.9.1
+    - tqdm>=4.64.1
+    - nest-asyncio>=1.5.6
+    - joblib>=1.2.0
+    - pandas>=1.5.2
+    - intervaltree>=3.1.0
+    - matplotlib>=3.5.2
+    - mappy>=2.24
+    - h5py>=3.8.0
+    - pyBigWig>=0.3.22
+    - plotly>=5.18.0
+    - regex>=2.5.135
+    - owlready2>=0.46
+    - scanpy>=1.10.2
+
+test:
+  imports:
+    - ourotools
+  requires:
+    - pip
+  commands:
+    - pip check
+
+about:
+  home: https://github.com/ahs2202/ouro-tools
+  license: MIT
+  license_family: MIT
+  license_file: LICENSE
+  summary: A comprehensive toolkit for quality control and analysis of single-cell long-read RNA-seq data
+  description: Ouro-Tools is a novel, comprehensive computational pipeline for long-read scRNA-seq with the following key features. Ouro-Tools (1) normalizes mRNA size distributions and (2) detects mRNA 7-methylguanosine caps to integrate multiple single-cell long-read RNA-sequencing experiments across modalities and characterize full-length transcripts, respectively.
+  dev_url: https://github.com/ahs2202/ouro-tools
+  doc_url: https://pypi.org/project/ourotools/
+  doc_source_url: https://raw.githubusercontent.com/ahs2202/ouro-tools/refs/heads/main/README.md
+  
+extra:
+  recipe-maintainers:
+    - ahs2202
