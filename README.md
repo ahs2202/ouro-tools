@@ -1,14 +1,18 @@
+[![PyPI version](https://badge.fury.io/py/ourotools.svg)](https://badge.fury.io/py/ourotools) ![PyPI - Downloads](https://img.shields.io/pypi/dm/ourotools) ![GitHub commits since latest release](https://img.shields.io/github/commits-since/ahs2202/ouro-tools/latest) ![GitHub last commit](https://img.shields.io/github/last-commit/ahs2202/ouro-tools) 
+
 <h1 align="center">
-  <a href="https://github.com/ahs2202/ouro-tools"><img src="doc/img/ourotools-logo-css.svg" width="850" height="189"></a>
+  <a href="https://github.com/ahs2202/ouro-tools"><img src="https://raw.githubusercontent.com/ahs2202/ouro-tools/refs/heads/main/doc/img/ourotools-logo-css.svg" width="850" height="189"></a>
   <br><br>
   <a href="https://github.com/ahs2202/ouro-tools">Ouro-Tools</a> - <em>long-read scRNA-seq</em> toolkit
 </h1>
 
+
 Ouro-Tools is a novel, comprehensive computational pipeline for long-read scRNA-seq with the following key features. Ouro-Tools **(1) normalizes mRNA size distributions** and **(2) detects mRNA 7-methylguanosine caps** to integrate multiple single-cell long-read RNA-sequencing experiments across modalities and characterize full-length transcripts, respectively.
 
 <p align="center">
-  <a href="https://github.com/ahs2202/ouro-tools"><img src="doc/img/ourotools-intro.SVG" width="850" height="412"></a>
+  <img src="https://raw.githubusercontent.com/ahs2202/ouro-tools/refs/heads/main/doc/img/ourotools-intro.SVG" width="850" height="412">
 </p>
+
 
 
 
@@ -65,7 +69,7 @@ The Ouro-Tools pipeline comprises five main modules, allowing seamless integrati
 
 ### What is long-read scRNA-seq? <a name="what-is-long-read-scRNA-seq"></a>
 
-![long_read_scRNAseq_intro](doc/img/long_read_scRNAseq_intro.webp)
+![long_read_scRNAseq_intro](https://raw.githubusercontent.com/ahs2202/ouro-tools/refs/heads/main/doc/img/long_read_scRNAseq_intro.webp)
 
 (Figure adapted from Volden & Vollmers, Genome Biol. 23:47 (2022), and made available under [Creative Commons license 4.0](https://creativecommons.org/licenses/by/4.0/) by Oxford Nanopore Technologies plc.)
 
@@ -175,8 +179,9 @@ ourotools.LongFilterNSplit(
 As the first module of the Ouro-Tools pipeline, the raw long-read pre-processing module `LongFilterNSplit` has a dual function for (1) providing comprehensive quality control metrics of a long-read scRNA-seq experiment and (2) pre-processing of raw long-read sequencing data for the downstream analysis. 
 
 <p align="center">
-  <img src="doc/img/QC-example.svg" width="850" height="412">
+  <img src="https://raw.githubusercontent.com/ahs2202/ouro-tools/refs/heads/main/doc/img/QC-example.svg" width="850" height="412">
 </p>
+
 
 According to the classification results, cDNA molecules are organized into separate output FASTQ files. For the cDNA molecules that contains a single (external or internal) poly(A) tail, the read is re-oriented so that it has the same orientation as its original mRNA transcript, with the poly(A) tail at its 3’ end; the resulting long-reads of cDNAs can be utilized for strand-specific long-read RNA-seq analysis.
 
@@ -220,8 +225,9 @@ ourotools.LongExtractBarcodeFromBAM(
 The barcode extraction module `LongExtractBarcodeFromBAM` identifies cell barcode (**CB**) and unique molecular identifier (**UMI**) sequences for each read and exports the results as a **“barcoded” BAM file**, a BAM file containing corrected CB and UMI sequences for each read using [the predefined SAM tags](#SAM-tags).
 
 <p align="center">
-  <img src="doc/img/UMI-deduplication-example.svg" width="850" height="412">
+  <img src="https://raw.githubusercontent.com/ahs2202/ouro-tools/refs/heads/main/doc/img/UMI-deduplication-example.svg" width="850" height="412">
 </p>
+
 
 
 
@@ -261,8 +267,9 @@ ourotools.Workers(
 The biological full-length identification module collects the lengths of guanosine homopolymers at the 5’ ends of cDNAs to identify genuine TSSs that produce capped mRNAs, depleting truncated cDNA molecules *in silico*. The module is implemented as a workflow consisting of `LongSurvey5pSiteFromBAM`, `LongClassify5pSiteProfiles`, `LongAdd5pSiteClassificationResultToBAM`, and `FilterArtifactReadFromBAM`.
 
 <p align="center">
-  <img src="doc/img/full-length-identification-example.svg" width="600" height="412">
+  <img src="https://raw.githubusercontent.com/ahs2202/ouro-tools/refs/heads/main/doc/img/full-length-identification-example.svg" width="600" height="412">
 </p>
+
 
 
 
@@ -295,8 +302,9 @@ str_confident_size_range = ourotools.get_confident_size_range( path_folder_size_
 The size distribution normalization module is implemented using the `LongSummarizeSizeDistributions` and `LongCreateReferenceSizeDistribution` workflows. First, using the `LongSummarizeSizeDistributions`workflow, a full-length, UMI-deduplicated cDNA size distribution is obtained from the `valid_3p_valid_5p` barcoded BAM file (representing ***in vivo* full-length mRNAs**) for each sample. Next, the reference mRNA size distribution is constructed for all the samples using the `LongCreateReferenceSizeDistribution` workflow.
 
 <p align="center">
-  <img src="doc/img/size-normalization-example.svg" width="850" height="412">
+  <img src="https://raw.githubusercontent.com/ahs2202/ouro-tools/refs/heads/main/doc/img/size-normalization-example.svg" width="850" height="412">
 </p>
+
 
 
 
