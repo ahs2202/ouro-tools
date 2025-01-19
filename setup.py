@@ -7,12 +7,12 @@ from setuptools import setup, find_packages
 HERE = os.path.abspath(os.path.dirname(__file__))
 
 # The text of the README file
-with open(os.path.join(HERE, "README.md")) as fid:
+with open(os.path.join(HERE, "README.md"), encoding="utf-8") as fid:
     README = fid.read()
 
 setup(
     name="ourotools",
-    version="0.2.5",
+    version="0.2.7",
     author="Hyunsu An",
     author_email="ahs2202@gm.gist.ac.kr",
     description="A comprehensive toolkit for quality control and analysis of single-cell long-read RNA-seq data",
