@@ -6,7 +6,7 @@ from typing import Union, List, Literal, Dict, Callable, Set, Iterable, Tuple
 
 def Minimap2_Align(
     path_file_fastq,
-    path_file_minimap2_index="/node210data/shared/ensembl/Mus_musculus/index/minimap2/Mus_musculus.GRCm38.dna.primary_assembly.k_14.idx",
+    path_file_minimap2_index,
     path_folder_minimap2_output=None,
     n_threads=20,
     verbose=True,

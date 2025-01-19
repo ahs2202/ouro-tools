@@ -55,17 +55,17 @@ import json  # to read and write JSON file
 import matplotlib.pyplot as plt
 import scipy.sparse
 import io
-import pysam
 import intervaltree
 import ast
+import inspect
+from bitarray import bitarray ## binary arrays
+import collections
 
 # prepare asynchronous operations
 import asyncio
 import nest_asyncio
 
 nest_asyncio.apply()
-
-from bitarray import bitarray  ## binary arrays
 
 from tqdm import tqdm as progress_bar  # for progress bar
 
@@ -77,7 +77,6 @@ import os, sys, getopt
 from io import StringIO, BytesIO
 import time
 import math
-import mappy
 import pkg_resources
 
 pd.options.mode.chained_assignment = None  # default='warn' # to disable worining
@@ -90,9 +89,9 @@ logging.basicConfig(
 logger = logging.getLogger("ouro-tools")
 
 # define version
-_version_ = "0.1.1"
+_version_ = "0.2.5"
 _ourotools_version_ = _version_
-_last_modified_time_ = "2024-08-13 15:20:28"
+_last_modified_time_ = "2025-01-19"
 
 str_release_note = [
     """
@@ -127,6 +126,9 @@ str_release_note = [
     
     # 2024-08-13 15:20:28 
     The entire code base was prepared for public release. Tutorial code, datasets, and documentation was prepared. Utility and wrapper functions were added.
+
+    # 2025-01-19 v0.2.5
+    Contained the lines importing pysam, mappy, pyBigWig packages (available in the bioconda channel) in order to make the Ouro-Tools available in the conda-forge channel.
     ##### Future implementations #####
 
     """
@@ -141,15 +143,6 @@ str_release_note = [
 `88b    d88'  `88.    .8'   888  `88b.  `88b    d88'              888      `88b    d88' `88b    d88'  888       o oo     .d8P 
  `Y8bood8P'     `YbodP'    o888o  o888o  `Y8bood8P'              o888o      `Y8bood8P'   `Y8bood8P'  o888ooooood8 8""88888P'  
  
- 
- _______  __   __  ______    _______         _______  _______  _______  ___      _______ 
-|       ||  | |  ||    _ |  |       |       |       ||       ||       ||   |    |       |
-|   _   ||  | |  ||   | ||  |   _   | ____  |_     _||   _   ||   _   ||   |    |  _____|
-|  | |  ||  |_|  ||   |_||_ |  | |  ||____|   |   |  |  | |  ||  | |  ||   |    | |_____ 
-|  |_|  ||       ||    __  ||  |_|  |         |   |  |  |_|  ||  |_|  ||   |___ |_____  |
-|       ||       ||   |  | ||       |         |   |  |       ||       ||       | _____| |
-|_______||_______||___|  |_||_______|         |___|  |_______||_______||_______||_______|
-
 
  ______     __  __     ______     ______     ______   ______     ______     __         ______    
 /\  __ \   /\ \/\ \   /\  == \   /\  __ \   /\__  _\ /\  __ \   /\  __ \   /\ \       /\  ___\   
@@ -227,6 +220,12 @@ def Call_Mutation_from_Read(
     """# 2021-08-29 16:55:23
     retrieve bases at the previously identified interesting sites (given by 'path_file_filtered_mutation') for each aligned read
     """
+    try:
+        import pysam
+    except ImportError as e:
+        e.add_note( f"Please install `pysam` and try again." )
+        raise
+        
     str_uuid = bk.UUID()
 
     # define interger representation of the CIGAR operations used in BAM files
@@ -2295,6 +2294,12 @@ def LongFilterNSplit(
     """
     Parse arguments
     """
+    try:
+        import mappy
+    except ImportError as e:
+        e.add_note( f"Please install `mappy` and try again." )
+        raise
+    
     if flag_usage_from_command_line_interface:  # parse arguments
         """parse arguments when the function was called from the command-line interface"""
         # {  } # unused arguments
@@ -3355,6 +3360,12 @@ def LongExtractBarcodeFromBAM(
     """
     Parse arguments
     """
+    try:
+        import pysam
+    except ImportError as e:
+        e.add_note( f"Please install `pysam` and try again." )
+        raise
+    
     if flag_usage_from_command_line_interface:  # parse arguments
         """parse arguments when the function was called from the command-line interface"""
         # {  } # unused arguments
@@ -4734,6 +4745,11 @@ def LongSummarizeSizeDistributions(
     # 2024-01-03 20:36:21 
     """
     import plotly.express as px
+    try:
+        import pysam
+    except ImportError as e:
+        e.add_note( f"Please install `pysam` and try again." )
+        raise
     
     """
     Parse arguments
@@ -5268,6 +5284,12 @@ def LongSurvey5pSiteFromBAM(
     """
     Parse arguments
     """
+    try:
+        import pysam
+    except ImportError as e:
+        e.add_note( f"Please install `pysam` and try again." )
+        raise
+        
     if flag_usage_from_command_line_interface:  # parse arguments
         """parse arguments when the function was called from the command-line interface"""
         # {  } # unused arguments
@@ -6363,6 +6385,12 @@ def LongAdd5pSiteClassificationResultToBAM(
     """
     Parse arguments
     """
+    try:
+        import pysam
+    except ImportError as e:
+        e.add_note( f"Please install `pysam` and try again." )
+        raise
+    
     if flag_usage_from_command_line_interface:  # parse arguments
         """parse arguments when the function was called from the command-line interface"""
         # {  } # unused arguments
@@ -7788,6 +7816,17 @@ def LongExportNormalizedCountMatrix(
     """
     Parse arguments
     """
+    try:
+        import pysam
+    except ImportError as e:
+        e.add_note( f"Please install `pysam` and try again." )
+        raise
+    try:
+        import mappy
+    except ImportError as e:
+        e.add_note( f"Please install `mappy` and try again." )
+        raise
+    
     if flag_usage_from_command_line_interface:  # parse arguments
         """parse arguments when the function was called from the command-line interface"""
         # { 'K', 'k' } # unused arguments
@@ -12158,6 +12197,10 @@ def ourotools(str_mode=None, **dict_args):
         elif str_mode == "LongExtractBarcodeFromBAM":
             LongExtractBarcodeFromBAM(**dict_args)
 
+# set entry point
+if __name__ == "__main__":
+    ourotools()  # run ouro at the top-level environment
+
 """ functions that are currently not supported in the command line """
 class ReadsToCoverage :
     """
@@ -12168,16 +12211,33 @@ class ReadsToCoverage :
     
     path_file_bw : str, # path to the output bw file
     pysam_header, # pysam header object. Alternatively, a Python list containing a tuple ( name_chr, len_chr ) can be given. (e.g., [ ( 'chr1', 1000 ), ( 'chr2' , 2000) ])
-    int_initial_buffer_size : int = 1_000_000,
-    # 2024-01-07 01:25:47 
+    int_initial_buffer_size : int = 1_000_000, # the initial buffer size in the number of base pairs
+    flag_assumes_records_are_sorted_by_start_position : bool = True, # By default, assumes the records are sorted by their start position and shift of the start position will automatically trigger flush operations to write the coverage data to the output bigwig file. If records are not sorted by the start position and a large variation of the start position is expected (however, this variation cannot exceed the half of 'int_min_safe_distance_for_automatic_flushing', implying that the records are still needed to be partially sorted in the ascending order by their start positions), set this flag to False, which will make the writer to flush coverage data based on the safe distance (see 'int_min_safe_distance_for_automatic_flushing' argument description).
+    int_min_safe_distance_for_automatic_flushing : int = 3_000_000, # based on the largest gene in the human, dystrophin, which spans 2.3Mbp. If 'flag_assumes_records_are_sorted_by_start_position' is True, 'int_min_safe_distance_for_automatic_flushing' will be automatically set to 0, as using "safe distance" will not be required when flushing the buffer.
+    int_buffer_flush_frequency : int = 100_000, # flush coverage data in the buffer for every 'int_buffer_flush_frequency' number of base pairs.
+    # 2024-10-22
     """
     def __init__( 
         self, 
         path_file_bw : str, 
         pysam_header, 
         int_initial_buffer_size : int = 1_000_000,
+        flag_assumes_records_are_sorted_by_start_position : bool = True, # By default, assumes the records are sorted by their start position and shift of the start position will automatically trigger flush operations to write the coverage data to the output bigwig file. If records are not sorted by the start position, set this flag to False, which will make the writer to flush coverage data based on the safe distance (see 'int_min_safe_distance_for_automatic_flushing' argument description).
+        int_min_safe_distance_for_automatic_flushing : int = 3_000_000, # based on the largest gene in the human, dystrophin, which spans 2.3Mbp.
+        int_buffer_flush_frequency : int = 100_000, # flush coverage data in the buffer for every 'int_buffer_flush_frequency' number of base pairs.
     ) :
-        import pyBigWig # import required package
+        # import required package
+        try:
+            import pysam
+        except ImportError as e:
+            e.add_note( f"Please install `pysam` and try again." )
+            raise
+        try:
+            import pyBigWig
+        except ImportError as e:
+            e.add_note( f"Please install `pyBigWig` and try again." )
+            raise
+            
         self._path_file_bw = path_file_bw
         # open BigWig file
         self._bw = pyBigWig.open( path_file_bw, "w" )
@@ -12190,6 +12250,11 @@ class ReadsToCoverage :
         # initialize properties
         self._buffer_name_chr = None
         self._flag_closed = False
+        # add settings
+        # read-only properties
+        self.__sorted = flag_assumes_records_are_sorted_by_start_position
+        self.__safe_dist = 0 if self.__sorted else int_min_safe_distance_for_automatic_flushing
+        self.__flush_freq = int_buffer_flush_frequency
     def initialize_buffer( self, name_chr : str, start : int ) :
         """
         initialize the buffer for the given 'name_chr' and 'start'
@@ -12197,91 +12262,144 @@ class ReadsToCoverage :
         start : int # start position of the chromosome (0-based coordinates)
         # 2024-01-06 19:44:59 
         """
+        # set buffer size and start position
+        buffer_size = self._int_initial_buffer_size + self.__safe_dist # add 'self.__safe_dist' as the padding
+        buffer_start = start - self.__safe_dist # buffer start can be negative
         # create a new buffer
-        self._buffer = np.zeros( self._int_initial_buffer_size, dtype = float )
+        self._buffer = np.zeros( buffer_size, dtype = float )
         # initialize the buffer
         self._buffer_name_chr = name_chr
-        self._buffer_start = start
+        self._buffer_start = buffer_start
         self._buffer_size = len( self._buffer )
         self._idx_current_pos_in_a_buffer = 0
         self._idx_start_pos_of_unwritten_portion_of_the_buffer = 0
         self._buffer_first_entry_added = False
-    def expand_buffer( self, int_required_size : int ) :
+    def recreate_buffer( self, int_new_buffer_size = None ) :
         """
-        int_required_size : int # the minimum required size of the buffer
+        int_new_buffer_size # the minimum required free size of the buffer. By default, the buffer will be recreated using the current buffer size.
         
-        increase the size of the buffer
-        # 2024-01-06 20:30:41 
+        recreate the buffer. The size of the buffer can be also changed during the operation.
+        # 2024-10-22
         """
-        int_size_remaining = self._buffer_size - self._idx_start_pos_of_unwritten_portion_of_the_buffer # retrieve the remaining size of the buffer
-        int_new_buffer_size = ( int_required_size - self._idx_start_pos_of_unwritten_portion_of_the_buffer ) * 3 # calculate the new buffer size based on the minimum required size of the buffer
+        # set default arguments
+        if int_new_buffer_size == None :
+            int_new_buffer_size = self._buffer_size # reuse existing buffer size
+
+        # create new buffer
         buffer_new = np.zeros( int_new_buffer_size, dtype = float ) # create a new buffer
+
+        # copy currently unwritten portion of the buffer to the new buffer
+        int_size_remaining = self._buffer_size - self._idx_start_pos_of_unwritten_portion_of_the_buffer # retrieve the remaining size of the buffer
         buffer_new[ : int_size_remaining ] = self._buffer[ - int_size_remaining : ] # copy buffer content to the new buffer
+        
+        # update the attributes
         self._buffer_start = self._buffer_start + self._idx_start_pos_of_unwritten_portion_of_the_buffer # update buffer start position
         self._buffer = buffer_new
         self._buffer_size = int_new_buffer_size
         self._idx_current_pos_in_a_buffer = self._idx_current_pos_in_a_buffer - self._idx_start_pos_of_unwritten_portion_of_the_buffer # update 'idx_current_pos_in_a_buffer'
-        self._idx_start_pos_of_unwritten_portion_of_the_buffer = 0
-    def flush_buffer( self, flag_flush_all : bool = False, flag_add_first_entry : bool = True, flag_add_last_entry : bool = True ) :
+        self._idx_start_pos_of_unwritten_portion_of_the_buffer = 0 # update idx_start_pos_of_unwritten_portion_of_the_buffer
+    def expand_buffer( self, int_required_size : int ) :
+        """
+        increase the size of the buffer
+        
+        # 2024 10 21
+        """
+        if self._buffer_size >= int_required_size : # if current buffer size is larger than the required size, exit
+            return
+        self.recreate_buffer( int_new_buffer_size = int_required_size )
+    def flush_buffer( self, int_new_pos = None, flag_flush_all : bool = False, flag_add_first_entry : bool = True, flag_add_last_entry : bool = True, float_min_proportion_written_data : float = 0.7 ) -> int :
         '''
         flush the buffer and write coverages to the currently opened BigWig file
-        
+
+        int_new_pos = None, # When this function is called, coverage data of all positions of the buffer prior to the current position will be written to the storage (i.e., flushing). if 'int_new_pos' is larger than 'self._idx_current_pos_in_a_buffer', 'self._idx_current_pos_in_a_buffer' will be updated using 'int_new_pos', and data will be flushed. Even though 'self._idx_current_pos_in_a_buffer' can be modified outside this method, it is recommended to update the attribute using this method. if 'flag_flush_all' = True, any value can be given and this argument will be ignored.
         flag_flush_all : bool = False, # if True, move the current position in the buffer to the end of the buffer and flush all the values in the buffer.
         flag_add_first_entry : bool = True, # if True and currently no entry has been added for the current chromosome, add the first entry containing a zero value when a non-zero value entry is added for the first time for the chromosome.
         flag_add_last_entry : bool = True, # if True and 'flag_flush_all' is also True, add the last entry containing a zero value for the current chromosome
-        # 2024-01-07 01:59:09 
+        float_min_proportion_written_data : float = 0.7, # When the proportion of written data in the buffer becomes larger than the given argument after flushing the data to the storage, the buffer will be recreated.
+
+        # return the number of records written
+        # 2024-10-23 
         '''
         if self._buffer_name_chr is None : # if buffer has not been initialized, exit
             return 0
         
         if flag_flush_all :
             self._idx_current_pos_in_a_buffer = self._buffer_size # change the current position to the end of the buffer so that all values will be flushed.
+        else : # if flushing all data in the buffer is not required, consider self.__flush_freq whether to determine whether to flush the buffer or not.
+            # if the current position cannot be updated, exit
+            if int_new_pos <= self._idx_current_pos_in_a_buffer :
+                return 0
+    
+            # update the current position
+            self._idx_current_pos_in_a_buffer = int_new_pos
 
-        if self._idx_start_pos_of_unwritten_portion_of_the_buffer == self._idx_current_pos_in_a_buffer : # if there is no writtable data, exit
+            # consider self.__flush_freq whether to determine whether to flush the buffer or not.
+            if ( self._idx_current_pos_in_a_buffer - self._idx_start_pos_of_unwritten_portion_of_the_buffer ) < self.__flush_freq : # if the unwritten portion of data is below 'self.__flush_freq', exit
+                return 0
+
+        # if there is no writtable data, exit
+        if self._idx_start_pos_of_unwritten_portion_of_the_buffer == self._idx_current_pos_in_a_buffer : 
             return 0
         
-        # collect the records to write
-        bf = self._buffer
-        l_val, l_st, l_en = [ ], [ ], [ ] # initialize the lists of bedGraph records
-        val_prev = bf[ self._idx_start_pos_of_unwritten_portion_of_the_buffer ] # initialize 'val_prev'
-        st_prev = self._idx_start_pos_of_unwritten_portion_of_the_buffer # initialize 'st_prev' (an index position in the buffer)
-        for idx in range( self._idx_start_pos_of_unwritten_portion_of_the_buffer, self._idx_current_pos_in_a_buffer ) :
-            val = bf[ idx ]
-            if val_prev != val : # if a value has change, 
-                # add a record
-                l_val.append( val_prev )
-                l_st.append( st_prev + self._buffer_start )
-                l_en.append( idx + self._buffer_start )
-                # initialize the next record
-                val_prev = val
-                st_prev = idx
-        int_num_records_written = len( l_val ) # retrieve the number of records written
+        # search positions where values change
+        st_target_region = self._idx_start_pos_of_unwritten_portion_of_the_buffer
+        en_target_region = self._idx_current_pos_in_a_buffer
+        bf = self._buffer[ st_target_region : en_target_region ]
+        bf_diff = np.diff( bf ) 
+        arr_pos_change = np.where( bf_diff )[ 0 ] + 1
+
+        # exit when no changes could be found
+        int_num_records_written = len( arr_pos_change ) # retrieve the number of records written
         if int_num_records_written == 0 : # exit when there is no records to write
             return 0
-        
+
+        # compose values
+        l_val = [ bf[ 0 ] ]
+        l_val.extend( bf[ arr_pos_change ][ : -1 ] )
+
+        # compose end positions
+        arr_en = arr_pos_change + ( st_target_region + self._buffer_start )
+        l_en = list( arr_en )
+
+        # compose start positions
+        l_st = [ st_target_region + self._buffer_start ]
+        l_st.extend( arr_en[ : -1 ] )
+
         # add the first entry
         if not self._buffer_first_entry_added and flag_add_first_entry :
-            pos_end_first_entry = l_st[ 0 ]
-            if pos_end_first_entry > 0 : # add the first entry only when the end position is larger than 0
-                self._bw.addEntries( [ self._buffer_name_chr ], [ 0 ], ends = [ pos_end_first_entry ], values = [ 0.0 ] ) # add the first entry containing a zero value # values should be [0.0] to avoid error ([0] will cause an error)
+            st_first = l_st[ 0 ]
+            if st_first > 0 : # add the first entry only when the first start position is larger than 0
+                int_num_records_written += 1
+                self._bw.addEntries( [ self._buffer_name_chr ], [ 0 ], ends = [ st_first ], values = [ 0.0 ] ) # add the first entry containing a zero value # values should be [0.0] to avoid error ([0] will cause an error)
+            elif st_first < 0 : # modify the first entry when the first start position is smaller than 0 (due to positive 'safe-distance', negative start position could be possible)
+                l_st[ 0 ] = 0 # start position of the first entry should be 0
             self._buffer_first_entry_added = True # update the flag, which prevent adding the first entry until a new buffer has been initialized.
         
         # write the records
-        self._bw.addEntries([ self._buffer_name_chr ] * int_num_records_written, l_st, ends = l_en, values = l_val ) # write records for the current chromosome
+        try :
+            self._bw.addEntries([ self._buffer_name_chr ] * len( l_st ), l_st, ends = l_en, values = l_val ) # write records for the current chromosome
+        except :
+            logger.info( f"{ self._buffer_name_chr = }, {len( l_st ) = }, {l_st[ : 100 ] = }, {l_en[ : 100 ] = }, {l_val[ : 100 ] = }" )
         
-        # add the last entry
+        # add the last entry (usually when all reacords for the chromosome has been collected)
         if flag_flush_all and flag_add_last_entry :
             len_chr, pos_start_last_entry = self._dict_name_chr_to_len[ self._buffer_name_chr ], l_en[ -1 ]
             if pos_start_last_entry < len_chr :
+                int_num_records_written += 1
                 self._bw.addEntries( [ self._buffer_name_chr ], [ pos_start_last_entry ], ends = [ len_chr ], values = [ 0.0 ] ) # add the last entry containing a zero value
                 
         # update the current unwritten position
         self._idx_start_pos_of_unwritten_portion_of_the_buffer = l_en[ -1 ] - self._buffer_start
+
+        # When the proportion of unwritten data in the buffer becomes smaller than the given argument after flushing the data to the storage, the buffer will be recreated.
+        if ( self._idx_start_pos_of_unwritten_portion_of_the_buffer / self._buffer_size ) > float_min_proportion_written_data : 
+            self.recreate_buffer( ) # recreate the buffer
+        
         return int_num_records_written # return the number of records written
     def close( self ) :
         """ 
         flush the buffer and close the bigwig file
-        # 2024-01-06 21:19:45 
+        # 2024-10-22
         """
         if self._flag_closed :
             raise RuntimeError( 'close on the already closed BigWig file' )
@@ -12299,7 +12417,16 @@ class ReadsToCoverage :
         """
         self.close( )
     def __repr__( self ) :
-        return f"<ReadsToCoverage object of {self._path_file_bw}, (current buffer name_chr={self._buffer_name_chr} start={self._buffer_start}, pos={self._idx_current_pos_in_a_buffer}, and size={self._buffer_size}>"
+        '''
+        represent the object
+        # 2024 10-20
+        '''
+        str_automatic_flushing_description = 'automatic flushing based on ' + ( 'start positions of given records' if self.__flag_assumes_records_are_sorted_by_start_position else f'safe distance ({self.__int_min_safe_distance_for_automatic_flushing:,} bp)' )
+        if self._buffer_name_chr == None :
+            str_repr = f"<ReadsToCoverage object of {self._path_file_bw}, (buffer ready to be initialized) {(str_automatic_flushing_description)}>"
+        else :
+            str_repr = f"<ReadsToCoverage object of {self._path_file_bw}, (current buffer name_chr={self._buffer_name_chr} start={self._buffer_start}, pos={self._idx_current_pos_in_a_buffer}, and size={self._buffer_size} {(str_automatic_flushing_description)})>"
+        return str_repr
     def retrieve_mapped_segments(
         self,
         cigartuples,
@@ -12331,61 +12458,70 @@ class ReadsToCoverage :
                 )
             )
         return l_seg
-    def add_read( self, pysam_read, float_weight : float = 1.0 ) :
+    def add_read( self, pysam_read, float_weight : float = 1.0, flag_flush_buffer : bool = True ) :
         '''
         add a read to the coverage.
-        reads added to a single 'ReadsToCoverage' object should be in a sorted order (sorted by chromosome name matched with given 'pysam_header' and sorted by the reference start position)
+        (reads added to a single 'ReadsToCoverage' object should be in a sorted order (sorted by the reference start position) if 'flag_assumes_records_are_sorted_by_start_position' == True.)
 
         pysam_read : # pysam read object. Alternatively, a tuple with the following components can be given through the argument: (pysam_read.reference_name, pysam_read.reference_start, pysam_read.cigartuples)
         float_weight : float = 1, # default weight would be 1
-        # 2024-10-07
+        flag_flush_buffer : bool = True, # If True, the proportion of the buffer before the alignment start position of the read will be flushed, assuming the 'add_read' method is being called using the reads sorted by the alignment start position of the read.
+        # 2024-10-22
         '''
         r = pysam_read
         # retrieve read properties
         name_chr, r_st, cigartuples = r if isinstance( r, tuple ) else ( r.reference_name, r.reference_start, r.cigartuples ) # directly parse the tuple
+        
+        # prepare the buffer 
         if name_chr != self._buffer_name_chr : # if chromosome has changed, 
             self.flush_buffer( flag_flush_all = True ) # flush all buffer
             self.initialize_buffer( name_chr, r_st ) # initialize new buffer using the properties of the current read
+            
         l_seg = self.retrieve_mapped_segments( cigartuples, r_st ) # retrieve segments of the current read
         
+        # update the buffer
         for st, en in l_seg : # for each segment, update the coverage 
             st_in_buffer, en_in_buffer = st - self._buffer_start, en - self._buffer_start # retrieve positions in the buffer
             if en_in_buffer > self._buffer_size :
-                self.expand_buffer( en_in_buffer )
+                self.expand_buffer( en_in_buffer * 2 ) # geometrically increase the size of the buffer
                 st_in_buffer, en_in_buffer = st - self._buffer_start, en - self._buffer_start # re-calculate the positions in the buffer
             self._buffer[ st_in_buffer : en_in_buffer ] += float_weight # update the buffer
-        
-        r_st_in_buffer = r_st - self._buffer_start # calculate the position in the buffer
-        if r_st_in_buffer > self._idx_current_pos_in_a_buffer : # if the position (reference start, which is used for sorting the BAM file) of a read exceeds the current position in the buffer
-            self._idx_current_pos_in_a_buffer = r_st_in_buffer # update the current position in a buffer
-            self.flush_buffer( ) # write the records
-    def add_region( self, name_chr : str, reference_start : int, values ) :
+
+        # The proportion of the buffer before the alignment start position of the read will be flushed, assuming the 'add_read' method is being called using the reads sorted by the alignment start position of the read.
+        if flag_flush_buffer :
+            self.flush_buffer( r_st - self._buffer_start - self.__safe_dist ) # calculate the position in the buffer # if the position (reference start, which is used for sorting the BAM file) of a read exceeds the current position in the buffer # update the current position in a buffer # write the records
+    def add_region( self, name_chr : str, reference_start : int, values, flag_flush_buffer : bool = True ) :
         '''
         add a region to the coverage.
         region added to a single 'ReadsToCoverage' object should be in a sorted order (sorted by chromosome name matched with given 'pysam_header' and sorted by the reference start position)
         
         name_chr : str, 
         reference_start : int, 
-        values
-        # 2024-01-07 01:17:51 
+        values,
+        flag_flush_buffer : bool = True, # If True, the proportion of the buffer before the start position of the region will be flushed, assuming the 'add_region' method is being called using the regions sorted by the start position.
+        # 2024-10-22
         '''
         r_st = reference_start
         r_en = r_st + len( values )
+
+        # prepare the buffer 
         if name_chr != self._buffer_name_chr : # if chromosome has changed, 
             self.flush_buffer( flag_flush_all = True ) # flush all buffer
             self.initialize_buffer( name_chr, r_st ) # initialize new buffer using the properties of the current read
         
         st_in_buffer, en_in_buffer = r_st - self._buffer_start, r_en - self._buffer_start # retrieve positions in the buffer
         if en_in_buffer > self._buffer_size :
-            self.expand_buffer( en_in_buffer )
+            self.expand_buffer( en_in_buffer * 2 ) # geometrically increase the size of the buffer
             st_in_buffer, en_in_buffer = r_st - self._buffer_start, r_en - self._buffer_start # re-calculate the positions in the buffer
         self._buffer[ st_in_buffer : en_in_buffer ] += values # update the buffer
-        
-        self._idx_current_pos_in_a_buffer = en_in_buffer # update the current position in a buffer
-        self.flush_buffer( ) # write the records
+
+        # The proportion of the buffer before the start position of the region will be flushed, assuming the 'add_region' method is being called using the regions sorted by the start position.
+        if flag_flush_buffer :
+            self.flush_buffer( st_in_buffer - self.__safe_dist ) # if the position (reference start) of a region exceeds the current position in the buffer # update the current position in a buffer # write the records
 
 def merge_bigwigs( path_file_bw_output : str, l_path_file_bw_input : List[ str ], int_window_size_for_a_batch : int = 10_000_000 ) :
     '''
+    (deprecated)
     merge bigwig files into a single bigwig file.
     Assumes all input chromosomes shares the same set of chromosome names.
     
@@ -12394,7 +12530,11 @@ def merge_bigwigs( path_file_bw_output : str, l_path_file_bw_input : List[ str ]
     int_window_size_for_a_batch : int = 10_000_000,
     # 2024-01-07 03:46:59 
     '''
-    import pyBigWig
+    try:
+        import pyBigWig
+    except ImportError as e:
+        e.add_note( f"Please install `pyBigWig` and try again." )
+        raise
 
     # exit if input is invalid
     if len( l_path_file_bw_input ) == 0 :
@@ -12432,6 +12572,96 @@ def merge_bigwigs( path_file_bw_output : str, l_path_file_bw_input : List[ str ]
     # close the coverage file
     coverage_writer.close( ) # close the output file
 
+def merge_bigwigs_in_bedgraph_format( path_file_bw_output : str, l_path_file_bw_input : List[ str ] ) :
+    '''
+    Efficiently merge bigwig files in bedgraph format into a single bigwig file in bedgraph format.
+    Assumes all input bigwig files shares the same set of chromosome names.
+    
+    path_file_bw_output : str, 
+    l_path_file_bw_input : List[ str ], 
+    # 2024-10-24 02:01 by IEUM
+    '''
+    import intervaltree
+    try:
+        import pyBigWig
+    except ImportError as e:
+        e.add_note( f"Please install `pyBigWig` and try again." )
+        raise
+
+    # exit if input is invalid
+    if len( l_path_file_bw_input ) == 0 :
+        return -1
+
+    # open input and output files
+    l_bw = list( pyBigWig.open( i, 'r' ) for i in l_path_file_bw_input )
+    bw_new = pyBigWig.open( path_file_bw_output, "w" )
+    
+    # add header to the output file
+    dict_chr_len = l_bw[ 0 ].chroms( ) # retrieve chromosome lengths from one of the input BigWig files
+    l_chr = list( ( k, dict_chr_len[ k ] ) for k in dict_chr_len ) # retrieve chromosome list
+    bw_new.addHeader( l_chr ) # add header
+    
+    # for each chromosome, merge BigWig BedGraph interval records and write records to the output BigWig file.
+    for name_chr, int_chr_len_curr in l_chr : # retrieve length of the current chromosome
+        # retrieve intervals from all input bigwig files in bedGraph formats (default format of pyBigWig)
+        df_intv = pd.concat( list( pd.DataFrame( bw.intervals( name_chr ), columns = [ 'st', 'en', 'val' ] ) for bw in l_bw ), ignore_index = True )
+        
+        # handle a chromosome with no records
+        if len( df_intv ) == 0 : 
+            bw_new.addEntries( chroms = [ name_chr ], starts = [ 0 ], ends = [ int_chr_len_curr ], values = [ 0.0 ] ) # add a record indicating the zero coverage for the chromosome
+            continue
+        
+        # pre-process intervals
+        df_intv = df_intv[ df_intv.val != 0 ] # exclude intervals with 0 values
+        df_intv.sort_values( 'st', ignore_index = True, inplace = True ) # sort by start position
+        df_intv = df_intv.groupby( [ 'st', 'en' ] ).sum( ).reset_index( drop = False ) # merge identical intervals
+        
+        # build an interval tree of the intervals
+        it = intervaltree.IntervalTree.from_tuples( list( df_intv.itertuples( index = False, name = None ) ) )
+        
+        # retrieve list of unique positions
+        set_pos_unique = set( df_intv.st.values )
+        set_pos_unique.update( df_intv.en.values )
+        arr_pos_unique = np.sort( list( set_pos_unique ) )
+        
+        # initialize new entries
+        l_st_new, l_en_new, l_val_new = [ ], [ ], [ ] 
+        
+        # if needed, add first record
+        if arr_pos_unique[ 0 ] != 0 :
+            l_st_new.append( 0 )
+            l_en_new.append( arr_pos_unique[ 0 ] )
+            l_val_new.append( 0.0 )
+        
+        for st, en in zip( arr_pos_unique[ : -1 ], arr_pos_unique[ 1 : ] ) : # iterate middle positions of unique intervals
+            # search overlapped intervals using the middle point
+            set_i_overlapped = it[ ( st + en ) / 2 ]
+        
+            # determine the coverage 
+            n_i_overlapped = len( set_i_overlapped )
+            if n_i_overlapped == 0 : 
+                val = 0.0 # a zero coverage region
+            elif n_i_overlapped < 10000 :
+                val = sum( i[ 2 ] for i in set_i_overlapped )
+            else :
+                val = np.sum( i[ 2 ] for i in set_i_overlapped )
+        
+            # add a record for the current interval
+            l_st_new.append( st )
+            l_en_new.append( en )
+            l_val_new.append( val )
+        
+        # if needed, add last record
+        if arr_pos_unique[ -1 ] != int_chr_len_curr :
+            l_st_new.append( arr_pos_unique[ -1 ] )
+            l_en_new.append( int_chr_len_curr )
+            l_val_new.append( 0.0 )
+    
+        # add records
+        bw_new.addEntries( chroms = [ name_chr ] * len( l_st_new ), starts = l_st_new, ends = l_en_new, values = l_val_new )
+    
+    bw_new.close( )
+    
 def SplitBAM( 
     path_file_bam_input : str, 
     path_folder_output : str, 
@@ -12446,7 +12676,7 @@ def SplitBAM(
     flag_strand_specific : bool = False, # if True, create separate BAM files and coverage BigWig files for + strand and - strand reads.
     flag_export_tss_and_tes_coverage : bool = False, # if True, create two additional BigWig coverage files containing (size-distribution-normalized) transcript start site (TSS) and transcript end site (TES) usage information. The locations of TSS and TES correspond to alignment start position (first base pair aligned to the genome) or alignment end position (last base pair aligned to the genome) for non-reverse-complemented and reverse-complemented reads, respectively.
 ) :
-    """ # 2024-10-07 
+    """ 
     A scalable pipeline employing multiprocessing for faster splitting of a barcoded BAM file to multiple BAM files, each containing the list of cell barcodes of the cells belonging to each 'name_cluster' (representing a cell type) or even a single-cell (a separate BAM file for each a single cell-barcode).
     Features:
     - use multiple processes to increase the performance
@@ -12477,15 +12707,24 @@ def SplitBAM(
     # -------- Export Transcript Start Site (TSS) and Transcript End Site (TES) information as coverages --------
     flag_export_tss_and_tes_coverage : bool = False, # if True, create two additional BigWig coverage files containing (size-distribution-normalized) transcript start site (TSS) and transcript end site (TES) usage information. The locations of TSS and TES correspond to alignment start position (first base pair aligned to the genome) or alignment end position (last base pair aligned to the genome) for non-reverse-complemented and reverse-complemented reads, respectively.
 
+    # 2024-10-24 2:10 by IEUM
     """
     ''' prepare : retrieve file header, preprocess name_clus, and group 'name_clus' values for each worker process. '''
     # import packages
     import multiprocessing as mp
-    import pysam
     import os
     import math
+    try:
+        import pysam
+    except ImportError as e:
+        e.add_note( f"Please install `pysam` and try again." )
+        raise
     if flag_export_coverages :
-        import pyBigWig
+        try:
+            import pyBigWig
+        except ImportError as e:
+            e.add_note( f"Please install `pyBigWig` and try again." )
+            raise
 
     # create the output folder
     os.makedirs( path_folder_output, exist_ok = True )
@@ -12562,9 +12801,9 @@ def SplitBAM(
                 l_path_file_bam.append( path_file_bam ) # collect the path of output BAM file
                 # collect coverage output files
                 for coverage_data_type in l_coverage_data_type :
-                    path_file_bw = f'{path_file_bam_prefix}{strand_type}{coverage_data_type}.bw' # define output file names
+                    path_file_bw = f'{path_file_bw_prefix}{strand_type}{coverage_data_type}.bw' # define output file names
                     if flag_export_coverages :
-                        dict_name_clus_to_dict_coverage_writer[ name_clus ][ strand_type, coverage_data_type ] = ReadsToCoverage( path_file_bw, sam_header ) # collect the new coverage file
+                        dict_name_clus_to_dict_coverage_writer[ name_clus ][ strand_type, coverage_data_type ] = ReadsToCoverage( path_file_bw, sam_header, flag_assumes_records_are_sorted_by_start_position = coverage_data_type == '' ) # collect the new coverage file # for TSS and TES coverages, the records are expected to be not sorted by reference start position.
 
         ''' work : retrieve records and write the records to output BAM files '''
         while True :
@@ -12592,8 +12831,10 @@ def SplitBAM(
                         dict_name_clus_to_dict_coverage_writer[ name_clus ][ strand_type, '' ].add_read( r, float_weight = float_weight ) # update the coverage using a size-distribution-normalizedweight 
                         if flag_export_tss_and_tes_coverage :
                             ref_name, ref_st, ref_en = r.reference_name, r.reference_start, r.reference_end # retrieve read info
-                            dict_name_clus_to_dict_coverage_writer[ name_clus ][ strand_type, '.TSS' ].add_read( ( ref_name, ref_st if flag_is_plus_strand else ( ref_en - 1 ), ( ( 0, 1 ), ) ), float_weight = float_weight ) # update the TSS coverage using a size-distribution-normalizedweight 
-                            dict_name_clus_to_dict_coverage_writer[ name_clus ][ strand_type, '.TES' ].add_read( ( ref_name, ref_en if flag_is_plus_strand else ( ref_st - 1 ), ( ( 0, 1 ), ) ), float_weight = float_weight ) # update the TES coverage using a size-distribution-normalizedweight 
+                            ref_S, ref_E = ref_st, ( ref_en - 1 ) # 0-based coordinates of start and end positions
+                            ref_TSS, ref_TES = ( ref_S, ref_E ) if flag_is_plus_strand else ( ref_E, ref_S )
+                            dict_name_clus_to_dict_coverage_writer[ name_clus ][ strand_type, '.TSS' ].add_read( ( ref_name, ref_TSS, ( ( 0, 1 ), ) ), float_weight = float_weight ) # update the TSS coverage using a size-distribution-normalizedweight 
+                            dict_name_clus_to_dict_coverage_writer[ name_clus ][ strand_type, '.TES' ].add_read( ( ref_name, ref_TES, ( ( 0, 1 ), ) ), float_weight = float_weight ) # update the TES coverage using a size-distribution-normalizedweight 
 
         ''' post-process : close files and index the files '''
         for name_clus in dict_name_clus_to_dict_newsamfile :
@@ -12689,12 +12930,13 @@ def SplitBAM(
         p.recv( ) # receive a signal indicating the worker has dismissed itself
     # pipeline completed
     return
-
+    
 def SplitBAMs( 
     dict__path_file_bam_input__to__dict_cb_to_name_clus : dict, 
     path_folder_output : str, 
     name_tag_cb : str = 'CB', 
     int_num_threads : int = 5,
+    int_num_pipelines : int = 3, # the maximum number of independent pipelines that could be run simultaneously
     int_max_num_files_for_each_process : int = 700,
     int_num_worker_processes : int = 100,
     flag_export_coverages : bool = False, # export size-distribution-normalized coverages of the output BAM files. if 'path_folder_reference_distribution' is not given, the coverage of each BAM file will be exported as-is.
@@ -12705,7 +12947,7 @@ def SplitBAMs(
     flag_strand_specific : bool = False, # if True, create separate BAM files and coverage BigWig files for + strand and - strand reads.
     flag_export_tss_and_tes_coverage : bool = False, # if True, create two additional BigWig coverage files containing (size-distribution-normalized) transcript start site (TSS) and transcript end site (TES) usage information. The locations of TSS and TES correspond to alignment start position (first base pair aligned to the genome) or alignment end position (last base pair aligned to the genome) for non-reverse-complemented and reverse-complemented reads, respectively.
 ) :
-    """ # 2024-10-07
+    """
     A pipeline employing multiprocessing for faster splitting of barcoded BAM files of a single cell dataset to multiple BAM files, each containing records of cells belonging to a single 'name_cluster' (a single cell type)
     
     Features:
@@ -12727,6 +12969,8 @@ def SplitBAMs(
     name_tag_cb : str = 'CB' # name of the SAM tag containing the corrected cell barcode
     
     int_num_threads : int = 5 # the number of threads for merging BAM files of the same cluster name (cell type)
+
+    int_num_pipelines : int = 3, # the maximum number of independent pipelines that could be run simultaneously.
     
     int_max_num_files_for_each_process : int = 700, # max number of file descriptors (an output BAM file or a pipe object) that can be opened in a single process.
     
@@ -12744,13 +12988,20 @@ def SplitBAMs(
 
     # -------- Export Transcript Start Site (TSS) and Transcript End Site (TES) information as coverages --------
     flag_export_tss_and_tes_coverage : bool = False, # if True, create two additional BigWig coverage files containing (size-distribution-normalized) transcript start site (TSS) and transcript end site (TES) usage information. The locations of TSS and TES correspond to alignment start position (first base pair aligned to the genome) or alignment end position (last base pair aligned to the genome) for non-reverse-complemented and reverse-complemented reads, respectively.
+
+    # 2024-10-24 2:10 by IEUM
     """
+    try:
+        import pysam
+    except ImportError as e:
+        e.add_note( f"Please install `pysam` and try again." )
+        raise
+    
     # create the output folder
     os.makedirs( path_folder_output, exist_ok = True )
     
     ''' Initiate pipelines for processing individual BAM file separately. '''
     logger.info(f"Started.")
-    pipelines = bk.Offload_Works( None ) # no limit for the number of works that can be submitted.
     
     # initialize flags 
     flag_perform_size_distribution_normalization_for_coverage_calculation = flag_export_coverages and isinstance( path_folder_reference_distribution, str ) and os.path.exists( f"{path_folder_reference_distribution}dict_output.pickle" )
@@ -12761,7 +13012,23 @@ def SplitBAMs(
         dict_name_file_distribution_to_arr_ratio_to_ref = dict( ( name_file_dist, arr_ratio_to_ref ) for name_file_dist, arr_ratio_to_ref in zip( dict_output[ 'setting' ][ 'l_name_file_distributions' ], dict_output[ 'l_arr_ratio_to_ref' ] ) ) # retrieve name_file_distribution > arr_ratio_to_ref mapping
     
     ''' run 'SplitBAM' for individual BAM files '''
-    for path_file_bam_input in dict__path_file_bam_input__to__dict_cb_to_name_clus : # run 'SplitBAM' for each input BAM file separately
+    # initialize 'dict_kwargs_for_workers'
+    dict_kwargs_for_workers = { 
+        'path_file_bam_input' : [ ], 
+        'path_folder_output' : [ ], 
+        'dict_cb_to_name_clus' : [ ], 
+        'name_tag_cb' : name_tag_cb, 
+        'int_max_num_files_for_each_process' : int_max_num_files_for_each_process, 
+        'int_num_worker_processes' : int_num_worker_processes,
+        'flag_export_coverages' : flag_export_coverages,
+        'arr_ratio_to_ref' : [ ],
+        't_distribution_range_of_interest' : t_distribution_range_of_interest,
+        'name_tag_length' : name_tag_length,
+        'flag_strand_specific' : flag_strand_specific,
+        'flag_export_tss_and_tes_coverage' : flag_export_tss_and_tes_coverage,
+    }
+    # collect arguments for running 'SplitBAM' for each input BAM file separately
+    for path_file_bam_input in dict__path_file_bam_input__to__dict_cb_to_name_clus : 
         str_uuid_file_bam_input = bk.UUID( ) # retrieve UUID of the input bam file
         # retrieve 'arr_ratio_to_ref' for size_distribution_normalization during coverage_calculation
         if flag_perform_size_distribution_normalization_for_coverage_calculation :
@@ -12770,26 +13037,13 @@ def SplitBAMs(
         else :
             arr_ratio_to_ref = None
         # run 'SplitBAM' for the current BAM file
-        pipelines.submit_work( 
-            SplitBAM, 
-            kwargs = { 
-                'path_file_bam_input' : path_file_bam_input, 
-                'path_folder_output' : f'{path_folder_output}temp_{str_uuid_file_bam_input}/', 
-                'dict_cb_to_name_clus' : dict__path_file_bam_input__to__dict_cb_to_name_clus[ path_file_bam_input ], 
-                'name_tag_cb' : name_tag_cb, 
-                'int_max_num_files_for_each_process' : int_max_num_files_for_each_process, 
-                'int_num_worker_processes' : int_num_worker_processes,
-                'flag_export_coverages' : flag_export_coverages,
-                'arr_ratio_to_ref' : arr_ratio_to_ref,
-                't_distribution_range_of_interest' : t_distribution_range_of_interest,
-                'name_tag_length' : name_tag_length,
-                'flag_strand_specific' : flag_strand_specific,
-                'flag_export_tss_and_tes_coverage' : flag_export_tss_and_tes_coverage,
-            },
-        )
-                    
+        dict_kwargs_for_workers[ 'path_file_bam_input' ].append( path_file_bam_input )
+        dict_kwargs_for_workers[ 'path_folder_output' ].append( f'{path_folder_output}temp_{str_uuid_file_bam_input}/' )
+        dict_kwargs_for_workers[ 'dict_cb_to_name_clus' ].append( dict__path_file_bam_input__to__dict_cb_to_name_clus[ path_file_bam_input ] )
+        dict_kwargs_for_workers[ 'arr_ratio_to_ref' ].append( arr_ratio_to_ref )
+
     # wait all pipelines to be completed
-    pipelines.wait_all()
+    bk.Workers( SplitBAM, int_num_workers_for_Workers = int_num_pipelines, ** dict_kwargs_for_workers )
     
     ''' define the list of output types '''
     l_strand_type = [ '.minus_strand', '.plus_strand', ] if flag_strand_specific else [ '' ] # no strand_type if 'flag_strand_specific' == False
@@ -12815,31 +13069,32 @@ def SplitBAMs(
             for path_file in l_path_file_output_temp : # delete the temporary output files
                 os.remove( path_file )
             pysam.index( path_file_bam_output ) # index the output file
-
+    
     ''' combine temporary output BigWig files '''
     if flag_export_coverages :
+        # initialize 'dict_kwargs_for_workers'
+        dict_kwargs_for_workers = {
+            'path_file_bw_output' : [ ],
+            'l_path_file_bw_input' : [ ],
+        }
+
+        # collect arguments for running 'merge_bigwigs' for the BigWig files of the current 'name_clus'
         normalization_type = '.size_distribution_normalized' if flag_perform_size_distribution_normalization_for_coverage_calculation else '' # retrieve type of the coverage
         for strand_type in l_strand_type :
             for coverage_data_type in l_coverage_data_type :
                 for name_clus in l_name_clus : # for each 'name_clus'
-                    # run 'merge_bigwigs' for the BigWig files of the current 'name_clus'
-                    pipelines.submit_work( 
-                        merge_bigwigs, 
-                        kwargs = { 
-                            'path_file_bw_output' : f'{path_folder_output}{name_clus}{normalization_type}{strand_type}{coverage_data_type}.bw',
-                            'l_path_file_bw_input' : glob.glob( f'{path_folder_output}*/{name_clus}{normalization_type}{strand_type}{coverage_data_type}.bw' ),
-                        },
-                    )
+                    dict_kwargs_for_workers[ 'path_file_bw_output' ].append( f'{path_folder_output}{name_clus}{normalization_type}{strand_type}{coverage_data_type}.bw' )
+                    dict_kwargs_for_workers[ 'l_path_file_bw_input' ].append( glob.glob( f'{path_folder_output}*/{name_clus}{normalization_type}{strand_type}{coverage_data_type}.bw' ) )
                 
-    # wait all works to be completed
-    pipelines.wait_all()
+        # wait all works to be completed
+        bk.Workers( merge_bigwigs_in_bedgraph_format, int_num_workers_for_Workers = int_num_pipelines, ** dict_kwargs_for_workers )
         
     # remove temporary output files
     for path_folder in bk.GLOB_Retrive_Strings_in_Wildcards( f"{path_folder_output}temp_*/" ).path.values :
         shutil.rmtree( path_folder )
         
     logger.info(f"Completed.")
-
+    
 def DeduplicateBAM( 
     path_file_bam_input : str, # an input Barcoded BAM file to split
     path_folder_output : str, # the output folder where splitted BAM files will be exported
@@ -12862,6 +13117,12 @@ def DeduplicateBAM(
     
     """
     ''' initialize '''
+    try:
+        import pysam
+    except ImportError as e:
+        e.add_note( f"Please install `pysam` and try again." )
+        raise
+
     # define folders
     path_folder_temp = f'{path_folder_output}temp/'
 
@@ -13012,8 +13273,13 @@ def FilterInternalPolyAPrimedReadFromBAM(
     """
     # import packages
     import multiprocessing as mp
-    import pysam
     import os
+    try:
+        import pysam
+    except ImportError as e:
+        e.add_note( f"Please install `pysam` and try again." )
+        raise
+
     # define functions
 
     # create the output folder
@@ -13137,8 +13403,13 @@ def FilterArtifactReadFromBAM(
     """
     # import packages
     import multiprocessing as mp
-    import pysam
     import os
+    try:
+        import pysam
+    except ImportError as e:
+        e.add_note( f"Please install `pysam` and try again." )
+        raise
+    
     # define functions
 
     # create the output folder
@@ -13296,8 +13567,13 @@ def StrandSpecificBAM(
     """
     # import packages
     import multiprocessing as mp
-    import pysam
     import os
+    try:
+        import pysam
+    except ImportError as e:
+        e.add_note( f"Please install `pysam` and try again." )
+        raise
+
     # define functions
     def _check_binary_flags( flags : int, int_bit_flag_position : int ) :
         """ # 2023-12-13 15:47:10 
