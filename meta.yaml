@@ -1,0 +1,35 @@
+{% set version = "0.2.1" %}
+
+package:
+  name: ourotools
+  version: {{ version }}
+
+source:
+  url: https://pypi.io/packages/source/o/ourotools/ourotools-{{ version }}.tar.gz
+  sha256: 7719edfc1696180d0642bb942cd44676de5ce82b2abb53747d8c13fb09173c1b
+
+build:
+  noarch: python
+  number: 0
+  script: python -m pip install --no-deps --ignore-installed .
+
+requirements:
+  host:
+    - python
+    - pip
+  run:
+    - python
+
+test:
+  imports:
+    - ourotools
+
+about:
+  home: https://github.com/ahs2202/ouro-tools
+  license: MIT
+  summary: A comprehensive toolkit for quality control and analysis of single-cell long-read RNA-seq data
+  description: |
+    Ouro-Tools is a novel, comprehensive computational pipeline for long-read scRNA-seq with the following key features. Ouro-Tools (1) normalizes mRNA size distributions and (2) detects mRNA 7-methylguanosine caps to integrate multiple single-cell long-read RNA-sequencing experiments across modalities and characterize full-length transcripts, respectively.
+  dev_url: https://github.com/ahs2202/ouro-tools
+  doc_url: https://pypi.org/project/ourotools/
+  doc_source_url: https://raw.githubusercontent.com/ahs2202/ouro-tools/refs/heads/main/README.md
