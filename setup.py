@@ -12,7 +12,7 @@ with open(os.path.join(HERE, "README.md"), encoding="utf-8") as fid:
 
 setup(
     name="ourotools",
-    version="0.2.7",
+    version="0.2.8",
     author="Hyunsu An",
     author_email="ahs2202@gm.gist.ac.kr",
     description="A comprehensive toolkit for quality control and analysis of single-cell long-read RNA-seq data",
@@ -22,7 +22,7 @@ setup(
     license="MIT",
     packages=find_packages(),
     include_package_data=True,
-    python_requires=">=3.11, <4",
+    python_requires=">=3.11",
     install_requires=[
         "bitarray>=2.5.1",
         "scipy>=1.9.1",

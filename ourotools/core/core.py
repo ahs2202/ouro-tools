@@ -89,9 +89,9 @@ logging.basicConfig(
 logger = logging.getLogger("ouro-tools")
 
 # define version
-_version_ = "0.2.7"
+_version_ = "0.2.8"
 _ourotools_version_ = _version_
-_last_modified_time_ = "2025-01-19"
+_last_modified_time_ = "2025-01-20"
 
 str_release_note = [
     """

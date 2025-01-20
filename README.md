@@ -1,4 +1,5 @@
-[![PyPI version](https://badge.fury.io/py/ourotools.svg)](https://badge.fury.io/py/ourotools) ![PyPI - Downloads](https://img.shields.io/pypi/dm/ourotools) ![GitHub commits since latest release](https://img.shields.io/github/commits-since/ahs2202/ouro-tools/latest) ![GitHub last commit](https://img.shields.io/github/last-commit/ahs2202/ouro-tools) 
+[![PyPI version](https://img.shields.io/pypi/v/ourotools?logo=PyPI)](https://pypi.org/project/ourotools) ![PyPI - Downloads](https://img.shields.io/pypi/dm/ourotools) [![BioConda Install](https://img.shields.io/conda/dn/bioconda/ourotools.svg?style=flag&label=BioConda%20install)](https://anaconda.org/bioconda/ourotools) ![GitHub commits since latest release](https://img.shields.io/github/commits-since/ahs2202/ouro-tools/latest) ![![Join the chat at https://gitter.im/Ouro-Tools/Lobby](https://badges.gitter.im/Join%20Chat.svg)](https://app.gitter.im/#/room/#ouro-tools:gitter.im?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
+
 
 <h1 align="center">
   <a href="https://github.com/ahs2202/ouro-tools"><img src="https://raw.githubusercontent.com/ahs2202/ouro-tools/refs/heads/main/doc/img/ourotools-logo-css.svg" width="850" height="189"></a>

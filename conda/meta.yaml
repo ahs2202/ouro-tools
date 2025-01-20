@@ -1,5 +1,5 @@
 {% set name = "ourotools" %}
-{% set version = "0.2.7" %}
+{% set version = "0.2.8" %}
 
 package:
   name: {{ name|lower }}
@@ -16,52 +16,57 @@ requirements:
   build:
     - python
   host:
-    - python>=3.8
-    - numpy>=1.26.4
-    - pysam>=0.18.0
-    - bitarray>=2.5.1
-    - scipy>=1.9.1
-    - tqdm>=4.64.1
-    - nest-asyncio>=1.5.6
-    - joblib>=1.2.0
-    - pandas>=1.5.2
-    - intervaltree>=3.1.0
-    - matplotlib>=3.5.2
-    - mappy>=2.24
-    - h5py>=3.8.0
-    - pyBigWig>=0.3.22
-    - plotly>=5.18.0
-    - regex>=2.5.135
-    - owlready2>=0.46
-    - scanpy>=1.10.2
+    - python >=3.11
     - pip
     - setuptools
+    - numpy >=1.26.4
+    - bitarray >=2.5.1
+    - scipy >=1.9.1
+    - tqdm >=4.64.1
+    - nest-asyncio >=1.5.6
+    - joblib >=1.2.0
+    - pandas >=1.5.2
+    - intervaltree >=3.1.0
+    - matplotlib-base >=3.5.2
+    - h5py >=3.8.0
+    - plotly >=5.18.0
+    - regex >=2.5.135
+    - owlready2 >=0.46
+    - scanpy >=1.10.2
+    - pysam >=0.18.0
+    - mappy >=2.24
+    - pyBigWig >=0.3.22
+    - samtools >=1.10
+    - minimap2 >=2.28
   run:
-    - python>=3.8
-    - numpy>=1.26.4
-    - pysam>=0.18.0
-    - bitarray>=2.5.1
-    - scipy>=1.9.1
-    - tqdm>=4.64.1
-    - nest-asyncio>=1.5.6
-    - joblib>=1.2.0
-    - pandas>=1.5.2
-    - intervaltree>=3.1.0
-    - matplotlib>=3.5.2
-    - mappy>=2.24
-    - h5py>=3.8.0
-    - pyBigWig>=0.3.22
-    - plotly>=5.18.0
-    - regex>=2.5.135
-    - owlready2>=0.46
-    - scanpy>=1.10.2
-
+    - python >=3.11
+    - numpy >=1.26.4
+    - bitarray >=2.5.1
+    - scipy >=1.9.1
+    - tqdm >=4.64.1
+    - nest-asyncio >=1.5.6
+    - joblib >=1.2.0
+    - pandas >=1.5.2
+    - intervaltree >=3.1.0
+    - matplotlib-base >=3.5.2
+    - h5py >=3.8.0
+    - plotly >=5.18.0
+    - regex >=2.5.135
+    - owlready2 >=0.46
+    - scanpy >=1.10.2
+    - pysam >=0.18.0
+    - mappy >=2.24
+    - pyBigWig >=0.3.22
+    - samtools >=1.10
+    - minimap2 >=2.28
+    
 test:
   imports:
     - ourotools
   requires:
     - pip
   commands:
+    - ourotools --help
     - pip check
 
 about:
