@@ -1,4 +1,4 @@
-[![PyPI version](https://img.shields.io/pypi/v/ourotools?logo=PyPI)](https://pypi.org/project/ourotools) ![PyPI - Downloads](https://img.shields.io/pypi/dm/ourotools) [![BioConda Install](https://img.shields.io/conda/dn/bioconda/ourotools.svg?style=flag&label=BioConda%20install)](https://anaconda.org/bioconda/ourotools) ![GitHub commits since latest release](https://img.shields.io/github/commits-since/ahs2202/ouro-tools/latest) [![Gitter chat](https://badges.gitter.im/Ouro-Tools/Lobby.svg)](https://app.gitter.im/#/room/#ouro-tools:gitter.im?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
+[![PyPI version](https://img.shields.io/pypi/v/ourotools?logo=PyPI)](https://pypi.org/project/ourotools) [![PyPI Downloads](https://static.pepy.tech/badge/ourotools)](https://pepy.tech/projects/ourotools) [![BioConda Install](https://img.shields.io/conda/dn/bioconda/ourotools.svg?style=flag&label=BioConda%20install)](https://anaconda.org/bioconda/ourotools) ![GitHub commits since latest release](https://img.shields.io/github/commits-since/ahs2202/ouro-tools/latest) [![Gitter chat](https://badges.gitter.im/Ouro-Tools/Lobby.svg)](https://app.gitter.im/#/room/#ouro-tools:gitter.im?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
 
 
 <h1 align="center">
@@ -80,7 +80,7 @@ In 2013, 2019, and 2022, “single-cell sequencing,” “single-cell multimodal
 
 ## Installation <a name="installation"></a>
 
-The latest stable version of Ouro-Tools is available via https://pypi.org/
+The latest stable version of Ouro-Tools is available in [PyPI](https://pypi.org/project/ourotools/) and [BioConda](https://bioconda.github.io/recipes/ourotools/README.html#package-ourotools).
 
 In order to install the latest, unreleased version of Ouro-Tools, run the following commands in bash shell.
 
@@ -104,7 +104,7 @@ To print the command line usage example of each module from the bash shell, plea
 ourotools LongFilterNSplit -h
 ```
 
-**IPython environment (Jupyter notebook)**
+**IPython environment (Jupyter Notebook)**
 
 ```python
 ourotools.LongFilterNSplit?
@@ -117,6 +117,8 @@ ourotools.LongFilterNSplit?
 
 
 ### Download our *toy* long-read scRNA-seq datasets <a name="toy-datasets"></a>
+
+Each toy dataset contains a subsampled long-read sequencing (ONT R10.4.1) result of an **Ouro-Seq** library (please check our [BioRxiv pre-print](https://doi.org/10.1101/2025.01.17.633678) for more details). 3 cell types (100 cells are sampled for each cell type) and 3 chromosomes are selected for subsampling. Additionally, the artifact molecules were subsampled and included in the toy dataset.
 
 ```bash
 # download toy datasets from mouse ovary and testis
@@ -135,7 +137,7 @@ import ourotools
 
 
 # global multiprocessing settings
-ourotools.bk.int_max_num_batches_in_a_queue_for_each_worker = 1
+ourotools.bk.int_max_num_batches_in_a_queue_for_each_worker = 1 # [NOTE] For WSL, changing this variable to 1 is necessary to prevent deadlock(s) during IPC. 
 n_workers = 2 # employ 2 workers (since there are two samples, 2 workers are sufficient)
 n_threads_for_each_worker = 8 # use 8 CPU cores for each worker
 
@@ -325,7 +327,7 @@ ourotools.LongExportNormalizedCountMatrix(
 )
 ```
 
-The single-cell long-read count module `LongExportNormalizedCountMatrix` is largely composed of three parts: [constructing an index](#count-module-index) (only required once for each set of gene, transcript, repeat elements, and regulatory element annotations and the reference genome), assigning each read to various `buckets` (each `bucket` represent one of genes, transcripts, exons, splice junctions, TE, tCRE, and individual genomic tiles), and exporting a size distribution-normalized count matrix for each `bucket` (later these count matrixes are combined into a single size distribution-normalized count matrix as an output).
+The single-cell long-read count module `LongExportNormalizedCountMatrix` is largely composed of three parts: [constructing an index](#count-module-index) (only required once for each set of genes, transcripts, repeat elements, regulatory elements and the reference genome), assigning each read to various `buckets` (each `bucket` represent one of the genes, transcripts, exons, splice junctions, TEs, tCREs, and individual genomic tiles), and exporting a size distribution-normalized count matrix for each `bucket` (later these count matrixes are combined into a single size distribution-normalized count matrix as an output).
 
 
 
@@ -340,8 +342,10 @@ The single-cell long-read count module `LongExportNormalizedCountMatrix` is larg
 ## *wrap-up)* Running the entire pipeline using a wrapper function<a name="run-entire-pipeline"></a>
 
 ```python
-# version 2024-08-09 19:02:27 by Hyunsu An @ GIST-FGL
+# version 2025-01-25 by Hyunsu An @ GIST-FGL
 import ourotools
+
+ourotools.bk.int_max_num_batches_in_a_queue_for_each_worker = 1 # [NOTE] For WSL, changing this variable to 1 is necessary to prevent deadlock(s) during IPC. 
 
 ourotools.run_pipeline(
     # dataset setting
