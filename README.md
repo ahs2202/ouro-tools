@@ -80,7 +80,17 @@ In 2013, 2019, and 2022, “single-cell sequencing,” “single-cell multimodal
 
 ## Installation <a name="installation"></a>
 
-The latest **stable** version of Ouro-Tools is available in [PyPI](https://pypi.org/project/ourotools/) [![PyPI install image](https://img.shields.io/badge/install%20with-pip-blue.svg?style=flat-square&logo=pypi)](https://pypi.org/project/ourotools/), [BioConda](https://bioconda.github.io/recipes/ourotools/README.html#package-ourotools) [![BioConda install image](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat-square&logo=anaconda)](https://bioconda.github.io/recipes/ourotools/README.html#package-ourotools), and [BioContainers](https://biocontainers.pro/tools/ourotools) [![BioContainers install image](https://img.shields.io/badge/install%20with-docker-important.svg?style=flat-square&logo=docker)](https://biocontainers.pro/tools/ourotools).
+The latest **stable** version of Ouro-Tools is available in [PyPI](https://pypi.org/project/ourotools/), [BioConda](https://bioconda.github.io/recipes/ourotools/README.html#package-ourotools), and [BioContainers](https://biocontainers.pro/tools/ourotools).
+
+[![PyPI install image](https://img.shields.io/badge/install%20with-pip-blue?logo=pypi&color=blue)](https://pypi.org/project/ourotools/) [![BioConda install image](https://img.shields.io/badge/install%20with-bioconda-brightgreen?logo=anaconda&color=brightgreen)](https://bioconda.github.io/recipes/ourotools/README.html#package-ourotools) [![BioContainers install image](https://img.shields.io/badge/install%20with-docker-important?logo=docker&color=important)](https://biocontainers.pro/tools/ourotools)
+
+
+
+**PyPI Installation (as a Python package)**
+
+```bash
+pip install ourotools
+```
 
 
 
@@ -90,11 +100,7 @@ The latest **stable** version of Ouro-Tools is available in [PyPI](https://pypi.
 conda install bioconda::ourotools
 ```
 
-**Bioconda Installation (as an Anaconda package)**
 
-```bash
-conda install bioconda::ourotools
-```
 
 **BioContainers Installation (as a Docker container)**
 
@@ -107,12 +113,17 @@ docker pull quay.io/biocontainers/ourotools:0.2.8--pyhdfd78af_0
 docker run -v /your/local/folder:/data -it quay.io/biocontainers/ourotools:0.2.8--pyhdfd78af_0
 ```
 
+
+
 **Install the latest (but possibly unstable) version via GitHub**
+
 ```bash
 git clone https://github.com/ahs2202/ouro-tools.git
 cd ouro-tools
 pip install .
 ```
+
+
 
 **Test the installation**
 
@@ -122,13 +133,15 @@ To print the command line usage example of each module from the bash shell, plea
 
 
 
-**Bash shell**
+***Bash shell***
 
 ```bash
 ourotools LongFilterNSplit -h
 ```
 
-**IPython environment (Jupyter Notebook)**
+
+
+***IPython environment (Jupyter Notebook)***
 
 ```python
 ourotools.LongFilterNSplit?
