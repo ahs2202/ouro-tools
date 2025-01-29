@@ -152,7 +152,7 @@ def To_python_compatible_str(
 
 def To_path_compatible_str(a_string):
     """
-        replace following characters to '_' so that a given string will be compatible for Window file system :
+    replace following characters to '_' so that a given string will be compatible for Window file system :
     : (colon)    " (double quote)    / (forward slash)    \ (backslash)    | (vertical bar or pipe)    ? (question mark)    * (asterisk)
         Also, replace new line character into '_'
     """

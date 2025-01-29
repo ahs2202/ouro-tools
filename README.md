@@ -80,17 +80,41 @@ In 2013, 2019, and 2022, “single-cell sequencing,” “single-cell multimodal
 
 ## Installation <a name="installation"></a>
 
-The latest stable version of Ouro-Tools is available in [PyPI](https://pypi.org/project/ourotools/) and [BioConda](https://bioconda.github.io/recipes/ourotools/README.html#package-ourotools).
+The latest **stable** version of Ouro-Tools is available in [PyPI](https://pypi.org/project/ourotools/) [![PyPI install image](https://img.shields.io/badge/install%20with-pip-blue.svg?style=flat-square&logo=pypi)](https://pypi.org/project/ourotools/), [BioConda](https://bioconda.github.io/recipes/ourotools/README.html#package-ourotools) [![BioConda install image](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat-square&logo=anaconda)](https://bioconda.github.io/recipes/ourotools/README.html#package-ourotools), and [BioContainers](https://biocontainers.pro/tools/ourotools) [![BioContainers install image](https://img.shields.io/badge/install%20with-docker-important.svg?style=flat-square&logo=docker)](https://biocontainers.pro/tools/ourotools).
 
-In order to install the latest, unreleased version of Ouro-Tools, run the following commands in bash shell.
 
+
+**Bioconda Installation (as an Anaconda package)**
+
+```bash
+conda install bioconda::ourotools
+```
+
+**Bioconda Installation (as an Anaconda package)**
+
+```bash
+conda install bioconda::ourotools
+```
+
+**BioContainers Installation (as a Docker container)**
+
+```bash
+# Download the latest Ouro-Tools Docker image from BioContainers
+docker pull quay.io/biocontainers/ourotools:0.2.8--pyhdfd78af_0 
+
+# Run the Ouro-Tools Docker image
+# please change '/your/local/folder' to the local path containing the input files
+docker run -v /your/local/folder:/data -it quay.io/biocontainers/ourotools:0.2.8--pyhdfd78af_0
+```
+
+**Install the latest (but possibly unstable) version via GitHub**
 ```bash
 git clone https://github.com/ahs2202/ouro-tools.git
 cd ouro-tools
 pip install .
 ```
 
-
+**Test the installation**
 
 Ouro-Tools can be used in command line, in a Python script, or in an interactive Python interpreter (e.g., Jupyter Notebook).
 
@@ -530,4 +554,4 @@ An Ouro-Tools index can be built on-the-fly from the input genome, transcriptome
 
 Ouro-Tools was developed by Hyunsu An and Chaemin Lim at Gwangju Institute of Science and Technology under the supervision of Professor Jihwan Park. 
 
-© 2024 Functional Genomics Lab, Gwangju Institute of Science and Technology
+© 2025 Functional Genomics Lab, Gwangju Institute of Science and Technology

@@ -134,7 +134,6 @@ str_release_note = [
     """
 ]
 """
-  
   .oooooo.   ooooo     ooo ooooooooo.     .oooooo.           ooooooooooooo   .oooooo.     .oooooo.   ooooo         .oooooo..o 
  d8P'  `Y8b  `888'     `8' `888   `Y88.  d8P'  `Y8b          8'   888   `8  d8P'  `Y8b   d8P'  `Y8b  `888'        d8P'    `Y8 
 888      888  888       8   888   .d88' 888      888              888      888      888 888      888  888         Y88bo.      
@@ -12736,7 +12735,7 @@ def SplitBAM(
         return ( flags & ( 1 << int_bit_flag_position ) ) > 0 
     def To_window_path_compatible_str(a_string):
         """
-            replace following characters to '_' so that a given string will be compatible for Window file system :
+        replace following characters to '_' so that a given string will be compatible for Window file system :
         : (colon)    " (double quote)    / (forward slash)    \ (backslash)    | (vertical bar or pipe)    ? (question mark)    * (asterisk)
             Also, replace new line character into '_'
         """
