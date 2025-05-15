@@ -1,4 +1,4 @@
-ourotools>=0.2.8
+ourotools>=0.2.9
 bitarray>=2.5.1
 scipy>=1.9.1
 tqdm>=4.64.1

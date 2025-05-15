@@ -8,6 +8,10 @@
 </h1>
 
 
+[Up-to-date **README.md** can be found on the GitHub repo.](https://github.com/ahs2202/ouro-tools?tab=readme-ov-file)
+
+
+
 Ouro-Tools is a novel, comprehensive computational pipeline for long-read scRNA-seq with the following key features. Ouro-Tools **(1) normalizes mRNA size distributions** and **(2) detects mRNA 7-methylguanosine caps** to integrate multiple single-cell long-read RNA-sequencing experiments across modalities and characterize full-length transcripts, respectively.
 
 <p align="center">
@@ -436,34 +440,32 @@ We recommends using <u>***Ensembl*** reference genome, transcriptome, and gene a
 
 
 
-### Pre-built index <a name="pre-built-index"></a>
+### [Latest] Pre-built index <a name="pre-built-index"></a>
 
-pre-built index can be downloaded using the following links (should be extracted to a folder using **tar -xf** command):
+The latest pre-built index can be downloaded using the following links (should be extracted to a folder using **tar -xf** command):
 
-[*<u>Human (GRCh38, Ensembl version 105)</u>*](https://ouro-tools.s3.amazonaws.com/index/latest/Homo_sapiens.GRCh38.105.v0.2.4.tar)
+[*<u>Human (GRCh38, Ensembl version 114)</u>*](https://ouro-tools.s3.amazonaws.com/index/latest/Homo_sapiens.GRCh38.Ensembl-114.tar)
 
-[*<u>Mouse (GRCm39, Ensembl version 105)</u>*](https://ouro-tools.s3.amazonaws.com/index/latest/Mus_musculus.GRCm39.105.v0.2.4.tar)
+[*<u>Mouse (GRCm39, Ensembl version 114)</u>*](https://ouro-tools.s3.amazonaws.com/index/latest/Mus_musculus.GRCm39.Ensembl-114.tar)
 
-[*<u>Mouse (GRCm38, Ensembl version 102)</u>*](https://ouro-tools.s3.amazonaws.com/index/latest/Mus_musculus.GRCm38.102.v0.2.4.tar)
+[*<u>Zebrafish (GRCz11, Ensembl version 114)</u>*](https://ouro-tools.s3.amazonaws.com/index/latest/Danio_rerio.GRCz11.Ensembl-114.tar)
 
-[*<u>Zebrafish (GRCz11, Ensembl version 104)</u>*](https://ouro-tools.s3.amazonaws.com/index/latest/Danio_rerio.GRCz11.104.v0.2.4.tar)
-
-[*<u>Thale cress (TAIR10, Ensembl Plant version 56)</u>*](https://ouro-tools.s3.amazonaws.com/index/latest/Arabidopsis_thaliana.TAIR10.56.v0.2.4.tar)
+[*<u>Arabidopsis thaliana (Thale cress) (TAIR10, Ensembl Plant version 61)</u>*](https://ouro-tools.s3.amazonaws.com/index/latest/Arabidopsis_thaliana.TAIR10.Ensembl-Plant-61.tar)
 
 
 
 ### Building index from scratch <a name="building-index"></a>
 
-An Ouro-Tools index can be built on-the-fly from the input genome, transcriptome, and gene annotation files. For example, below are the list of files that were used for the pre-built Ouro-Tools index "<u>*[Human (GRCh38, Ensembl version 105)](https://ouro-tools.s3.amazonaws.com/index/latest/Homo_sapiens.GRCh38.105.v0.2.4.tar)*</u>".
+An Ouro-Tools index can be built on-the-fly from the input genome, transcriptome, and gene annotation files. For example, below are the list of files that were used for the pre-built Ouro-Tools index "[*<u>Human (GRCh38, Ensembl version 114)</u>*](https://ouro-tools.s3.amazonaws.com/index/latest/Homo_sapiens.GRCh38.Ensembl-114.tar)".
 
 
 
-*required annotations* (*Ensemble version 105*):
+*The list of [required] annotations* (<u>*Ensemble version **114***</u> and <u>*Ensemble-Plant version **61***</u>, as of **2025-05-15**):
 
-* **path_file_fa_genome** : https://ftp.ensembl.org/pub/release-105/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz
-  * A genome FASTA file. Either gzipped or plain FASTA file can be accepted.
-* **path_file_gtf_genome** :  https://ftp.ensembl.org/pub/release-105/gtf/homo_sapiens/Homo_sapiens.GRCh38.105.gtf.gz
-  * A GTF file. Either gzipped or plain GTF file can be accepted. Currently GFF3 format files are not supported.
+* **path_file_fa_genome** : [Human/GRCh38](https://ftp.ensembl.org/pub/release-114/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz), [Mouse/GRCm39](https://ftp.ensembl.org/pub/release-114/fasta/mus_musculus/dna/Mus_musculus.GRCm39.dna.primary_assembly.fa.gz)
+  * A **genome** **FASTA** file. Either gzipped or plain FASTA file can be accepted.
+* **path_file_gtf_genome** : [Human/GRCh38](https://ftp.ensembl.org/pub/release-114/gtf/homo_sapiens/Homo_sapiens.GRCh38.114.gtf.gz), [Mouse/GRCm39](https://ftp.ensembl.org/pub/release-114/gtf/mus_musculus/Mus_musculus.GRCm39.114.gtf.gz)
+  * A **GTF** file. Either gzipped or plain GTF file can be accepted. Currently GFF3 format files are not supported.
   * Following arguments can be used to set attribute names for identifying gene and transcript annotations in its attributes column.
     * str_name_gtf_attr_for_id_gene : (default: '**gene_id**')
     * str_name_gtf_attr_for_name_gene : (default: '**gene_name**')
@@ -477,20 +479,21 @@ An Ouro-Tools index can be built on-the-fly from the input genome, transcriptome
 1	ensembl_havana	exon	1213983	1214153	.	-	.	gene_id "ENSG00000186827"; gene_version "11"; transcript_id "ENST00000379236"; transcript_version "4"; exon_number "1"; gene_name "TNFRSF4"; gene_source "ensembl_havana"; gene_biotype "protein_coding"; transcript_name "TNFRSF4-201"; transcript_source "ensembl_havana"; transcript_biotype "protein_coding"; tag "CCDS"; ccds_id "CCDS11"; exon_id "ENSE00001832731"; exon_version "2"; tag "basic"; transcript_support_level "1 (assigned to previous version 3)";
 ```
 
-* **path_file_fa_transcriptome** : https://ftp.ensembl.org/pub/release-105/fasta/homo_sapiens/cdna/Homo_sapiens.GRCh38.cdna.all.fa.gz
-  * A transcriptome FASTA file. Either gzipped or plain FASTA file can be accepted.
+* **path_file_fa_transcriptome** : [Human/GRCh38](https://ftp.ensembl.org/pub/release-114/fasta/homo_sapiens/cdna/Homo_sapiens.GRCh38.cdna.all.fa.gz), [Mouse/GRCm39](https://ftp.ensembl.org/pub/release-114/fasta/mus_musculus/cdna/Mus_musculus.GRCm39.cdna.all.fa.gz)
+  * A **transcriptome FASTA** file. Either gzipped or plain FASTA file can be accepted.
 
 
 
 #### *optional input annotations*  <a name="optional-input-annotations"></a>
 
-* **path_file_tsv_repeatmasker_ucsc** : [Table Browser (ucsc.edu)](https://genome.ucsc.edu/cgi-bin/hgTables?hgsid=1576143313_LetmEyQf9yggiQJAXajCua4TGOGl&clade=mammal&org=Human&db=hg38&hgta_group=rep&hgta_track=knownGene&hgta_table=0&hgta_regionType=genome&position=chr2%3A25%2C160%2C915-25%2C168%2C903&hgta_outputType=primaryTable&hgta_outFileName=GRCh38_RepeatMasker.tsv.gz) [click "get output" to download the annotation]
+* **path_file_tsv_repeatmasker_ucsc** : [Human/GRCh38](https://genome.ucsc.edu/cgi-bin/hgTables?hgsid=1576143313_LetmEyQf9yggiQJAXajCua4TGOGl&clade=mammal&org=Human&db=hg38&hgta_group=rep&hgta_track=knownGene&hgta_table=0&hgta_regionType=genome&position=chr2%3A25%2C160%2C915-25%2C168%2C903&hgta_outputType=primaryTable&hgta_outFileName=GRCh38_RepeatMasker.tsv.gz), [Mouse/GRCm39](https://genome.ucsc.edu/cgi-bin/hgTables?hgsid=2563163322_7iQrwYGzNLCHcdJ3krx8SAbOIbOa&clade=mammal&org=&db=mm39&hgta_group=varRep&hgta_track=rmsk&hgta_table=rmsk&hgta_regionType=genome&position=&hgta_outputType=primaryTable&hgta_outFileName=GRCm39_RepeatMasker.tsv.gz), [Zebrafish/GRCz11](https://genome.ucsc.edu/cgi-bin/hgTables?hgsid=2563334074_tz9vzM9M6sxG5rAqKa42vvTv0FXr&clade=vertebrate&org=Zebrafish&db=danRer11&hgta_group=varRep&hgta_track=refSeqComposite&hgta_table=0&hgta_regionType=genome&position=chr6%3A43%2C426%2C669-43%2C433%2C274&hgta_outputType=primaryTable&hgta_outFileName=GRCz11_RepeatMasker.tsv.gz); *[click "get output" to download the annotation];*
+  * Custom repeat annotation files should follow the RepeatMasker annotation format from the UCSC Table Browser (*ucsc.edu*)
 
-  * repeat masker annotations from the UCSC Table Browser
 
-* **path_file_gff_regulatory_element** : https://ftp.ensembl.org/pub/current_regulation/homo_sapiens/homo_sapiens.GRCh38.Regulatory_Build.regulatory_features.20221007.gff.gz
-
-  * The latest regulatory build from **Ensembl**.
+* **path_file_gff_regulatory_element** : 
+  * The latest <u>regulatory build</u> from **Ensembl**.
+    * [Human/GRCh38](https://ftp.ensembl.org/pub/current_regulation/homo_sapiens/GRCh38/annotation/) [click "Homo_sapiens.GRCh38.regulatory_features.v114.gff3.gz"]
+    * [Mouse/GRCm39](https://ftp.ensembl.org/pub/current_regulation/mus_musculus/GRCm39/annotation/) [click "Mus_musculus.GRCm39.regulatory_features.v114.gff3.gz"]
   * Annotations from other sources, or custom annotations can be used. Currently only the GFF3 file format is supported (with **.gff** extension).
   * The following argument can be used to set the attribute name for identifying regulatory region
     * str_name_gff_attr_id_regulatory_element : (default: '**ID**')
