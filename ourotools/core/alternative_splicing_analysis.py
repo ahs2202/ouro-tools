@@ -169,6 +169,8 @@ def classify_and_sort_feature(
     if flag_convert_gene_id_to_gene_name and isinstance( path_folder_ref, str ) and os.path.exists( f'{path_folder_ref}gtf.gene.genome.gtf' ) :
         df_gtf_gene = bk.GTF_Read( f'{path_folder_ref}gtf.gene.genome.gtf' )
         # retrieve the mapping
+        mask_no_gene_name = pd.isnull( df_gtf_gene.gene_name )
+        df_gtf_gene.loc[ mask_no_gene_name, 'gene_id' ] = df_gtf_gene.loc[ mask_no_gene_name, 'gene_name' ] # for genes without proper gene_name, use gene_id as gene_name 
         dict_gene_id_to_gene_name = df_gtf_gene.set_index( 'gene_id' ).gene_name.to_dict( )
         # retrieve new ft names, where id_gene is replaced by name_gene
         arr_ft_new = list( ( dict_gene_id_to_gene_name[ name_ft.split( '|', 1 )[ 0 ] ] + '|' + name_ft.split( '|', 1 )[ 1 ] if name_ft.split( '|', 1 )[ 0 ] in dict_gene_id_to_gene_name else name_ft ) if flag_sub_gene else name_ft for name_ft, flag_sub_gene in zip( adata.var_names, mask_subgene ) ) 
