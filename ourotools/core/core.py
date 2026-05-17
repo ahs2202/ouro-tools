@@ -37,7 +37,8 @@ This part should be uncommented in jupyter notebook
 """
 
 import joblib  # for persistent, reference-counting-free memory
-from typing import Union, List, Literal, Dict
+from typing import Union, List, Literal, Dict, Iterable
+from collections.abc import Callable, Awaitable
 import os
 import pandas as pd
 import numpy as np
@@ -55,11 +56,10 @@ import json  # to read and write JSON file
 import matplotlib.pyplot as plt
 import scipy.sparse
 import io
+import pysam
 import intervaltree
 import ast
-import inspect
 from bitarray import bitarray ## binary arrays
-import collections
 
 # prepare asynchronous operations
 import asyncio
@@ -77,21 +77,23 @@ import os, sys, getopt
 from io import StringIO, BytesIO
 import time
 import math
+import mappy
 import pkg_resources
 
 pd.options.mode.chained_assignment = None  # default='warn' # to disable worining
 
 # set logging format
-logging.basicConfig(
-    format="%(asctime)s [%(name)s] <%(levelname)s> (%(funcName)s) - %(message)s",
-    level=logging.INFO,
-)
+# logging.basicConfig(
+#     format="%(asctime)s [%(name)s] <%(levelname)s> (%(funcName)s) - %(message)s",
+#     level=logging.INFO,
+# )
 logger = logging.getLogger("ouro-tools")
+logger.setLevel(logging.INFO)
 
 # define version
-_version_ = "0.2.8"
+_version_ = "0.1.1"
 _ourotools_version_ = _version_
-_last_modified_time_ = "2025-01-20"
+_last_modified_time_ = "2024-08-13 15:20:28"
 
 str_release_note = [
     """
@@ -126,14 +128,12 @@ str_release_note = [
     
     # 2024-08-13 15:20:28 
     The entire code base was prepared for public release. Tutorial code, datasets, and documentation was prepared. Utility and wrapper functions were added.
-
-    # 2025-01-19 v0.2.5
-    Contained the lines importing pysam, mappy, pyBigWig packages (available in the bioconda channel) in order to make the Ouro-Tools available in the conda-forge channel.
     ##### Future implementations #####
 
     """
 ]
 """
+  
   .oooooo.   ooooo     ooo ooooooooo.     .oooooo.           ooooooooooooo   .oooooo.     .oooooo.   ooooo         .oooooo..o 
  d8P'  `Y8b  `888'     `8' `888   `Y88.  d8P'  `Y8b          8'   888   `8  d8P'  `Y8b   d8P'  `Y8b  `888'        d8P'    `Y8 
 888      888  888       8   888   .d88' 888      888              888      888      888 888      888  888         Y88bo.      
@@ -219,12 +219,6 @@ def Call_Mutation_from_Read(
     """# 2021-08-29 16:55:23
     retrieve bases at the previously identified interesting sites (given by 'path_file_filtered_mutation') for each aligned read
     """
-    try:
-        import pysam
-    except ImportError as e:
-        e.add_note( f"Please install `pysam` and try again." )
-        raise
-        
     str_uuid = bk.UUID()
 
     # define interger representation of the CIGAR operations used in BAM files
@@ -2124,6 +2118,7 @@ def _get_df_bar( dict_arr_dist : dict, l_name_type_dist : Union[ list, None ] = 
         l_arr.append( arr )
     df_bar = pd.DataFrame( np.vstack( l_arr ), index = l_name_type_dist, columns = np.arange( 1, len( l_arr[ 0 ] ) + 1, dtype = int ) * int_size_bin_in_base_pairs )
     return df_bar
+get_df_bar = _get_df_bar # expose the private method for the convenience of re-formatting of the graph 
 
 def _draw_bar_plot( 
     df_bar, 
@@ -2179,6 +2174,90 @@ def _draw_bar_plot(
         fig.write_html( f"{path_folder_graph}distribution.bar.{'proportion' if flag_use_proportion else 'read_count'}.{title}.html", config = plotly_config ) # write HTML file
     else :
         return fig
+def draw_bar_plot( 
+    df_bar, 
+    l_status : list, 
+    title : str = '', 
+    y_format : str = ':.3f', 
+    flag_save_figure : bool = False, 
+    path_folder_graph : Union[ str, None ] = None,
+    l_color : Union[ List[ str ], None ] = None,
+    flag_use_proportion : bool = False,
+    float_ratio_padding_y_axis : float = 0.05,
+    xaxis_range : Union[ List[ float ], None ] = None,
+    int_min_total_counts_bin_for_proportion_calculation : int = 10,
+    flag_use_pattern : bool = False,
+    size_pattern : int = 10,
+    l_pattern_shape = None,
+    l_bgcolor = None,
+    l_fgcolor = None,
+) :
+    ''' 
+    draw barplot for the given 'df_bar'
+    Return plotly fig
+    maximum number of l_status (unique color will be assigned to each) is 56
+    
+    l_color : Union[ List[ str ], None ] = None, # list of color for each status
+    flag_use_proportion : bool = False, # if True, draw proportion graph
+    float_ratio_padding_y_axis : float = 0.05, # padding added to the max value of the y-axis
+    xaxis_range : Union[ List[ float ], None ] = None, # if given, set the xaxis range using the given start and end positions
+    int_min_total_counts_bin_for_proportion_calculation : int = 10, # min total counts for a bin to plot the proportions of categories for the bin. bins below this total counts will be shown as '0'
+    
+    ## for visualization based on patterns, instead of solid colors (appropriate for grey-scale documents) ##
+    flag_use_pattern : bool = False,
+    size_pattern : int = 10,
+    l_pattern_shape = None,
+    l_bgcolor = None,
+    l_fgcolor = None,
+
+    # 2023-10-25 21:16:00 
+    # 2025-06-24 20:09; IEUM-An & ❤️
+    '''
+    import plotly.express as px
+    import plotly.graph_objects as go
+    x = df_bar.columns.values # retrieve x categories
+    if l_color is None :
+        l_color = px.colors.qualitative.Dark24 + px.colors.qualitative.Pastel2 + px.colors.qualitative.Light24  # retrieve unique colors for each status # plotly express can draw barplot more easily, but for annotating each status with the same color annotation, for loop with go.Bar will be used instead
+    if l_pattern_shape is None :
+        l_pattern_shape = [ "/", "\\", "x", "-", "|", "+", "." ] * 21
+    if l_bgcolor is None :
+        l_bgcolor = [ 'white' ] * 7 + [ 'black' ] * 7 + [ 'grey' ] * 7
+    if l_fgcolor is None :
+        l_fgcolor = [ 'black' ] * 7 + [ 'white' ] * 7 + [ 'white' ] * 7
+    set_valid_status = set( df_bar.index.values ) # retrieve a set of valid status
+    df_bar = df_bar.copy( ) # copy the data
+    df_bar = df_bar.loc[ list( e for e in l_status if e in set_valid_status ) ] # drop invalid categories
+    if flag_use_proportion : # if use proportions, calculate proportions
+        s_sum = df_bar.sum( axis = 0 )
+        df_bar = df_bar / s_sum
+        df_bar.loc[ :, s_sum.values < int_min_total_counts_bin_for_proportion_calculation ] = 0 # does not plot bins below 'int_min_total_counts_bin_for_proportion_calculation'
+        df_bar.fillna( 0, inplace = True )
+
+    if flag_use_pattern :
+        l_go = list( go.Bar( x = x, y = df_bar.loc[ str_status ].values, name = str_status, marker_color = str_color, marker = dict( pattern = dict( bgcolor = str_bgcolor, fgcolor = str_fgcolor, size = size_pattern, shape = str_pattern_shape ) ), hovertemplate = 'size_bin: <b>%{x}</b><br><br>proportion: <b>%{y' + y_format + '}</b>', width = df_bar.columns[ 1 ] - df_bar.columns[ 0 ] ) for str_status, str_color, str_bgcolor, str_fgcolor, str_pattern_shape in zip( l_status, l_color, l_bgcolor, l_fgcolor, l_pattern_shape ) if str_status in set_valid_status ) # retrieve graph object for each valid str_status # infer width from the input 'df_bar'
+    else :
+        l_go = list( go.Bar( x = x, y = df_bar.loc[ str_status ].values, name = str_status, marker_color = str_color, hovertemplate = 'size_bin: <b>%{x}</b><br><br>proportion: <b>%{y' + y_format + '}</b>', width = df_bar.columns[ 1 ] - df_bar.columns[ 0 ] ) for str_status, str_color in zip( l_status, l_color ) if str_status in set_valid_status ) # retrieve graph object for each valid str_status # infer width from the input 'df_bar'
+
+    # compose a bar plot
+    fig = go.Figure( l_go[ 0 ] )
+    for go_bar in l_go[ 1 : ] :
+        fig.add_trace( go_bar )
+    fig.update_traces(marker=dict( line = dict(width=0) )) 
+    fig.update_layout( barmode = 'stack', xaxis = { 'categoryorder' : 'category ascending' }, title_text = title, plot_bgcolor='white' )
+    fig.update_layout( yaxis_range = [ 0, 1 + float_ratio_padding_y_axis ] if flag_use_proportion else [ 0, df_bar.sum( axis = 0 ).max( ) * ( 1 + float_ratio_padding_y_axis ) ] ) # update y-axis range        
+    if xaxis_range is not None : # update xaxis_range
+        fig.update_layout( xaxis_range = [ xaxis_range[ 0 ], xaxis_range[ 1 ] ] ) 
+    if flag_use_pattern :
+        fig.update_traces(
+            marker=dict(color="black", line_color="black", pattern_fillmode="replace" )
+        )
+    fig.update_xaxes( mirror=True, ticks='outside', showline=True, linecolor='black', gridcolor='#f8f8f8' )
+    fig.update_yaxes( mirror=True, ticks='outside', showline=True, linecolor='black', gridcolor='#f8f8f8' )
+    if flag_save_figure and path_folder_graph is not None :
+        fig.write_html( f"{path_folder_graph}distribution.bar.{'proportion' if flag_use_proportion else 'read_count'}.{title}.html", config = plotly_config ) # write HTML file
+    else :
+        return fig
+draw_bar_plot = _draw_bar_plot # expose the private method for the convenience of re-formatting of the graph
     
 def _check_binary_flags( flags : int, int_bit_flag_position : int ) :
     """ # 2023-08-08 22:47:02 
@@ -2293,12 +2372,6 @@ def LongFilterNSplit(
     """
     Parse arguments
     """
-    try:
-        import mappy
-    except ImportError as e:
-        e.add_note( f"Please install `mappy` and try again." )
-        raise
-    
     if flag_usage_from_command_line_interface:  # parse arguments
         """parse arguments when the function was called from the command-line interface"""
         # {  } # unused arguments
@@ -3296,6 +3369,7 @@ def LongExtractBarcodeFromBAM(
     int_num_samples_analyzed_concurrently : int = 2, # the number of samples that can be analyzed concurrently to reduce bottlenecks due to processing of very large chunks.
     int_num_base_pairs_in_a_batch : int = 2_500_000, # the number of base pairs in a batch
     int_min_mapq : int = 1, # minimum mapping quality of the alignment to filter read with low alignment quality
+    l_seqname_to_skip: list = [ "MT" ], # the list of names of the chromosomes of the reference genome to skip the analysis. By default, reads aligned to the mitochondrial genomes will be skipped, as the high counts of MT genes could creating a huge bottleneck in the analysis pipeline.
     float_memory_in_GiB : float = 50, # expected memory usage of the pipeline
     float_error_rate : float = 0.2, # maximum error rate to consider when searching adaptor sequence in the read
     int_length_cb : int = 16, # the length of the cell barcode
@@ -3323,6 +3397,7 @@ def LongExtractBarcodeFromBAM(
     int_num_samples_analyzed_concurrently : int = 2, # the number of samples that can be analyzed concurrently to reduce bottlenecks due to processing of very large chunks.
     int_num_base_pairs_in_a_batch : int = 2_500_000, # the number of base pairs in a batch
     int_min_mapq : int = 1, # minimum mapping quality of the alignment to filter read with low alignment quality
+    l_seqname_to_skip: list = [ "MT" ], # the list of names of the chromosomes of the reference genome to skip the analysis. By default, reads aligned to the mitochondrial genomes will be skipped, as the high counts of MT genes could creating a huge bottleneck in the analysis pipeline.
     float_memory_in_GiB: float = 50,
     float_error_rate : float = 0.2, # maximum error rate to consider when searching adaptor sequence in the read
     int_length_cb : int = 16, # the length of the cell barcode
@@ -3359,12 +3434,6 @@ def LongExtractBarcodeFromBAM(
     """
     Parse arguments
     """
-    try:
-        import pysam
-    except ImportError as e:
-        e.add_note( f"Please install `pysam` and try again." )
-        raise
-    
     if flag_usage_from_command_line_interface:  # parse arguments
         """parse arguments when the function was called from the command-line interface"""
         # {  } # unused arguments
@@ -3423,6 +3492,8 @@ def LongExtractBarcodeFromBAM(
             help="turn on verbose mode", 
             action="store_true"
         )
+
+        ## BAM input files-related settings ##
         arg_grp_alignment = parser.add_argument_group("Alignment")
         arg_grp_alignment.add_argument(
             "-Q", 
@@ -3431,7 +3502,14 @@ def LongExtractBarcodeFromBAM(
             default=1,
             type=int,
         )
-        # define adaptor sequences (10X)
+        arg_grp_alignment.add_argument(
+            "--l_seqname_to_skip",
+            help="(default: [ 'MT' ]) the list of names of the chromosomes of the reference genome to skip the analysis. By default, reads aligned to the mitochondrial genomes will be skipped. Because gene boundaries of the mitochondrial genome-encoded genes are often overlapping, an entire mitochondrial genome often assigned as a single chunk, creating a huge bottleneck in the analysis pipeline.",
+            default=["MT"],
+            nargs="*",
+        )
+        
+        ## settings for defining adaptor sequences (10X) ##
         # define cell barcode and umi length
         arg_grp_barcode_extraction = parser.add_argument_group("Barcode Extraction")
         arg_grp_barcode_extraction.add_argument( "-x", "--int_length_cb", help = "(default: 16) the length of the cell barcode", default = 16, type = int )
@@ -3444,6 +3522,7 @@ def LongExtractBarcodeFromBAM(
         arg_grp_cb_correction.add_argument( "-V", "--path_file_valid_cb", help = "(required argument) the path to tsv file of whitelist barcodes. For more details, please see 10x cellranger references." ) # required argument
         arg_grp_cb_correction.add_argument( "-N", "--int_max_num_cell_expected", help = "(default: 20000) the max number of expected cells", default = 1000, type = int )
 
+        ## settings for the detection of internal polyA primed reads ##
         arg_grp_internal_polyt = parser.add_argument_group("Internal Poly(A) Tract-Primed Read Identification")
         arg_grp_internal_polyt.add_argument( "-S", "--int_len_sliding_window_internal_polyT", help = "(default: 10) the length of sliding window for searching internal poly T (poly A) tract. (When poly-A tailed read is reverse complemented, R1 adaptor become situated in the forward direction", type = int, default = 10 )
         arg_grp_internal_polyt.add_argument( "-w", "--int_len_window_internal_polyT", help = "(default: 30) the size of window for searching for internal poly T", type = int, default = 30 )
@@ -3458,7 +3537,7 @@ def LongExtractBarcodeFromBAM(
         arg_grp_size_distribution.add_argument( "-B", "--int_size_bin_in_base_pairs_for_collecting_size_distributions_at_single_cell_level", help = "(default: 50) the size of the bin (in base pairs) for collecting size distributions at the single-cell level", type = int, default = 50 )
         
         args = parser.parse_args( )
-
+        
         l_path_file_bam_input = args.l_path_file_bam_input
         l_path_folder_output = args.l_path_folder_output
         n_threads = args.n_threads
@@ -3467,6 +3546,7 @@ def LongExtractBarcodeFromBAM(
         float_memory_in_GiB = args.float_memory_in_GiB
         verbose = args.verbose
         int_min_mapq = args.int_min_mapq
+        l_seqname_to_skip = args.l_seqname_to_skip
         str_seq_r1 = args.str_seq_r1
         str_seq_tso = args.str_seq_tso
         float_error_rate = args.float_error_rate
@@ -3846,97 +3926,110 @@ def LongExtractBarcodeFromBAM(
             """
             Define a generator for partitioning input file
             """
+            set_seqname_to_skip = set( l_seqname_to_skip ) # retrieve a set of contig names that are not contigs of interest
+            def identify_a_valid_read( r ) -> tuple :
+                """
+                determine whether to include a given read in the analysis or not
+                
+                returns:
+                    flag_invalid, t_info
+                
+                2026-05-09 18:48; IEUM-An (ahs2202) & ❤️.
+                """
+                ouput_invalid = ( True, None ) # define an output for an invalid read
+                if r.mapq < int_min_mapq : # filter out reads with low mapq
+                    return ouput_invalid
+                seq = r.seq
+                if seq is None : # consider only the primary alignment
+                    return ouput_invalid
+                ## skip reads aligned to contigs that are not contigs of interest ##
+                reference_name = r.reference_name
+                if reference_name in set_seqname_to_skip :
+                    return ouput_invalid
+                len_seq = len( seq ) # retrieve the length of the sequence
+                cigartuples, flags = r.cigartuples, r.flag # retrieve attributes
+                if int_cigarop_H == cigartuples[ 0 ][ 0 ] or int_cigarop_H == cigartuples[ -1 ][ 0 ] : # skip hard-clipped reads
+                    return ouput_invalid
+                if _check_binary_flags( flags, 10 ) or _check_binary_flags( flags, 8 ) : # filter out optical duplicates or secondary alignments
+                    return ouput_invalid
+                    
+                ## return the result for the valid read ##
+                reference_start = r.reference_start
+                return False, ( reference_name, seq, len_seq, cigartuples, flags, reference_start )
+            
             def gen_batch( ):
                 """# 2023-07-30 18:37:49 
                 create batch from the input BAM file
                 """
                 with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
                     gen_r = samfile.fetch( ) # open the generator
-                    ''' retrieve the first valid read '''
+                    ## retrieve the first valid read ##
                     while True :
-                        ''' retrieve a read '''
+                        ## retrieve a read ##
                         try :
                             r = next( gen_r ) # retrieve the first read
                         except StopIteration : # if the bam file is emtpy, end the generator
                             return
                         
-                        """ filter read """
-                        if r.mapq < int_min_mapq : # filter out reads with low mapq
+                        ## filter read ##
+                        flag_invalid, t_info = identify_a_valid_read( r )
+                        if flag_invalid :
                             continue
-                        if r.seq is None : # consider only the primary alignment
-                            continue
-                        len_seq = len( r.seq ) # retrieve the length of the sequence
-                        cigartuples, flags = r.cigartuples, r.flag # retrieve attributes
-                        if int_cigarop_H == cigartuples[ 0 ][ 0 ] or int_cigarop_H == cigartuples[ -1 ][ 0 ] : # skip hard-clipped reads
-                            continue 
-                        if _check_binary_flags( flags, 10 ) or _check_binary_flags( flags, 8 ) : # filter out optical duplicates or secondary alignments
-                            continue
-                        ''' once the first valid read is found, continue to the next step '''
+                        reference_name, seq, len_seq, cigartuples, flags, reference_start = t_info
+                        ## once the first valid read is found, continue to the next step ##
                         break
-
+                    
                     # initialize the batch
-                    ns_batch = { 'int_num_base_pairs_encountered_for_a_batch' : len( r.seq ), 'start__reference_name' : r.reference_name, 'start__reference_start' : r.reference_start, } # initialize the dictionary containing information about the batch using the first valid read # counts of base pairs in a batch
+                    ns_batch = { 'int_num_base_pairs_encountered_for_a_batch' : len_seq, 'start__reference_name' : reference_name, 'start__reference_start' : reference_start, } # initialize the dictionary containing information about the batch using the first valid read # counts of base pairs in a batch
                     
                     while True :
-                        """ retrieve a read """ 
+                        ## retrieve a read ##
                         try :
                             r = next( gen_r )
                         except StopIteration : # once all reads were analyzed, exit the loop
                             yield ns_batch # yield the last batch
                             break
                         
-                        """ filter read """
-                        if r.mapq < int_min_mapq : # filter out reads with low mapq
+                        ## filter read ##
+                        flag_invalid, t_info = identify_a_valid_read( r )
+                        if flag_invalid :
                             continue
-                        if r.seq is None : # consider only the primary alignment
-                            continue
-                        len_seq = len( r.seq ) # retrieve the length of the sequence
-                        cigartuples, flags = r.cigartuples, r.flag # retrieve attributes
-                        if int_cigarop_H == cigartuples[ 0 ][ 0 ] or int_cigarop_H == cigartuples[ -1 ][ 0 ] : # skip hard-clipped reads
-                            continue 
-                        if _check_binary_flags( flags, 10 ) or _check_binary_flags( flags, 8 ) : # filter out optical duplicates or secondary alignments
-                            continue
-                            
-                        """ when contig changes """
-                        if r.reference_name != ns_batch[ 'start__reference_name' ] :
+                        reference_name, seq, len_seq, cigartuples, flags, reference_start = t_info
+                        
+                        ## when contig changes ##
+                        if reference_name != ns_batch[ 'start__reference_name' ] :
                             yield ns_batch # yield the last batch for the last contig
                             # initialize the next batch
                             ns_batch = { 'int_num_base_pairs_encountered_for_a_batch' : 0 } # initialize the counter
-                            ns_batch[ 'start__reference_name' ] = r.reference_name
-                            ns_batch[ 'start__reference_start' ] = r.reference_start
+                            ns_batch[ 'start__reference_name' ] = reference_name
+                            ns_batch[ 'start__reference_start' ] = reference_start
                             
                         ns_batch[ 'int_num_base_pairs_encountered_for_a_batch' ] += len_seq # increase the base pair count
                         if int_num_base_pairs_in_a_batch <= ns_batch[ 'int_num_base_pairs_encountered_for_a_batch' ] : # once the batch is full, yield the batch and consume remaining reads starting at the reference start position, so that the reads of the same reference start position are processed together. # pipe overloading might happens, causing dead lock. in this case, 'int_num_base_pairs_in_a_batch' can be lowered.
                             # update batch information
-                            ns_batch[ 'end__reference_start' ] = r.reference_start
+                            ns_batch[ 'end__reference_start' ] = reference_start
                             while True :
-                                """ retrieve a read """ 
+                                ## retrieve a read ##
                                 try :
                                     r = next( gen_r )
                                 except StopIteration : # once all reads were analyzed, exit the loop
                                     break
                                     
-                                """ filter read """
-                                if r.mapq < int_min_mapq : # filter out reads with low mapq
+                                ## filter read ##
+                                flag_invalid, t_info = identify_a_valid_read( r )
+                                if flag_invalid :
                                     continue
-                                if r.seq is None : # consider only the primary alignment
-                                    continue
-                                len_seq = len( r.seq ) # retrieve the length of the sequence
-                                cigartuples, flags = r.cigartuples, r.flag # retrieve attributes
-                                if int_cigarop_H == cigartuples[ 0 ][ 0 ] or int_cigarop_H == cigartuples[ -1 ][ 0 ] : # skip hard-clipped reads
-                                    continue 
-                                if _check_binary_flags( flags, 10 ) or _check_binary_flags( flags, 8 ) : # filter out optical duplicates or secondary alignments
-                                    continue
+                                reference_name, seq, len_seq, cigartuples, flags, reference_start = t_info
                                     
-                                """ check boundary condition """
-                                if ns_batch[ 'end__reference_start' ] != r.reference_start : # when the 'reference_start' position changes, finish the batch
+                                ## check boundary condition ##
+                                if ns_batch[ 'end__reference_start' ] != reference_start : # when the 'reference_start' position changes, finish the batch
                                     break
                                 
                                 ns_batch[ 'int_num_base_pairs_encountered_for_a_batch' ] += len_seq # increase the counter
                             yield ns_batch # yield the batch
                             ns_batch = { 'int_num_base_pairs_encountered_for_a_batch' : len_seq } # initialize the counter
-                            ns_batch[ 'start__reference_name' ] = r.reference_name
-                            ns_batch[ 'start__reference_start' ] = r.reference_start
+                            ns_batch[ 'start__reference_name' ] = reference_name
+                            ns_batch[ 'start__reference_start' ] = reference_start
                             
             def process_batch(pipe_receiver, pipe_sender):
                 """ # 2023-08-09 00:26:28 
@@ -3973,39 +4066,31 @@ def LongExtractBarcodeFromBAM(
                     end__reference_start = ns_batch[ 'end__reference_start' ] if 'end__reference_start' in ns_batch else None
                     with pysam.AlignmentFile( path_file_bam_input, 'rb' ) as samfile :
                         for r in samfile.fetch( start__reference_name, start__reference_start, end__reference_start + 1 ) if end__reference_start is not None else samfile.fetch( start__reference_name, start__reference_start ) : # include the end position by adding +1 # if 'end__reference_start' is None, retrieve all reads remaining for the contig
-                            ''' if the batch has not been started, skip the read '''
-                            reference_start = r.reference_start
+                            ## filter read ##
+                            flag_invalid, t_info = identify_a_valid_read( r )
+                            if flag_invalid :
+                                continue
+                            reference_name, seq, len_seq, cigartuples, flags, reference_start = t_info
+                            
+                            ## if the batch has not been started, skip the read ##
                             if reference_start < start__reference_start : 
                                 continue
                             
-                            """ filter read """
-                            if r.mapq < int_min_mapq : # filter out reads with low mapq
-                                continue
-                            seq = r.seq
-                            if seq is None : # consider only the primary alignment
-                                continue
-                            len_seq = len( seq ) # retrieve the length of the sequence
-                            cigartuples, flags = r.cigartuples, r.flag # retrieve attributes
-                            if int_cigarop_H == cigartuples[ 0 ][ 0 ] or int_cigarop_H == cigartuples[ -1 ][ 0 ] : # skip hard-clipped reads
-                                continue 
-                            if _check_binary_flags( flags, 10 ) or _check_binary_flags( flags, 8 ) : # filter out optical duplicates or secondary alignments
-                                continue
-                                
-                            ''' if the batch has been completed, exit the loop '''
+                            ## if the batch has been completed, exit the loop ##
                             if end__reference_start is not None and reference_start > end__reference_start : 
                                 break
                             
-                            ''' process read '''
+                            ## process read ##
+                            #############################################
+                            # (Assumes the aligned FASTQ files are already pre-processed by ouro-tools and poly A tail is located in the downstream of the read.)
+                            # 
+                            # not reverse complemented:
+                            #     - poly A and cell barcodes (reverse complemented) located at the right
+                            # 
+                            # reverse complemented:
+                            #     - poly T and cell barcodes located at the left
+                            #############################################
                             
-                            """
-                            (Assumes the aligned FASTQ files are already pre-processed by ouro-tools and poly A tail is located in the downstream of the read.)
-                            
-                            not reverse complemented:
-                                - poly A and cell barcodes (reverse complemented) located at the right
-                            
-                            reverse complemented:
-                                - poly T and cell barcodes located at the left
-                            """
                             int_total_num_records_processed += 1 # update 'int_total_num_records_processed'
                             # check whether the read was reverse complemented
                             flag_is_reverse_complemented = _check_binary_flags( flags, 4 ) 
@@ -4031,7 +4116,7 @@ def LongExtractBarcodeFromBAM(
                             # initialize the tags that will be added to the SAM record
                             l_tags = [ ( 'XR', res_r1[ 'num_errors' ], 'i' ), ( 'XT', res_tso[ 'num_errors' ], 'i' ), ( 'LE', int_total_length_covering_genome, 'i' ) ] # add the number of errors from R1 and TSO adaptor search results as tags
                             
-                            ''' Retrieve Cell Barcode and Check for Internal PolyA Priming (looking for reference-derived polyT next to Cell Barcode in the aligned reads) '''
+                            ## Retrieve Cell Barcode and Check for Internal PolyA Priming (looking for reference-derived polyT next to Cell Barcode in the aligned reads) ##
                             # retrieve cell barcode and UMI
                             int_start_cb_umi = res_r1[ 'index_end_subsequence' ]
                             if int_start_cb_umi != -1 : # if R1 adaptor sequence was identified
@@ -4045,27 +4130,27 @@ def LongExtractBarcodeFromBAM(
                                 # collect data 
                                 l_cb_umi.append( seq_cb_umi ) # collect 'seq_cb_umi'
 
-                            ''' write the SAM record ''' 
+                            ### write the SAM record ###
                             r.set_tags( l_tags ) # set tags
                             newsamfile.write( r ) # write the record to the output BAM file
                             
-                    """ report a batch has been completed """
+                    ### report a batch has been completed ###
                     pipe_sender.send( { 
                         'int_total_num_records_for_a_batch' : int_total_num_records_processed, # record the actual number of records processed for the batch
                         'l_cb_umi' : l_cb_umi,
                         'ns_batch' : ns_batch, # for debugging
                     } )  # report the number of processed records
 
-                """ close output files """
+                ## close output files ##
                 newsamfile.close( )
                 # index the resulting BAM file
                 pysam.index( path_file_bam_preprocessed )
                 
-                """ report the worker has completed all works """
+                ## report the worker has completed all works ##
                 pipe_sender.send( 'completed' )  
                 if verbose:
                     logger.info(f"[Completed] all works completed (worker_id={str_uuid})")
-
+            
             ns = { 'int_num_read_currently_processed' : 0, 'int_num_records_with_cb_umi' : 0, 'l_cb_umi' : [ ], 'l_l' : [ ] }  # define a namespace # initialize total number of reads processed by the algorithm
             name_file_input = path_file_bam_input.rsplit( '/', 1 )[ 1 ] if '/' in path_file_bam_input else path_file_bam_input # retrieve name of the input file
 
@@ -4744,11 +4829,6 @@ def LongSummarizeSizeDistributions(
     # 2024-01-03 20:36:21 
     """
     import plotly.express as px
-    try:
-        import pysam
-    except ImportError as e:
-        e.add_note( f"Please install `pysam` and try again." )
-        raise
     
     """
     Parse arguments
@@ -5283,12 +5363,6 @@ def LongSurvey5pSiteFromBAM(
     """
     Parse arguments
     """
-    try:
-        import pysam
-    except ImportError as e:
-        e.add_note( f"Please install `pysam` and try again." )
-        raise
-        
     if flag_usage_from_command_line_interface:  # parse arguments
         """parse arguments when the function was called from the command-line interface"""
         # {  } # unused arguments
@@ -6384,12 +6458,6 @@ def LongAdd5pSiteClassificationResultToBAM(
     """
     Parse arguments
     """
-    try:
-        import pysam
-    except ImportError as e:
-        e.add_note( f"Please install `pysam` and try again." )
-        raise
-    
     if flag_usage_from_command_line_interface:  # parse arguments
         """parse arguments when the function was called from the command-line interface"""
         # {  } # unused arguments
@@ -6500,6 +6568,7 @@ def LongAdd5pSiteClassificationResultToBAM(
     name_tag_num_unaligned_Gs = 'UG'
     name_tag_flag_valid_TSS = 'VS'
     name_tag_num_aligned_unreferenced_Gs = 'AU'
+    set_name_tag_current_module = set( [ name_tag_num_aligned_Gs, name_tag_num_unaligned_Gs, name_tag_flag_valid_TSS, name_tag_num_aligned_unreferenced_Gs ] ) # define a set of name_tags for the current module
 
     """ validate input directory  """
     l_path_folder_input_valid = [ ]
@@ -6830,8 +6899,8 @@ def LongAdd5pSiteClassificationResultToBAM(
 
                             ''' compose 't_id_5p' '''
                             flag_plus_strand = not _check_binary_flags( flags, 4 ) # retrieve a strand flag # check whether the read was reverse complemented
-                            t_id_5p = ( flag_plus_strand, r_st if flag_plus_strand else r_en ) # compose 't_id_5p' representing a 5p site                        
-
+                            t_id_5p = ( flag_plus_strand, r_st if flag_plus_strand else r_en ) # compose 't_id_5p' representing a 5p site
+                            
                             ''' count the number of aligned and unaligned G bases '''
                             # retrieve sequences around the 5p site
                             if flag_plus_strand :
@@ -6846,6 +6915,8 @@ def LongAdd5pSiteClassificationResultToBAM(
 
                             ''' add new tags  '''
                             l_tags = r.get_tags( with_value_type = True ) # initialize l_tags using existing tags (unfortunately, it is not possible to simply add tags to existing tags)
+                            l_tags = list( tag for tag in l_tags if tag[ 0 ] not in set_name_tag_current_module ) # drop the tags that have been previously added by the current module
+                            
                             l_tags.extend( [ ( name_tag_num_aligned_Gs, int_num_aligned_Gs, 'i' ), ( name_tag_num_unaligned_Gs, int_num_unaligned_Gs, 'i' ) ] ) # add tags indicating the number of aligned/unaligned G bases.
                             int_num_reads_analyzed += 1 # update the summary metric
 
@@ -7815,17 +7886,6 @@ def LongExportNormalizedCountMatrix(
     """
     Parse arguments
     """
-    try:
-        import pysam
-    except ImportError as e:
-        e.add_note( f"Please install `pysam` and try again." )
-        raise
-    try:
-        import mappy
-    except ImportError as e:
-        e.add_note( f"Please install `mappy` and try again." )
-        raise
-    
     if flag_usage_from_command_line_interface:  # parse arguments
         """parse arguments when the function was called from the command-line interface"""
         # { 'K', 'k' } # unused arguments
@@ -12225,18 +12285,7 @@ class ReadsToCoverage :
         int_min_safe_distance_for_automatic_flushing : int = 3_000_000, # based on the largest gene in the human, dystrophin, which spans 2.3Mbp.
         int_buffer_flush_frequency : int = 100_000, # flush coverage data in the buffer for every 'int_buffer_flush_frequency' number of base pairs.
     ) :
-        # import required package
-        try:
-            import pysam
-        except ImportError as e:
-            e.add_note( f"Please install `pysam` and try again." )
-            raise
-        try:
-            import pyBigWig
-        except ImportError as e:
-            e.add_note( f"Please install `pyBigWig` and try again." )
-            raise
-            
+        import pyBigWig # import required package
         self._path_file_bw = path_file_bw
         # open BigWig file
         self._bw = pyBigWig.open( path_file_bw, "w" )
@@ -12529,11 +12578,7 @@ def merge_bigwigs( path_file_bw_output : str, l_path_file_bw_input : List[ str ]
     int_window_size_for_a_batch : int = 10_000_000,
     # 2024-01-07 03:46:59 
     '''
-    try:
-        import pyBigWig
-    except ImportError as e:
-        e.add_note( f"Please install `pyBigWig` and try again." )
-        raise
+    import pyBigWig
 
     # exit if input is invalid
     if len( l_path_file_bw_input ) == 0 :
@@ -12580,12 +12625,8 @@ def merge_bigwigs_in_bedgraph_format( path_file_bw_output : str, l_path_file_bw_
     l_path_file_bw_input : List[ str ], 
     # 2024-10-24 02:01 by IEUM
     '''
+    import pyBigWig
     import intervaltree
-    try:
-        import pyBigWig
-    except ImportError as e:
-        e.add_note( f"Please install `pyBigWig` and try again." )
-        raise
 
     # exit if input is invalid
     if len( l_path_file_bw_input ) == 0 :
@@ -12711,19 +12752,11 @@ def SplitBAM(
     ''' prepare : retrieve file header, preprocess name_clus, and group 'name_clus' values for each worker process. '''
     # import packages
     import multiprocessing as mp
+    import pysam
     import os
     import math
-    try:
-        import pysam
-    except ImportError as e:
-        e.add_note( f"Please install `pysam` and try again." )
-        raise
     if flag_export_coverages :
-        try:
-            import pyBigWig
-        except ImportError as e:
-            e.add_note( f"Please install `pyBigWig` and try again." )
-            raise
+        import pyBigWig
 
     # create the output folder
     os.makedirs( path_folder_output, exist_ok = True )
@@ -12735,7 +12768,7 @@ def SplitBAM(
         return ( flags & ( 1 << int_bit_flag_position ) ) > 0 
     def To_window_path_compatible_str(a_string):
         """
-        replace following characters to '_' so that a given string will be compatible for Window file system :
+            replace following characters to '_' so that a given string will be compatible for Window file system :
         : (colon)    " (double quote)    / (forward slash)    \ (backslash)    | (vertical bar or pipe)    ? (question mark)    * (asterisk)
             Also, replace new line character into '_'
         """
@@ -12990,12 +13023,6 @@ def SplitBAMs(
 
     # 2024-10-24 2:10 by IEUM
     """
-    try:
-        import pysam
-    except ImportError as e:
-        e.add_note( f"Please install `pysam` and try again." )
-        raise
-    
     # create the output folder
     os.makedirs( path_folder_output, exist_ok = True )
     
@@ -13116,12 +13143,6 @@ def DeduplicateBAM(
     
     """
     ''' initialize '''
-    try:
-        import pysam
-    except ImportError as e:
-        e.add_note( f"Please install `pysam` and try again." )
-        raise
-
     # define folders
     path_folder_temp = f'{path_folder_output}temp/'
 
@@ -13272,13 +13293,8 @@ def FilterInternalPolyAPrimedReadFromBAM(
     """
     # import packages
     import multiprocessing as mp
+    import pysam
     import os
-    try:
-        import pysam
-    except ImportError as e:
-        e.add_note( f"Please install `pysam` and try again." )
-        raise
-
     # define functions
 
     # create the output folder
@@ -13402,13 +13418,8 @@ def FilterArtifactReadFromBAM(
     """
     # import packages
     import multiprocessing as mp
+    import pysam
     import os
-    try:
-        import pysam
-    except ImportError as e:
-        e.add_note( f"Please install `pysam` and try again." )
-        raise
-    
     # define functions
 
     # create the output folder
@@ -13566,13 +13577,8 @@ def StrandSpecificBAM(
     """
     # import packages
     import multiprocessing as mp
+    import pysam
     import os
-    try:
-        import pysam
-    except ImportError as e:
-        e.add_note( f"Please install `pysam` and try again." )
-        raise
-
     # define functions
     def _check_binary_flags( flags : int, int_bit_flag_position : int ) :
         """ # 2023-12-13 15:47:10 

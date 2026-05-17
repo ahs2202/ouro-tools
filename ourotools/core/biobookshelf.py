@@ -24,16 +24,17 @@ import multiprocessing
 import multiprocessing as mp
 import collections
 from copy import copy, deepcopy
+import math
 
 # set default parameters
-int_max_num_batches_in_a_queue_for_each_worker = 2 # 2 batches distributed to each process should be optimal, while preventing pipe buffer overloading. However, when deadlocks frequently occurs, changing this argument to 1 will prevent the occurrence of deadlocks.
+int_max_num_batches_in_a_queue_for_each_worker = 1 # 2 batches distributed to each process should be optimal, while preventing pipe buffer overloading. However, when deadlocks frequently occurs, changing this argument to 1 will prevent the occurrence of deadlocks. # 20250429--21:11 The default max number of batches will be 1, considering the significant bottleneck in WSL incurred by setting this variable to 2. by IEUM An (ahs2202) & ❤️
 
 def Wide(int_percent_html_code_cell_width=95):
     """
     # 20210224
     widen jupyter notebook cell
     """
-    from IPython.core.display import display, HTML
+    from IPython.display import display, HTML
     display(HTML("<style>.container { width:100% !important; }</style>"))
     display(
         HTML(
@@ -177,7 +178,7 @@ def TIME_GET_timestamp(flag_human_readable=False):
 
 def To_window_path_compatible_str(a_string):
     """
-    replace following characters to '_' so that a given string will be compatible for Window file system :
+        replace following characters to '_' so that a given string will be compatible for Window file system :
     : (colon)    " (double quote)    / (forward slash)    \ (backslash)    | (vertical bar or pipe)    ? (question mark)    * (asterisk)
         Also, replace new line character into '_'
     """
@@ -637,21 +638,113 @@ def LIST_Split(
             return list(l[a_slice] for a_slice in l_slice)
 
 
-def PD_Select(df, deselect=False, **dict_select):
-    """Select and filter rows of df according to the given dict_select. If 'deselect' is set to True, deselect rows according to the given dict_select  Usage example : PANDAS_Select( df_meta_imid_ubi, dict(  Data_Type = [ 'Proteome', 'Ubi_Profiling' ], Value_Type = 'log2fc' ) )"""
+def PD_Threshold(df, AND_operation=True, verbose = False, **dict_thresholds):
+    """
+    Select rows of a given DataFrame or indices of Series based on a given threshold for each given column or the given series.
+    Add 'b' or 'B' at the end of column_label to select rows below the threshold, or add 'a' or 'A' to select rows above the threshold.
+    If 'AND_operation' is true, filter generated from the given threshold will be combined with AND operation before filtering rows of a given dataframe
+    2024-11-21 20:00 by IEUM An
+    """
+    # detect data type
+    flag_is_dataframe = type(df) is pd.DataFrame
+    if flag_is_dataframe :
+        set_columns = set( df.columns.values )
+        flag_has_multiindex = isinstance( df.columns, pd.MultiIndex ) # detect dataframe containing 'multiindex' columns
+        if flag_has_multiindex :
+            n_multiindex_levels = len( df.columns.names )
+            def compose_multiindex_col( dict_select, l_multiindex = [ ] ) :
+                """
+                compose multiindex col recursively
+                2024-11-21 by IEUM An
+                """
+                if len( l_multiindex ) + 1 == n_multiindex_levels :
+                    return dict( ( tuple( l_multiindex + [ k ] ), dict_select[ k ] ) for k in dict_select )
+                else :
+                    dict_select_multiindex_col = dict( )
+                    for k in dict_select :
+                        v = dict_select[ k ]
+                        dict_select_multiindex_col.update( compose_multiindex_col( v, l_multiindex = l_multiindex + [ k ] ) )
+                    return dict_select_multiindex_col
+            dict_thresholds = compose_multiindex_col( dict_thresholds, l_multiindex = [ ] ) # convert 'dict_thresholds' (nested dictionaries) to tuple-based dictionary for the select operation
+    else :
+        assert( type(df) is pd.Series ) # other allowed data type is pandas Series
+        set_columns = set([""]) # allow search values for pandas Series without the need to refer to a column
+        
+    mask_filter = (
+        np.ones(len(df), dtype=bool) if AND_operation else np.zeros(len(df), dtype=bool)
+    )
+    for col_direction, threshold in dict_thresholds.items():
+        if flag_has_multiindex :
+            # when input data is a multiindex dataframe
+            # extract the filtering direction from the last entry of the input tuple.
+            last_col_direction = col_direction[ -1 ]
+            col, direction = last_col_direction[:-1], last_col_direction[-1] 
+            col = tuple( list( col_direction[ : -1 ] ) + [ col ] )
+        else :
+            col, direction = col_direction[:-1], col_direction[-1]
+        if col not in set_columns:
+            if verbose :
+                print("'{}' column_label does not exist in the given DataFrame".format(col))
+            continue
+        data = df[col].values if type(df) is pd.DataFrame else df.values
+        if direction.lower() == "a":
+            current_mask = data > threshold
+        elif direction.lower() == "b":
+            current_mask = data < threshold
+        else:
+            if verbose :
+                print(
+                    "'{}' direction is not either 'a' or 'b' and thus invalid".format(
+                        direction
+                    )
+                )
+            continue
+        mask_filter = (
+            current_mask & mask_filter if AND_operation else current_mask | mask_filter
+        )
+    return df[mask_filter]
+    
+def PD_Select(df, deselect = False, verbose = False, ** dict_select ) :
+    """
+    Select and filter rows of df according to the given dict_select. If 'deselect' is set to True, deselect rows according to the given dict_select  Usage example : PANDAS_Select( df_meta_imid_ubi, dict(  Data_Type = [ 'Proteome', 'Ubi_Profiling' ], Value_Type = 'log2fc' ) )
+    2024-11-21 19:50 by IEUM An
+    """
+    # detect data type
+    flag_is_dataframe = type(df) is pd.DataFrame
+    if flag_is_dataframe :
+        set_columns = set( df.columns.values )
+        flag_has_multiindex = isinstance( df.columns, pd.MultiIndex ) # detect dataframe containing 'multiindex' columns
+        if flag_has_multiindex :
+            n_multiindex_levels = len( df.columns.names )
+            def compose_multiindex_col( dict_select, l_multiindex = [ ] ) :
+                """
+                compose multiindex col recursively
+                2024-11-21 by IEUM An
+                """
+                if len( l_multiindex ) + 1 == n_multiindex_levels :
+                    return dict( ( tuple( l_multiindex + [ k ] ), dict_select[ k ] ) for k in dict_select )
+                else :
+                    dict_select_multiindex_col = dict( )
+                    for k in dict_select :
+                        v = dict_select[ k ]
+                        dict_select_multiindex_col.update( compose_multiindex_col( v, l_multiindex = l_multiindex + [ k ] ) )
+                    return dict_select_multiindex_col
+            dict_select = compose_multiindex_col( dict_select, l_multiindex = [ ] ) # convert 'dict_select' (nested dictionaries) to tuple-based dictionary for the select operation
+    else :
+        assert( type(df) is pd.Series ) # other allowed data type is pandas Series
+        
+    # detect query type
     for col, query in dict_select.items():
-        if type(df) is pd.Series:
+        if not flag_is_dataframe :
             data_values = (
                 df.index.values if col == "index" else df.values
             )  # select values or indices of a given pd.Series
-        elif type(df) is pd.DataFrame:
-            if col not in df.columns.values and col != "index":
-                print("'{}' does not exist in columns of a given DataFrame".format(col))
+        else :
+            if col not in set_columns and col != "index":
+                if verbose :
+                    print("'{}' does not exist in columns of a given DataFrame".format(col))
                 continue
             data_values = df.index.values if col == "index" else df[col].values
-        else:
-            print("[INVALID INPUT]: Inputs should be DataFrame or Series")
-            return -1
         if isinstance(
             query, (list, tuple, np.ndarray, set)
         ):  # if data to be selected is iterable
@@ -677,38 +770,85 @@ def PD_Select(df, deselect=False, **dict_select):
             df = df[data_values != query] if deselect else df[data_values == query]
     return df
 
-
-def PD_Threshold(df, AND_operation=True, **dict_thresholds):
-    """Select rows of a given DataFrame or indices of Series based on a given threshold for each given column or the given series.
-    Add 'b' or 'B' at the end of column_label to select rows below the threshold, or add 'a' or 'A' to select rows above the threshold.
-    If 'AND_operation' is true, filter generated from the given threshold will be combined with AND operation before filtering rows of a given dataframe
+def PD_Search(
+    df,
+    query_AND_operation=True,
+    is_negative_query=False,
+    ignore_case=True,
+    verbose=True,
+    **dict_search,
+):
     """
-    set_df_columns = set(df.columns.values) if type(df) is pd.DataFrame else set([""])
-    mask_filter = (
-        np.ones(len(df), dtype=bool) if AND_operation else np.zeros(len(df), dtype=bool)
-    )
-    for col_direction, threshold in dict_thresholds.items():
-        col, direction = col_direction[:-1], col_direction[-1]
-        if col not in set_df_columns:
-            print("'{}' column_label does not exist in the given DataFrame".format(col))
+    to search index, put 'index' as the name of column in the 'dict_search' argument. To search values in a series, put 'values' as the name of column in the 'dict_search' argument
+    To retrive entries matched with all queries, set 'query_AND_operation' to True (perform AND operation during searching), while set 'query_AND_operation' to False to retrive all entries
+    containing at least one of the given queries. Search with multiple columns are always performed with AND operation (will be improved)
+    2021-11-10 01:56:43 by IEUM An
+    """
+    for col, queries in dict_search.items():
+        if type(df) is pd.DataFrame and col not in list(df.columns.values) + [
+            "index",
+            "columns",
+            "col",
+        ]:  # print out an error message when invalid column name was given for a dataframe
+            if verbose:
+                print("'{}' does not exist in columns of a given DataFrame".format(col))
             continue
-        data = df[col].values if type(df) is pd.DataFrame else df.values
-        if direction.lower() == "a":
-            current_mask = data > threshold
-        elif direction.lower() == "b":
-            current_mask = data < threshold
+        if col == "index":  # retrive data to be searched
+            data = df.index.values
+        elif col == "columns" or col == "col":
+            data = df.columns.values
+        elif col == "values":
+            if type(df) is not pd.Series:
+                continue  # if df is not Series, ignore this query
+            data = df.values
         else:
-            print(
-                "'{}' direction is not either 'a' or 'b' and thus invalid".format(
-                    direction
-                )
+            data = df[col].values
+        if ignore_case:
+            data = np.char.lower(data.astype(str)).astype(
+                object
+            )  # convert all strings to lower cases if 'ignore_case' is set to True.
+        else:
+            data = data.astype(str).astype(
+                object
+            )  # convert data_types of data values to be searched to string
+        #         if isinstance( data[ 0 ], ( float, int, np.float64, np.int64 ) ) : # if data contained in the column (or values or indices) are numbers and not a string, ignore this column
+        #             continue
+        if isinstance(
+            queries, (list, tuple, np.ndarray, set)
+        ):  # if the given queries is iterable
+            len_entries = (
+                df.shape[1] if col == "columns" or col == "col" else df.shape[0]
             )
-            continue
-        mask_filter = (
-            current_mask & mask_filter if AND_operation else current_mask | mask_filter
-        )
-    return df[mask_filter]
-
+            mask = (
+                np.ones(len_entries).astype(bool)
+                if query_AND_operation
+                else np.zeros(len_entries).astype(bool)
+            )  # mask that will contain all entries matching a given list of data
+            for query in queries:
+                if ignore_case:
+                    query = (
+                        query.lower()
+                    )  # convert query to lower cases if 'ignore_case' is set to True.
+                mask_current_query = Search_list_of_strings_Return_mask(
+                    data, query, is_negative_query=is_negative_query
+                )
+                mask = (
+                    mask & mask_current_query
+                    if query_AND_operation
+                    else mask | mask_current_query
+                )  # merge mask for each data entry
+        else:
+            if ignore_case:
+                query = (
+                    queries.lower()
+                )  # convert query to lower cases if 'ignore_case' is set to True.
+            else:
+                query = queries
+            mask = Search_list_of_strings_Return_mask(
+                data, query, is_negative_query=is_negative_query
+            )
+        df = df.iloc[:, mask] if col == "columns" else df[mask]
+    return df
 
 def DF_Deduplicate_without_loading_in_memory(
     path_file_dataframe: str,
@@ -806,20 +946,60 @@ def PD_Binary_Flag_Select(
     ]
 
 
+def check_gtf_or_gff3_format( path_file_input : str ) -> bool :
+    """
+    based on the input file path, check GTF or GFF3 format of the input annotation file
+
+    return:
+    flag_gtf_format # a boolean flag indicating whether the file is in GTF format (in which case the flag will be True) or GFF3 format (in which case the flag will be False)
+    
+    2024-12-03 17:10 by IEUM An
+    """
+    path_file_input = os.path.abspath( path_file_input ) # retrieve absolute path
+    
+    name = path_file_input.rsplit( '/', 1 )[ -1 ] # retrieve file name
+    # if the file contains gzipped content according to the file name (file extension), drop '.gz' from the file name.
+    if name.rsplit( '.', 1 )[ -1 ].lower( ) in { 'gz' } :
+        name = name.rsplit( '.', 1 )[ 0 ]
+    
+    # check whether the file contains GTF annotation according to the file name (file extension)
+    flag_gtf_format = name.rsplit( '.', 1 )[ -1 ].lower( ) in { 'gtf' }
+
+    return flag_gtf_format
+
+
 def GTF_Parse_Attribute(attr):
     """
-    # 2021-02-06 18:51:47
     parse attribute string of a gtf file
+    # 2021-02-06 18:51:47
+    2024-12-03 by IEUM An, support for integer/float data type was added 
     """
     dict_data = dict()
-    for e in attr.split('";'):
+    l_e = attr.split('; ')
+    if len( l_e ) > 0 :
+        last_e = l_e[ -1 ]
+        if len( last_e ) > 0 and last_e[ -1 ] == ';' :
+            l_e[ -1 ] = last_e[ : -1 ] # discard the ';' character at the end of the last element
+    for e in l_e :
         e = e.strip()
+        # skip empty element
         if len(e) == 0:
             continue
-        str_key, str_value = e.split(' "')
-        if str_value[-1] == '"':
-            str_value = str_value[:-1]
-        dict_data[str_key] = str_value
+        # check dtype
+        if '"' in e :
+            # string dtype
+            str_key, str_value = e.split(' "', 1) # there should be 1 occurrence of ' "'
+            # remove the trailing '"'
+            if str_value[-1] == '"':
+                str_value = str_value[:-1]
+            value = str_value # use the value as-is
+        else :
+            # integer or float dtype
+            str_key, str_value = e.split(' ', 1) # the attribute name should not contain ' ' when integer/float value is contained
+            value = float( str_value ) # for simplicity, it will be converted to float first
+            if value == int( value ) : # perform the equivalent test, and convert the value to the integer
+                value = int( value )
+        dict_data[str_key] = value
     return dict_data
 
 
@@ -833,21 +1013,24 @@ def GFF3_Parse_Attribute(attr):
 
 def GTF_Read(
     path_gtf,
-    flag_gtf_gzipped=False,
     parse_attr=True,
-    flag_gtf_format=True,
     remove_chr_from_seqname=True,
     flag_verbose=False,
+    flag_gtf_format=True, # deprecated
+    flag_gtf_gzipped=False, # deprecated
     **dict_filter_gtf,
 ):
     """
-    # 2022-02-08 08:55:37
     Load gzipped or plain text GTF files into pandas DataFrame. the file's gzipped-status can be explicitly given by 'flag_gtf_gzipped' argument.
     'path_gtf' : directory to the gtf file or a dataframe containing GTF records to parse attributes
     'parse_attr' : parse gtf attribute if set to True
-    'flag_gtf_format' : set this flag to true if the attributes are in GTF format. If it is in GFF3 format, set this flag to False
     'dict_filter_gtf' : keyworded arguments for 'PD_Select', which will be used to filter df_gtf before parsing attributes
+    remove_chr_from_seqname=True, # by default, remove 'chr' prefix from the sequence names.
+
+    # 2022-02-08 08:55:37
+    # 2024-12-03 21:57 by IEUM An 
     """
+    # read GTF/GFF annotation and sort the entries
     try:
         df = (
             pd.read_csv(
@@ -895,14 +1078,23 @@ def GTF_Read(
         df = df.iloc[:0]
         return df
     df = df.sort_values(["seqname", "start"]).reset_index(drop=True)
+
+    # detect file format
+    flag_gtf_format = check_gtf_or_gff3_format( path_gtf )
+
+    # remove 'chr' prefix 
     if remove_chr_from_seqname:
         df["seqname"] = list(
             seqname if seqname[:3] != "chr" else seqname[3:]
             for seqname in df.seqname.values
         )
+
+    # filter entries using GTF/GFF columns (excluding attribute column) 
     if len(dict_filter_gtf) > 0:
         df = PD_Select(df, **dict_filter_gtf)
         df.reset_index(drop=True, inplace=True)
+    
+    # parse attributes
     if parse_attr:
         return df.join(
             pd.DataFrame(
@@ -911,16 +1103,20 @@ def GTF_Read(
                 else list(GFF3_Parse_Attribute(attr) for attr in df.attribute.values)
             )
         )
+
+    # return the result
     return df
 
 
 def GTF_Write(
     df_gtf, path_file, flag_update_attribute=True, flag_filetype_is_gff3=False
 ):
-    """# 2021-08-24 21:02:08
+    """
     write gtf file as an unzipped tsv file
     'flag_update_attribute' : ignore the 'attribute' column present in the given dataframe 'df_gtf', and compose a new column based on all the non-essential columns of the dataframe.
     'flag_filetype_is_gff3' : a flag indicating the filetype of the output file. According to the output filetype, columns containing attributes will be encoded into the values of the attribute column before writing the file.
+
+    # 2021-08-24 21:02:08 - 2024-11-25 14:30 by IEUM-An
     """
     if flag_update_attribute:
         l_col_essential = [
@@ -939,17 +1135,24 @@ def GTF_Write(
             col for col in df_gtf.columns.values if col not in l_col_essential
         )  # all non-essential columns will be considered as the columns
 
-        l_attribute_new = list()
-        for arr in df_gtf[l_col_attribute].values:
-            str_attribute = ""  # initialize
-            for name, val in zip(l_col_attribute, arr):
-                if isinstance(val, float) and np.isnan(val):
-                    continue
-                str_attribute += (
-                    f"{name}={val};" if flag_filetype_is_gff3 else f'{name} "{val}"; '
-                )  # encode attributes according to the gff3 file format
-            str_attribute = str_attribute.strip()
-            l_attribute_new.append(str_attribute)
+        empty_attribute_value = '' # define empty attribute value
+        if len( l_col_attribute ) == 0 :
+            # when there is no columns to include in the attribute
+            l_attribute_new = list( empty_attribute_value for _ in range( len( df_gtf ) ) )
+        else :
+            # compose the attribute column using the given columns 
+            l_attribute_new = list()
+            for arr in df_gtf[l_col_attribute].values:
+                str_attribute = empty_attribute_value # initialize as 'empty_attribute_value'
+                for name, val in zip(l_col_attribute, arr):
+                    if isinstance(val, float) and np.isnan(val):
+                        continue
+                    str_attribute += (
+                        f"{name}={val};" if flag_filetype_is_gff3 else f'{name} "{val}"; '
+                    )  # encode attributes according to the gff3 file format
+                str_attribute = str_attribute.strip()
+                l_attribute_new.append(str_attribute)
+        # add the attribute column
         df_gtf["attribute"] = l_attribute_new  # update attributes
     df_gtf[
         [
@@ -964,7 +1167,6 @@ def GTF_Write(
             "attribute",
         ]
     ].to_csv(path_file, index=False, header=None, sep="\t", quoting=csv.QUOTE_NONE)
-
 
 def GTF_Interval_Tree(
     path_file_gtf, feature=["gene"], value="gene_name", drop_duplicated_intervals=False
@@ -1391,23 +1593,40 @@ def Slice_to_Range(sl, length):
 
 
 def COUNTER(l_values, dict_counter=None, ignore_float=True):  # 2020-07-29 23:49:51
-    """Count values in l_values and return a dictionary containing count values. if 'dict_counter' is given, countinue counting by using the 'dict_counter'. if 'ignore_float' is True, ignore float values, including np.nan"""
+    """
+    Count values in l_values and return a dictionary containing count values. if 'dict_counter' is given, countinue counting by using the 'dict_counter'. if 'ignore_float' is True, ignore float values, including np.nan
+
+    l_values # list of values OR another 'dict_counter'
+
+    # 2024-11-18 17:00 by IEUM An
+    """
     if dict_counter is None:
         dict_counter = dict()
-    if ignore_float:  # if 'ignore_float' is True, ignore float values, including np.nan
-        for value in l_values:
-            if isinstance(value, float):
-                continue  # ignore float values
-            if value in dict_counter:
-                dict_counter[value] += 1
-            else:
-                dict_counter[value] = 1
-    else:  # faster counting by not checking type of value
-        for value in l_values:
-            if value in dict_counter:
-                dict_counter[value] += 1
-            else:
-                dict_counter[value] = 1
+    if isinstance( l_values, dict ) :
+        # when 'l_values' is another 'dict_counter'
+        dict_counter_incoming = l_values
+        # update 'dict_counter' with 'dict_counter_incoming'
+        for k in dict_counter_incoming :
+            if k in dict_counter :
+                dict_counter[ k ] += dict_counter_incoming[ k ]
+            else :
+                dict_counter[ k ] = dict_counter_incoming[ k ]
+    else :
+        # when 'l_values' is list of values
+        if ignore_float:  # if 'ignore_float' is True, ignore float values, including np.nan
+            for value in l_values:
+                if isinstance(value, float):
+                    continue  # ignore float values
+                if value in dict_counter:
+                    dict_counter[value] += 1
+                else:
+                    dict_counter[value] = 1
+        else:  # faster counting by not checking type of value
+            for value in l_values:
+                if value in dict_counter:
+                    dict_counter[value] += 1
+                else:
+                    dict_counter[value] = 1
     return dict_counter
 
 
@@ -1559,15 +1778,17 @@ def GLOB_Retrive_Strings_in_Wildcards(
     else:
         return l_l_str_in_wildcard
 
+
 def Multiprocessing_Batch_Generator_and_Workers(
     gen_batch,
     process_batch,
-    post_process_batch=None,
+    post_process_batch = None,
     int_num_threads : int =15,
     int_num_seconds_to_wait_before_identifying_completed_processes_for_a_loop : float = 0.2,
     flag_wait_for_a_response_from_worker_after_sending_termination_signal : bool = True, # wait until all worker exists before resuming works in the main process
+    seed_batch_distribution = 42,
 ):
-    """# 2024-07-30 11:29:35 
+    """
     'Multiprocessing_Batch_Generator_and_Workers' : multiprocessing using batch generator and workers.
     all worker process will be started using the default ('fork' in UNIX) method.
     perform batch-based multiprocessing using the three components, (1) gen_batch, (2) process_batch, (3) post_process_batch. (3) will be run in the main process, while (1) and (2) will be offloaded to worker processes.
@@ -1579,8 +1800,10 @@ def Multiprocessing_Batch_Generator_and_Workers(
     'int_num_threads' : the number of threads(actually processes) including the main process. For example, when 'int_num_threads' is 3, 2 worker processes will be used. one thread is reserved for batch generation.
     'int_num_seconds_to_wait_before_identifying_completed_processes_for_a_loop' : number of seconds to wait for each loop before checking which running processes has been completed
     flag_wait_for_a_response_from_worker_after_sending_termination_signal : bool = True, # wait until all worker exists before resuming works in the main process.
+    seed_batch_distribution = 42, # a seed for random index generator for selecting the available workers for processing batches
+    
+    # 2024-10-28 00:32 (updated); 2026-04-10 22:15 (random selection of available workers) IEUM-An (ahs2202) & ❤️.
     """
-
     def __batch_generating_worker(
         gen_batch,
         l_pipe_sender_input,
@@ -1590,6 +1813,7 @@ def Multiprocessing_Batch_Generator_and_Workers(
         """# 2023-10-06 01:52:24 
         define a worker for generating batch and distributing batches across the workers, receives results across the workers, and send result back to the main process
         """
+        rng = np.random.default_rng( seed = seed_batch_distribution )
         q_batch = collections.deque()  # initialize queue of batchs
         int_num_batch_processing_workers = len(l_pipe_sender_input)
         flag_batch_generation_completed = False  # flag indicating whether generating batchs for the current input sam file was completed
@@ -1626,7 +1850,7 @@ def Multiprocessing_Batch_Generator_and_Workers(
                     ] -= 1  # update the number of batches being processed by the worker
 
             """ if workers are available and there are remaining works to be distributed, distribute works """
-            index_worker = 0  # initialize the index of the worker
+            index_worker = math.floor( rng.random( ) * int_num_batch_processing_workers )  # initialize the index of the worker
             while (
                 len(q_batch) > 0
                 and (
@@ -1697,6 +1921,11 @@ def Multiprocessing_Batch_Generator_and_Workers(
         for s, r in l_pipes_output : # pipe receiving responses from batch workers
             r.recv( )
 
+    # allow the worker processes to join
+    for p in l_batch_processing_workers:
+        p.join()
+    p_batch_generating_worker.join() 
+    return # exit
 
 
 def Multiprocessing(

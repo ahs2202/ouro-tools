@@ -48,10 +48,50 @@ def COUNTER(l_values, dict_counter=None, ignore_float=True):  # 2020-07-29 23:49
                 dict_counter[value] = 1
     return dict_counter
 
+dict_dna_complement = { 
+    # canonical #
+    "A": "T", 
+    "T": "A", 
+    "C": "G", 
+    "G": "C", 
+    'U' : 'A',
+    'W' : 'W',
+    'S' : 'S',
+    'Y' : 'R',
+    'R' : 'Y',
+    'M' : 'K',
+    'K' : 'M',
+    'B' : 'V',
+    'V' : 'B',
+    'D' : 'H',
+    'H' : 'D',
+    "N": "N",
+    "-": "-",
+}
 def Reverse_Complement(seq):
-    """# 2021-02-04 11:47:19
-    Return reverse complement of 'seq'"""
-    dict_dna_complement = {"A": "T", "T": "A", "C": "G", "G": "C", "N": "N", "-": "-"}
+    """
+    Return reverse complement of 'seq'
+    
+    A	Adenine	A
+    C	Cytosine	C
+    G	Guanine	G
+    T	Thymine (DNA)	T
+    U	Uracil (RNA)	U
+    W	Weak	A/T
+    S	Strong	C/G
+    M	Amino	A/C
+    K	Keto	G/T
+    R	Purine	A/G
+    Y	Pyrimidine	C/T
+    B	Not A	C/G/T
+    D	Not C	A/G/T
+    H	Not G	A/C/T
+    V	Not T	A/C/G
+    N	Any	A/C/G/T
+    
+    # 2021-02-04 11:47:19
+    # 2026-05-07 18:05; 
+    """
     return "".join(list(dict_dna_complement[base] for base in seq))[::-1]
 
 
