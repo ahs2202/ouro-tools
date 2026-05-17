@@ -78,7 +78,6 @@ from io import StringIO, BytesIO
 import time
 import math
 import mappy
-import pkg_resources
 
 pd.options.mode.chained_assignment = None  # default='warn' # to disable worining
 
@@ -12235,8 +12234,8 @@ def ourotools(str_mode=None, **dict_args):
     """
     name_package = "ourotools"
     path_remote = "https://github.com/ahs2202/ouro/raw/main/ouro-tools/"  # remote directory from which datafiles will be downloaded
-    path_folder_ouro = f"{pkg_resources.resource_filename( name_package, '' )}/"  # directory of the current installed package
-
+    path_folder_ouro = os.path.abspath( '../' ) + '/' # directory of the current installed package
+    
     """ check whether the program is called from the command-line interface or from an interactive Python programming environment """
     str_name_program = sys.argv[0]
     if "/" in str_name_program:
